@@ -1,0 +1,30 @@
+{
+  "name": "@roadside/customer-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@roadside/types": "workspace:*",
+    "@roadside/ui": "workspace:*",
+    "@roadside/utils": "workspace:*",
+    "@roadside/white-label": "workspace:*",
+    "@supabase/supabase-js": "^2.47.10",
+    "expo": "^56.0.0",
+    "expo-location": "^56.0.0",
+    "expo-status-bar": "^56.0.0",
+    "react": "19.0.0",
+    "react-native": "0.86.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.3"
+  }
+}
