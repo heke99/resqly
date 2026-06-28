@@ -1,0 +1,38 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "stream",
+  "globalEnv": [
+    "NODE_ENV",
+    "APP_ENV",
+    "APP_BASE_URL",
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "GOOGLE_MAPS_BROWSER_KEY",
+    "GOOGLE_MAPS_SERVER_KEY",
+    "GOOGLE_MAPS_ROUTES_API_ENABLED",
+    "BANKID_ENV",
+    "BANKID_API_URL",
+    "BANKID_CERT_PATH",
+    "BANKID_CERT_PASSWORD",
+    "BANKID_MOCK_ENABLED",
+    "WEBHOOK_SIGNING_SECRET",
+    "ENCRYPTION_KEY"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "lint": {},
+    "test": {
+      "dependsOn": ["^build"]
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}
