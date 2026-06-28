@@ -67,6 +67,25 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.0)
 
+  packages/bankid:
+    dependencies:
+      '@roadside/types':
+        specifier: workspace:*
+        version: link:../types
+      '@roadside/utils':
+        specifier: workspace:*
+        version: link:../utils
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)
+
   packages/database:
     dependencies:
       '@roadside/utils':
@@ -75,6 +94,57 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.47.10
         version: 2.108.2
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)
+
+  packages/dispatch:
+    dependencies:
+      '@roadside/types':
+        specifier: workspace:*
+        version: link:../types
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)
+
+  packages/geodata:
+    dependencies:
+      '@roadside/database':
+        specifier: workspace:*
+        version: link:../database
+      '@roadside/maps':
+        specifier: workspace:*
+        version: link:../maps
+      '@roadside/types':
+        specifier: workspace:*
+        version: link:../types
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)
+
+  packages/maps:
+    dependencies:
+      '@roadside/types':
+        specifier: workspace:*
+        version: link:../types
+      '@roadside/utils':
+        specifier: workspace:*
+        version: link:../utils
     devDependencies:
       '@types/node':
         specifier: ^22.10.5
