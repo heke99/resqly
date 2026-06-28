@@ -3,6 +3,7 @@ import { formatCaseNumber, parseCaseNumber } from "./case-number";
 import { hashPersonalNumber, hmacSignature, verifyHmacSignature, signedPayloadHash } from "./hash";
 import { RateLimiter } from "./rate-limit";
 import { retry } from "./retry";
+import { TransitionGuard } from "./fsm";
 
 describe("case-number", () => {
   it("formats with prefix, year and zero-padded sequence", () => {
@@ -83,5 +84,21 @@ describe("retry", () => {
       retry(fn, { retries: 5, shouldRetry: () => false, sleep: async () => {} }),
     ).rejects.toThrow("nope");
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TransitionGuard", () => {
+  const guard = new TransitionGuard<"a" | "b" | "c">({ a: ["b"], b: ["c"], c: [] });
+  it("allows declared transitions and identity", () => {
+    expect(guard.canTransition("a", "b")).toBe(true);
+    expect(guard.canTransition("a", "a")).toBe(true);
+  });
+  it("rejects undeclared transitions", () => {
+    expect(guard.canTransition("a", "c")).toBe(false);
+    expect(() => guard.assertTransition("a", "c")).toThrow(/Illegal status transition/);
+  });
+  it("detects terminal states", () => {
+    expect(guard.isTerminal("c")).toBe(true);
+    expect(guard.isTerminal("a")).toBe(false);
   });
 });
