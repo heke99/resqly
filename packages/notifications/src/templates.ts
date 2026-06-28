@@ -1,4 +1,4 @@
-import type { NotificationChannel } from "@roadside/types";
+import type { NotificationChannel } from "@resqly/types";
 
 export interface NotificationTemplate {
   channel: NotificationChannel;

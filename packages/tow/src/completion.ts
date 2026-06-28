@@ -1,4 +1,4 @@
-import type { TowJobCompleteInput } from "@roadside/types";
+import type { TowJobCompleteInput } from "@resqly/types";
 
 export type CompletionReportRow = {
   tenant_id: string;

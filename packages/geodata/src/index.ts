@@ -1,6 +1,6 @@
-import type { Coordinate } from "@roadside/types";
-import { haversineMeters } from "@roadside/maps";
-import type { AppSupabaseClient } from "@roadside/database";
+import type { Coordinate } from "@resqly/types";
+import { haversineMeters } from "@resqly/maps";
+import type { AppSupabaseClient } from "@resqly/database";
 
 export interface DriverLocation {
   driverId: string;

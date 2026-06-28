@@ -1,4 +1,4 @@
-import type { Coordinate } from "@roadside/types";
+import type { Coordinate } from "@resqly/types";
 import { estimateFallbackEta, normalizeCoordinates } from "./geo";
 
 export type EtaSource = "google_routes" | "google_matrix" | "haversine_fallback" | "last_known";

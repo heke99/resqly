@@ -1,4 +1,4 @@
-import type { DispatchStrategy, DutyStatus, TowVehicleType } from "@roadside/types";
+import type { DispatchStrategy, DutyStatus, TowVehicleType } from "@resqly/types";
 
 export interface CandidateCapabilities {
   canHandleEv?: boolean;

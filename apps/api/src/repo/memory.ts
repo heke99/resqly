@@ -1,6 +1,6 @@
-import { newId } from "@roadside/utils";
-import { formatCaseNumber } from "@roadside/utils";
-import type { DispatchCandidate } from "@roadside/dispatch";
+import { newId } from "@resqly/utils";
+import { formatCaseNumber } from "@resqly/utils";
+import type { DispatchCandidate } from "@resqly/dispatch";
 import type {
   ApiClientRecord,
   ApiRepo,
@@ -11,7 +11,7 @@ import type {
   TenantSettingsRecord,
   TowJobRecord,
 } from "./types";
-import type { IncidentStatus, TowJobStatus } from "@roadside/types";
+import type { IncidentStatus, TowJobStatus } from "@resqly/types";
 
 const DEFAULT_SETTINGS: TenantSettingsRecord = {
   default_dispatch_strategy: "eta_first",

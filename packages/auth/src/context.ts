@@ -1,6 +1,6 @@
-import type { AccessContext, RoleKey } from "@roadside/types";
-import { buildAccessContext } from "@roadside/rbac";
-import type { AppSupabaseClient } from "@roadside/database";
+import type { AccessContext, RoleKey } from "@resqly/types";
+import { buildAccessContext } from "@resqly/rbac";
+import type { AppSupabaseClient } from "@resqly/database";
 
 export interface ProfileRow {
   id: string;

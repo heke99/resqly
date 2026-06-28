@@ -1,24 +1,29 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getServiceClient } from "@roadside/web-kit/server";
-import { newApiKey, sha256Hex, newId } from "@roadside/utils";
+import { newApiKey, sha256Hex, newId } from "@resqly/utils";
+import { requirePortalTenant } from "./auth";
 
-async function db() {
-  const client = getServiceClient();
-  if (!client) throw new Error("Supabase is not configured.");
-  return client;
+async function portalDb(tenantId?: string | null) {
+  return requirePortalTenant(tenantId);
 }
 
-async function setIncidentStatus(incidentId: string, status: string, reason?: string) {
-  const client = await db();
+function assertTenant(expected: string, actual: string) {
+  if (expected !== actual) throw new Error("You do not have access to this tenant.");
+}
+
+async function setIncidentStatus(incidentId: string, tenantId: string, status: string, reason?: string) {
+  const { db: client, tenant, userId } = await portalDb(tenantId);
   const { data: current } = await client
     .from("incidents" as never)
     .select("status, tenant_id")
     .eq("id", incidentId)
     .maybeSingle();
   const from = (current as { status?: string } | null)?.status ?? null;
-  await client.from("incidents" as never).update({ status } as never).eq("id", incidentId);
+  const currentTenantId = (current as { tenant_id?: string } | null)?.tenant_id ?? null;
+  if (!currentTenantId) throw new Error("Case not found.");
+  assertTenant(tenant.id, currentTenantId);
+  await client.from("incidents" as never).update({ status } as never).eq("id", incidentId).eq("tenant_id", tenant.id);
   await client.from("incident_status_events" as never).insert({
     incident_id: incidentId,
     from_status: from,
@@ -26,7 +31,8 @@ async function setIncidentStatus(incidentId: string, status: string, reason?: st
     reason: reason ?? null,
   } as never);
   await client.from("audit_logs" as never).insert({
-    tenant_id: (current as { tenant_id?: string } | null)?.tenant_id ?? null,
+    tenant_id: currentTenantId,
+    actor_user_id: userId,
     action: "status_change",
     entity_type: "incident",
     entity_id: incidentId,
@@ -37,22 +43,24 @@ async function setIncidentStatus(incidentId: string, status: string, reason?: st
 }
 
 export async function approveClaim(formData: FormData): Promise<void> {
-  await setIncidentStatus(String(formData.get("incident_id")), "in_progress", "approved by insurer");
+  await setIncidentStatus(String(formData.get("incident_id")), String(formData.get("tenant_id")), "in_progress", "approved by insurer");
 }
 export async function rejectClaim(formData: FormData): Promise<void> {
-  await setIncidentStatus(String(formData.get("incident_id")), "rejected", String(formData.get("reason") ?? ""));
+  await setIncidentStatus(String(formData.get("incident_id")), String(formData.get("tenant_id")), "rejected", String(formData.get("reason") ?? ""));
 }
 export async function requestMoreInfo(formData: FormData): Promise<void> {
   await setIncidentStatus(
     String(formData.get("incident_id")),
+    String(formData.get("tenant_id")),
     "more_info_required",
     String(formData.get("reason") ?? ""),
   );
 }
 
 export async function updateSettings(formData: FormData): Promise<void> {
-  const client = await db();
   const tenantId = String(formData.get("tenant_id"));
+  const { db: client, tenant } = await portalDb(tenantId);
+  assertTenant(tenant.id, tenantId);
   const strategy = String(formData.get("default_dispatch_strategy") ?? "");
   const radius = Number(formData.get("max_dispatch_radius_km") ?? "");
   const patch: Record<string, unknown> = {};
@@ -73,8 +81,9 @@ export async function updateSettings(formData: FormData): Promise<void> {
 }
 
 export async function createDriver(formData: FormData): Promise<void> {
-  const client = await db();
   const tenantId = String(formData.get("tenant_id"));
+  const { db: client, tenant } = await portalDb(tenantId);
+  assertTenant(tenant.id, tenantId);
   const { data: company } = await client
     .from("tow_companies" as never)
     .select("id")
@@ -94,8 +103,9 @@ export async function createDriver(formData: FormData): Promise<void> {
 }
 
 export async function createTowVehicle(formData: FormData): Promise<void> {
-  const client = await db();
   const tenantId = String(formData.get("tenant_id"));
+  const { db: client, tenant } = await portalDb(tenantId);
+  assertTenant(tenant.id, tenantId);
   const { data: company } = await client
     .from("tow_companies" as never)
     .select("id")
@@ -125,8 +135,9 @@ export async function createTowVehicle(formData: FormData): Promise<void> {
 }
 
 export async function createWebhook(formData: FormData): Promise<void> {
-  const client = await db();
   const tenantId = String(formData.get("tenant_id"));
+  const { db: client, tenant } = await portalDb(tenantId);
+  assertTenant(tenant.id, tenantId);
   const url = String(formData.get("url") ?? "");
   const events = String(formData.get("events") ?? "")
     .split(",")
@@ -143,8 +154,9 @@ export async function createWebhook(formData: FormData): Promise<void> {
 
 /** Create an API key; the raw key is shown once (stored only as a hash). */
 export async function createApiKey(formData: FormData): Promise<void> {
-  const client = await db();
   const tenantId = String(formData.get("tenant_id"));
+  const { db: client, tenant } = await portalDb(tenantId);
+  assertTenant(tenant.id, tenantId);
   const name = String(formData.get("name") ?? "API client");
   const { key, last4 } = newApiKey("rk_live");
   await client.from("tenant_api_clients" as never).insert({

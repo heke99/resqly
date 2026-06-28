@@ -1,5 +1,5 @@
-import type { TowJobStatus } from "@roadside/types";
-import { TransitionGuard } from "@roadside/utils";
+import type { TowJobStatus } from "@resqly/types";
+import { TransitionGuard } from "@resqly/utils";
 
 export const TOW_JOB_TRANSITIONS: Record<TowJobStatus, readonly TowJobStatus[]> = {
   draft: ["awaiting_bankid", "created", "cancelled"],

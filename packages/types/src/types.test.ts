@@ -34,6 +34,7 @@ describe("createIncidentInputSchema", () => {
   it("normalises registration numbers in input", () => {
     const parsed = createIncidentInputSchema.parse({
       type: "towing",
+      customer_user_id: "11111111-1111-4111-8111-111111111111",
       registration_number: "abc 123",
       problem_type: "dead_battery",
     });

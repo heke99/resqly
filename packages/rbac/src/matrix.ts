@@ -1,4 +1,4 @@
-import type { PermissionKey, RoleKey, TenantType } from "@roadside/types";
+import type { PermissionKey, RoleKey, TenantType } from "@resqly/types";
 
 /**
  * Role -> permission matrix. This MUST stay in sync with the database seed in
@@ -95,7 +95,7 @@ export const ROLE_META: RoleMeta[] = [
   { key: "insurance_claims_handler", label: "Claims Handler", tenantType: "insurance_company" },
   {
     key: "insurance_roadside_handler",
-    label: "Roadside Assistance Handler",
+    label: "Resqly Handler",
     tenantType: "insurance_company",
   },
   { key: "insurance_fraud_reviewer", label: "Fraud / Risk Reviewer", tenantType: "insurance_company" },

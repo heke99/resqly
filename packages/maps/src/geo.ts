@@ -1,4 +1,4 @@
-import type { Coordinate } from "@roadside/types";
+import type { Coordinate } from "@resqly/types";
 
 const EARTH_RADIUS_M = 6_371_000;
 const toRad = (deg: number) => (deg * Math.PI) / 180;

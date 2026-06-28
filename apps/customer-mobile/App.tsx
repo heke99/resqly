@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import * as Location from "expo-location";
-import { towStatusLabel, whatHappensNext } from "@roadside/ui";
+import { towStatusLabel, whatHappensNext } from "@resqly/ui";
 import { getSupabase } from "./src/supabase";
 import { palette } from "./src/theme";
 
@@ -31,7 +31,7 @@ export default function App() {
   return (
     <View style={styles.root}>
       <StatusBar style="dark" />
-      <Text style={styles.brand}>Roadside Assistance</Text>
+      <Text style={styles.brand}>Resqly</Text>
       {!supabase ? (
         <Text style={styles.muted}>Set EXPO_PUBLIC_SUPABASE_URL / ANON_KEY to connect.</Text>
       ) : null}

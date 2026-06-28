@@ -18,13 +18,19 @@ export function getSupabase(): SupabaseClient | null {
  */
 export async function apiPost(path: string, body: unknown): Promise<Response | null> {
   const base = process.env.EXPO_PUBLIC_API_URL;
-  const token = process.env.EXPO_PUBLIC_DRIVER_TOKEN;
-  if (!base) return null;
+  const apiToken = process.env.EXPO_PUBLIC_DRIVER_TOKEN;
+  if (!base || !apiToken) return null;
+
+  const supabase = getSupabase();
+  const { data } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
+  const driverAccessToken = data.session?.access_token;
+
   return fetch(`${base}${path}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      authorization: `Bearer ${apiToken}`,
+      ...(driverAccessToken ? { "x-driver-authorization": `Bearer ${driverAccessToken}` } : {}),
     },
     body: JSON.stringify(body),
   });

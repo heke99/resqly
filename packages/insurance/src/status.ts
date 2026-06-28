@@ -1,5 +1,5 @@
-import type { IncidentStatus } from "@roadside/types";
-import { TransitionGuard } from "@roadside/utils";
+import type { IncidentStatus } from "@resqly/types";
+import { TransitionGuard } from "@resqly/utils";
 
 export const INCIDENT_TRANSITIONS: Record<IncidentStatus, readonly IncidentStatus[]> = {
   draft: ["awaiting_bankid", "submitted", "cancelled"],

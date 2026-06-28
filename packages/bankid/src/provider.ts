@@ -1,4 +1,4 @@
-import type { BankidEnv, BankidHintCode, BankidStatus } from "@roadside/types";
+import type { BankidEnv, BankidHintCode, BankidStatus } from "@resqly/types";
 
 export interface BankidStartRequest {
   /** Purpose shown to the user / stored for audit, e.g. "Sign towing case". */

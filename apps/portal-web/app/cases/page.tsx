@@ -1,4 +1,4 @@
-import { Card, DataTable, PageHeader, type Column } from "@roadside/web-kit";
+import { Card, DataTable, PageHeader, type Column } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
 import { listIncidents } from "../lib/data";
 

@@ -1,4 +1,4 @@
-import { backoffDelay } from "@roadside/utils";
+import { backoffDelay } from "@resqly/utils";
 
 export interface DeliveryState {
   id: string;

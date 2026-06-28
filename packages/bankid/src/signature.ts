@@ -1,5 +1,5 @@
-import type { BankidEnv, BankidStatus } from "@roadside/types";
-import { hashPersonalNumber, signedPayloadHash } from "@roadside/utils";
+import type { BankidEnv, BankidStatus } from "@resqly/types";
+import { hashPersonalNumber, signedPayloadHash } from "@resqly/utils";
 import type { BankidCompletionData } from "./provider";
 
 export interface BuildSignatureInput {

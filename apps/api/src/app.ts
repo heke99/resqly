@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AppError, isAppError, newRequestId, sha256Hex } from "@roadside/utils";
+import { AppError, isAppError, newRequestId, sha256Hex } from "@resqly/utils";
 import { Router, type RouteResult } from "./http/router";
 import { type AppConfig, type ApiContext, defaultRateLimiter } from "./context";
 import * as incidents from "./handlers/incidents";
@@ -93,6 +93,14 @@ export class App {
       };
     }
 
+    const driverAccessToken =
+      extractBearer(req.headers["x-driver-authorization"]) ?? req.headers["x-driver-access-token"] ?? null;
+    const driverUserId =
+      driverAccessToken && this.config.driverAuth
+        ? await this.config.driverAuth.getUserIdFromAccessToken(driverAccessToken)
+        : null;
+    const driverId = driverUserId ? await this.config.repo.getDriverIdForUser(driverUserId) : null;
+
     const ctx: ApiContext = {
       config: this.config,
       repo: this.config.repo,
@@ -100,6 +108,9 @@ export class App {
       apiClientId: client.id,
       requestId,
       ip: req.ip ?? null,
+      driverUserId,
+      driverId,
+      idempotencyKey: req.headers["idempotency-key"] ?? req.headers["x-idempotency-key"] ?? null,
     };
 
     let result: RouteResult;

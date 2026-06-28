@@ -1,5 +1,5 @@
 {
-  "name": "@roadside/maps",
+  "name": "@resqly/maps",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,8 +15,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@roadside/types": "workspace:*",
-    "@roadside/utils": "workspace:*"
+    "@resqly/types": "workspace:*",
+    "@resqly/utils": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

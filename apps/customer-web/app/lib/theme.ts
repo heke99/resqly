@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
-import { getServiceClient } from "@roadside/web-kit/server";
-import { resolveTenant } from "@roadside/white-label";
-import type { TenantThemeTokens } from "@roadside/types";
+import { getServiceClient } from "@resqly/web-kit/server";
+import { resolveTenant } from "@resqly/white-label";
+import type { TenantThemeTokens } from "@resqly/types";
 
 export interface ActiveTheme {
   tokens: Partial<TenantThemeTokens>;
@@ -12,7 +12,7 @@ export interface ActiveTheme {
 
 const DEFAULT: ActiveTheme = {
   tokens: {},
-  productName: "Roadside Assistance",
+  productName: "Resqly",
   supportPhone: null,
   tenantId: null,
 };

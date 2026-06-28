@@ -1,5 +1,5 @@
-import { etaCalculateInputSchema, etaMatrixInputSchema } from "@roadside/types";
-import { MapsClient } from "@roadside/maps";
+import { etaCalculateInputSchema, etaMatrixInputSchema } from "@resqly/types";
+import { MapsClient } from "@resqly/maps";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
 

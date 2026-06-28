@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { sha256Hex, RateLimiter } from "@roadside/utils";
+import { sha256Hex, RateLimiter } from "@resqly/utils";
 import { App } from "./app";
 import { MemoryRepo } from "./repo/memory";
 
 const API_KEY = "rk_test_secret";
+const DRIVER_TOKEN = "driver_session_token";
+const CUSTOMER_USER_ID = "11111111-1111-4111-8111-111111111111";
 
 function setup() {
   const repo = new MemoryRepo();
@@ -19,6 +21,11 @@ function setup() {
     maps: { routesEnabled: false },
     bankid: { env: "mock", mockEnabled: true },
     encryptionKey: "pepper",
+    driverAuth: {
+      async getUserIdFromAccessToken(token: string) {
+        return token === DRIVER_TOKEN ? "user-drv1" : null;
+      },
+    },
   });
   return { repo, app };
 }
@@ -27,6 +34,8 @@ const auth = (extra: Record<string, string> = {}) => ({
   authorization: `Bearer ${API_KEY}`,
   ...extra,
 });
+
+const driverAuth = () => auth({ "x-driver-authorization": `Bearer ${DRIVER_TOKEN}` });
 
 describe("API auth", () => {
   it("rejects requests without an API key", async () => {
@@ -74,7 +83,7 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
       method: "POST",
       path: "/api/v1/incidents",
       headers: auth(),
-      body: { type: "towing", problem_type: "dead_battery" },
+      body: { type: "towing", customer_user_id: CUSTOMER_USER_ID, problem_type: "dead_battery" },
     });
   }
 
@@ -137,22 +146,22 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     // Customer data must NOT be shared before acceptance.
     expect(env.repo.customerShares).toHaveLength(0);
 
-    // A driver who was not offered cannot accept.
+    // Driver actions require an authenticated driver token.
     const badAccept = await env.app.handle({
       method: "POST",
       path: `/api/v1/tow/jobs/${towBody.tow_job_id}/accept`,
       headers: auth(),
-      body: { driver_id: "00000000-0000-0000-0000-000000000000" },
+      body: {},
     });
-    expect(badAccept.status).toBe(409);
+    expect(badAccept.status).toBe(403);
     expect(env.repo.customerShares).toHaveLength(0);
 
     // The offered driver accepts -> customer data is shared exactly once.
     const accept = await env.app.handle({
       method: "POST",
       path: `/api/v1/tow/jobs/${towBody.tow_job_id}/accept`,
-      headers: auth(),
-      body: { driver_id: "drv1" },
+      headers: driverAuth(),
+      body: {},
     });
     expect(accept.status).toBe(200);
     expect(env.repo.customerShares).toHaveLength(1);
@@ -214,7 +223,7 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
       method: "POST",
       path: "/api/v1/incidents",
       headers: auth(),
-      body: { type: "not_a_type" },
+      body: { type: "not_a_type", customer_user_id: CUSTOMER_USER_ID },
     });
     expect(res.status).toBe(422);
   });

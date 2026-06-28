@@ -1,4 +1,4 @@
-import { DataTable, PageHeader, type Column } from "@roadside/web-kit";
+import { DataTable, PageHeader, type Column } from "@resqly/web-kit";
 import { listAuditLogs } from "../lib/data";
 
 export const dynamic = "force-dynamic";

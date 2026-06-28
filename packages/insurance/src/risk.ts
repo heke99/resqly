@@ -1,4 +1,4 @@
-import type { RiskFlag, RiskStatus } from "@roadside/types";
+import type { RiskFlag, RiskStatus } from "@resqly/types";
 
 export interface RiskSignals {
   bankidVerified: boolean;

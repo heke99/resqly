@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
-import { AppShell, Sidebar, ThemeRoot } from "@roadside/web-kit";
+import { AppShell, Sidebar, ThemeRoot } from "@resqly/web-kit";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Roadside Platform — Superadmin",
-  description: "Platform superadmin portal",
+  title: "Resqly Admin",
+  description: "Resqly platform superadmin portal",
 };
 
 const NAV = [
@@ -19,7 +19,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <ThemeRoot>
-          <AppShell sidebar={<Sidebar brand="Platform Admin" items={NAV} />}>{children}</AppShell>
+          <AppShell sidebar={<Sidebar brand="Resqly Admin" items={NAV} />}>{children}</AppShell>
         </ThemeRoot>
       </body>
     </html>

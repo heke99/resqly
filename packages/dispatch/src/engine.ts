@@ -1,4 +1,4 @@
-import type { DispatchStrategy } from "@roadside/types";
+import type { DispatchStrategy } from "@resqly/types";
 import type {
   DispatchCandidate,
   DispatchRequest,

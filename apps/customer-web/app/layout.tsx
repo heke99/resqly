@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 import type { Metadata, Viewport } from "next";
-import { ThemeRoot } from "@roadside/web-kit";
+import { ThemeRoot } from "@resqly/web-kit";
 import { getActiveTheme } from "./lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Roadside Assistance",
+  title: "Resqly",
   manifest: "/manifest.webmanifest",
 };
 

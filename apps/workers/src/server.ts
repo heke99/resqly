@@ -1,4 +1,4 @@
-import { optionalEnv } from "@roadside/utils";
+import { optionalEnv } from "@resqly/utils";
 
 /**
  * Worker runner. In production this polls the database for due webhook

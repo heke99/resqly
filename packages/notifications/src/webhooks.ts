@@ -1,8 +1,8 @@
-import { hmacSignature, newId, verifyHmacSignature } from "@roadside/utils";
-import type { WebhookEnvelope, WebhookEvent } from "@roadside/types";
+import { hmacSignature, newId, verifyHmacSignature } from "@resqly/utils";
+import type { WebhookEnvelope, WebhookEvent } from "@resqly/types";
 
-export const WEBHOOK_SIGNATURE_HEADER = "x-roadside-signature";
-export const WEBHOOK_ID_HEADER = "x-roadside-webhook-id";
+export const WEBHOOK_SIGNATURE_HEADER = "x-resqly-signature";
+export const WEBHOOK_ID_HEADER = "x-resqly-webhook-id";
 
 export function buildWebhookEnvelope(
   event: WebhookEvent,

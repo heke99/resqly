@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@roadside/database";
+import type { Database } from "@resqly/database";
 
 /**
  * Browser Supabase client built from public env. Returns null when env is not

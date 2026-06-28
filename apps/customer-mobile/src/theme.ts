@@ -1,4 +1,4 @@
-import { DEFAULT_THEME_TOKENS } from "@roadside/white-label";
+import { DEFAULT_THEME_TOKENS } from "@resqly/white-label";
 
 /**
  * White-label palette for the mobile app. In production these tokens are fetched

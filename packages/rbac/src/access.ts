@@ -1,5 +1,5 @@
-import type { AccessContext, PermissionKey, RoleKey } from "@roadside/types";
-import { forbidden } from "@roadside/utils";
+import type { AccessContext, PermissionKey, RoleKey } from "@resqly/types";
+import { forbidden } from "@resqly/utils";
 import { ROLE_PERMISSIONS } from "./matrix";
 
 /** Resolve the unique set of permissions granted by a set of roles. */

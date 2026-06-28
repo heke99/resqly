@@ -1,4 +1,4 @@
-import { Card, DataTable, PageHeader, Button, type Column } from "@roadside/web-kit";
+import { Card, DataTable, PageHeader, Button, type Column } from "@resqly/web-kit";
 import { listTenants, type TenantRow } from "../lib/data";
 import { createTenant } from "../lib/actions";
 

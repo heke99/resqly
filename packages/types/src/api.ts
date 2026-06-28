@@ -11,6 +11,7 @@ import { registrationNumberSchema } from "./vehicle";
 
 export const createIncidentInputSchema = z.object({
   type: incidentTypeSchema,
+  customer_user_id: uuidSchema,
   vehicle_id: uuidSchema.optional(),
   registration_number: registrationNumberSchema.optional(),
   insurance_company_id: uuidSchema.optional(),

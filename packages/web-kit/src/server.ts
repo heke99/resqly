@@ -1,4 +1,4 @@
-import { createServiceClient, type AppSupabaseClient } from "@roadside/database";
+import { createServiceClient, type AppSupabaseClient } from "@resqly/database";
 
 /**
  * Server-only Supabase service client for Next.js server components / route

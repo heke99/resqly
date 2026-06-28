@@ -23,3 +23,11 @@ android/.gradle/
 android/app/build/
 
 *.tsbuildinfo
+
+# App-level local env files
+apps/*/.env
+apps/*/.env.local
+apps/*/.env.*.local
+packages/*/.env
+packages/*/.env.local
+packages/*/.env.*.local

@@ -3,7 +3,7 @@ import type {
   Tenant,
   TenantBranding,
   TenantThemeTokens,
-} from "@roadside/types";
+} from "@resqly/types";
 
 export const DEFAULT_THEME_TOKENS: Omit<TenantThemeTokens, "tenant_id"> = {
   color_primary: "#0B5FFF",

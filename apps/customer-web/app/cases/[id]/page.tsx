@@ -2,8 +2,8 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import { useSupabase } from "../../lib/supabase-client";
-import { towStatusLabel, whatHappensNext, formatEta } from "@roadside/web-kit";
-import type { TowJobStatus } from "@roadside/types";
+import { towStatusLabel, whatHappensNext, formatEta } from "@resqly/web-kit";
+import type { TowJobStatus } from "@resqly/types";
 
 interface Incident {
   id: string;

@@ -3,22 +3,31 @@ import {
   towJobCompleteInputSchema,
   towJobLocationInputSchema,
   towJobStatusInputSchema,
-} from "@roadside/types";
-import { AppError, notFound, badRequest } from "@roadside/utils";
+} from "@resqly/types";
+import { AppError, notFound, badRequest, forbidden } from "@resqly/utils";
 import {
   buildCustomerShare,
   buildCompletionReport,
   transitionTowJob,
   SHAREABLE_CUSTOMER_FIELDS,
-} from "@roadside/tow";
-import { buildCustomerShareAudit } from "@roadside/audit";
-import { buildInvoiceBasis, type PriceList } from "@roadside/billing";
-import { MapsClient, buildEtaSnapshot } from "@roadside/maps";
+} from "@resqly/tow";
+import { buildCustomerShareAudit } from "@resqly/audit";
+import { buildInvoiceBasis, type PriceList } from "@resqly/billing";
+import { MapsClient, buildEtaSnapshot } from "@resqly/maps";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
 
-const acceptSchema = z.object({ driver_id: z.string().min(1) });
-const rejectSchema = z.object({ driver_id: z.string().min(1), reason: z.string().optional() });
+const acceptSchema = z.object({});
+const rejectSchema = z.object({ reason: z.string().optional() });
+
+function requireAuthenticatedDriver(ctx: ApiContext): string {
+  if (!ctx.driverId) throw forbidden("Authenticated driver token is required for this action");
+  return ctx.driverId;
+}
+
+function assertAssignedDriver(jobDriverId: string | null, driverId: string): void {
+  if (jobDriverId && jobDriverId !== driverId) throw forbidden("This job is assigned to another driver");
+}
 
 const DEFAULT_PRICE_LIST: PriceList = {
   start_fee_minor: 0,
@@ -51,7 +60,8 @@ export async function acceptTowJob(
   id: string,
   body: unknown,
 ): Promise<RouteResult> {
-  const { driver_id } = acceptSchema.parse(body);
+  acceptSchema.parse(body);
+  const driver_id = requireAuthenticatedDriver(ctx);
   const job = await ctx.repo.getTowJob(ctx.tenantId, id);
   if (!job) throw notFound("Tow job not found");
 
@@ -114,7 +124,8 @@ export async function rejectTowJob(
   id: string,
   body: unknown,
 ): Promise<RouteResult> {
-  const { driver_id } = rejectSchema.parse(body);
+  const { reason } = rejectSchema.parse(body);
+  const driver_id = requireAuthenticatedDriver(ctx);
   const job = await ctx.repo.getTowJob(ctx.tenantId, id);
   if (!job) throw notFound("Tow job not found");
   await ctx.repo.setOfferStatus(id, driver_id, "rejected");
@@ -124,7 +135,7 @@ export async function rejectTowJob(
     entity_type: "tow_job_offer",
     entity_id: id,
     fields: ["status"],
-    metadata: { driver_id, status: "rejected" },
+    metadata: { driver_id, status: "rejected", reason },
   });
   return { status: 200, body: { status: "rejected" } };
 }
@@ -135,8 +146,10 @@ export async function updateTowJobStatus(
   body: unknown,
 ): Promise<RouteResult> {
   const input = towJobStatusInputSchema.parse(body);
+  const driver_id = requireAuthenticatedDriver(ctx);
   const job = await ctx.repo.getTowJob(ctx.tenantId, id);
   if (!job) throw notFound("Tow job not found");
+  assertAssignedDriver(job.driver_id, driver_id);
   const event = transitionTowJob({
     towJobId: id,
     from: job.status,
@@ -162,8 +175,10 @@ export async function updateTowJobLocation(
   body: unknown,
 ): Promise<RouteResult> {
   const input = towJobLocationInputSchema.parse(body);
+  const driver_id = requireAuthenticatedDriver(ctx);
   const job = await ctx.repo.getTowJob(ctx.tenantId, id);
   if (!job) throw notFound("Tow job not found");
+  assertAssignedDriver(job.driver_id, driver_id);
   const contact = await ctx.repo.getCustomerContact(job.incident_id);
   if (!contact) throw badRequest("Pickup location unknown");
 
@@ -202,9 +217,11 @@ export async function completeTowJob(
   body: unknown,
 ): Promise<RouteResult> {
   const input = towJobCompleteInputSchema.parse(body);
+  const driver_id = requireAuthenticatedDriver(ctx);
   const job = await ctx.repo.getTowJob(ctx.tenantId, id);
   if (!job) throw notFound("Tow job not found");
   if (!job.driver_id) throw new AppError("conflict", "Job has no assigned driver");
+  assertAssignedDriver(job.driver_id, driver_id);
 
   // delivered -> completed (allow from transporting/delivered)
   if (job.status === "transporting") {

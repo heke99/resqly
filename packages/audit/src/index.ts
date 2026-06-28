@@ -1,5 +1,5 @@
-import type { AuditAction } from "@roadside/types";
-import type { AppSupabaseClient } from "@roadside/database";
+import type { AuditAction } from "@resqly/types";
+import type { AppSupabaseClient } from "@resqly/database";
 
 export interface AuditInput {
   tenantId?: string | null;

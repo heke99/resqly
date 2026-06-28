@@ -1,5 +1,5 @@
 {
-  "name": "@roadside/white-label",
+  "name": "@resqly/white-label",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,7 +15,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@roadside/types": "workspace:*"
+    "@resqly/types": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3",

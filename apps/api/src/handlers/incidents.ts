@@ -3,12 +3,12 @@ import {
   bankidSignInputSchema,
   createIncidentInputSchema,
   requestTowInputSchema,
-} from "@roadside/types";
-import { AppError, badRequest, notFound } from "@roadside/utils";
-import { buildIncidentRow, determineRequiresBankid } from "@roadside/insurance";
-import { getBankidProvider, buildSignatureRecord } from "@roadside/bankid";
-import { selectDispatch, type DispatchRequest } from "@roadside/dispatch";
-import type { DispatchStrategy } from "@roadside/types";
+} from "@resqly/types";
+import { AppError, badRequest, notFound } from "@resqly/utils";
+import { buildIncidentRow, determineRequiresBankid } from "@resqly/insurance";
+import { getBankidProvider, buildSignatureRecord } from "@resqly/bankid";
+import { selectDispatch, type DispatchRequest } from "@resqly/dispatch";
+import type { DispatchStrategy } from "@resqly/types";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
 
@@ -23,8 +23,9 @@ export async function createIncident(ctx: ApiContext, body: unknown): Promise<Ro
 
   const row = buildIncidentRow({
     tenantId: ctx.tenantId,
-    // The API acts on behalf of the partner; the customer is resolved upstream.
-    customerUserId: (input as { customer_user_id?: string }).customer_user_id ?? ctx.tenantId,
+    // The API acts on behalf of the partner, but customer_user_id must be explicit.
+    // Never default to tenant_id because that creates invalid/cross-domain data.
+    customerUserId: input.customer_user_id,
     input,
     vehicleId: input.vehicle_id ?? null,
     insuranceCompanyId: input.insurance_company_id ?? null,

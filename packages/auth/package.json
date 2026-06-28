@@ -1,5 +1,5 @@
 {
-  "name": "@roadside/auth",
+  "name": "@resqly/auth",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,10 +15,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@roadside/database": "workspace:*",
-    "@roadside/rbac": "workspace:*",
-    "@roadside/types": "workspace:*",
-    "@roadside/utils": "workspace:*"
+    "@resqly/database": "workspace:*",
+    "@resqly/rbac": "workspace:*",
+    "@resqly/types": "workspace:*",
+    "@resqly/utils": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3",

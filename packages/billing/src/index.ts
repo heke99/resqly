@@ -1,4 +1,4 @@
-import type { InvoiceLineType, PayerType } from "@roadside/types";
+import type { InvoiceLineType, PayerType } from "@resqly/types";
 
 export interface PriceList {
   start_fee_minor: number;

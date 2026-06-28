@@ -1,5 +1,5 @@
 {
-  "name": "@roadside/geodata",
+  "name": "@resqly/geodata",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,9 +15,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@roadside/database": "workspace:*",
-    "@roadside/maps": "workspace:*",
-    "@roadside/types": "workspace:*"
+    "@resqly/database": "workspace:*",
+    "@resqly/maps": "workspace:*",
+    "@resqly/types": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3",

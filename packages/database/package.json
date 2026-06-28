@@ -1,5 +1,5 @@
 {
-  "name": "@roadside/database",
+  "name": "@resqly/database",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -19,7 +19,7 @@
     "gen:types": "supabase gen types typescript --local > src/generated-types.ts"
   },
   "dependencies": {
-    "@roadside/utils": "workspace:*",
+    "@resqly/utils": "workspace:*",
     "@supabase/supabase-js": "^2.47.10"
   },
   "devDependencies": {

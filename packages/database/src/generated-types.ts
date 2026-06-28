@@ -2,7 +2,7 @@
  * Placeholder database typings.
  *
  * Regenerate against a live schema with:
- *   pnpm --filter @roadside/database gen:types
+ *   pnpm --filter @resqly/database gen:types
  * (requires `supabase` CLI + a linked/local project).
  *
  * Until then we expose a permissive but structurally-correct shape so the rest

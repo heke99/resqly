@@ -1,4 +1,4 @@
-import { EmptyState, PageHeader, StatCard } from "@roadside/web-kit";
+import { EmptyState, PageHeader, StatCard } from "@resqly/web-kit";
 import { getActiveTenant } from "./lib/tenant";
 import { listIncidents, listTowJobs } from "./lib/data";
 

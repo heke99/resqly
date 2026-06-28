@@ -1,13 +1,13 @@
 {
   "expo": {
-    "name": "Roadside Assistance",
-    "slug": "roadside-customer",
-    "scheme": "roadside",
+    "name": "Resqly",
+    "slug": "resqly-customer",
+    "scheme": "resqly",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "ios": { "supportsTablet": true },
-    "android": { "package": "com.roadside.customer" },
+    "android": { "package": "com.resqly.customer" },
     "plugins": ["expo-location"]
   }
 }

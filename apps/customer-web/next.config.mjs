@@ -1,12 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: [
-    "@roadside/web-kit",
-    "@roadside/ui",
-    "@roadside/types",
-    "@roadside/white-label",
-    "@roadside/database",
-    "@roadside/utils",
+    "@resqly/web-kit",
+    "@resqly/ui",
+    "@resqly/types",
+    "@resqly/white-label",
+    "@resqly/database",
+    "@resqly/utils",
   ],
   typescript: { ignoreBuildErrors: false },
 };

@@ -1,4 +1,4 @@
-import type { CreateIncidentInput, IncidentType } from "@roadside/types";
+import type { CreateIncidentInput, IncidentType } from "@resqly/types";
 
 export interface BankidRequirementSettings {
   bankidRequiredForClaims: boolean;

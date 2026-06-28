@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
-import { createServiceClient } from "@roadside/database";
-import { boolEnv, optionalEnv, requireEnv } from "@roadside/utils";
+import { createServiceClient } from "@resqly/database";
+import { boolEnv, optionalEnv, requireEnv } from "@resqly/utils";
 import { App } from "./app";
 import { SupabaseRepo } from "./repo/supabase";
 
@@ -19,6 +19,13 @@ function buildApp(): App {
       mockEnabled: boolEnv("BANKID_MOCK_ENABLED", true),
     },
     encryptionKey: optionalEnv("ENCRYPTION_KEY", "dev-pepper-change-me"),
+    driverAuth: {
+      async getUserIdFromAccessToken(token: string) {
+        const { data, error } = await db.auth.getUser(token);
+        if (error || !data.user) return null;
+        return data.user.id;
+      },
+    },
   });
 }
 

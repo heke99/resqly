@@ -50,25 +50,25 @@ importers:
 
   apps/admin-web:
     dependencies:
-      '@roadside/database':
+      '@resqly/database':
         specifier: workspace:*
         version: link:../../packages/database
-      '@roadside/rbac':
+      '@resqly/rbac':
         specifier: workspace:*
         version: link:../../packages/rbac
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../../packages/types
-      '@roadside/ui':
+      '@resqly/ui':
         specifier: workspace:*
         version: link:../../packages/ui
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../../packages/utils
-      '@roadside/web-kit':
+      '@resqly/web-kit':
         specifier: workspace:*
         version: link:../../packages/web-kit
-      '@roadside/white-label':
+      '@resqly/white-label':
         specifier: workspace:*
         version: link:../../packages/white-label
       next:
@@ -96,49 +96,49 @@ importers:
 
   apps/api:
     dependencies:
-      '@roadside/audit':
+      '@resqly/audit':
         specifier: workspace:*
         version: link:../../packages/audit
-      '@roadside/auth':
+      '@resqly/auth':
         specifier: workspace:*
         version: link:../../packages/auth
-      '@roadside/bankid':
+      '@resqly/bankid':
         specifier: workspace:*
         version: link:../../packages/bankid
-      '@roadside/billing':
+      '@resqly/billing':
         specifier: workspace:*
         version: link:../../packages/billing
-      '@roadside/database':
+      '@resqly/database':
         specifier: workspace:*
         version: link:../../packages/database
-      '@roadside/dispatch':
+      '@resqly/dispatch':
         specifier: workspace:*
         version: link:../../packages/dispatch
-      '@roadside/geodata':
+      '@resqly/geodata':
         specifier: workspace:*
         version: link:../../packages/geodata
-      '@roadside/insurance':
+      '@resqly/insurance':
         specifier: workspace:*
         version: link:../../packages/insurance
-      '@roadside/maps':
+      '@resqly/maps':
         specifier: workspace:*
         version: link:../../packages/maps
-      '@roadside/notifications':
+      '@resqly/notifications':
         specifier: workspace:*
         version: link:../../packages/notifications
-      '@roadside/rbac':
+      '@resqly/rbac':
         specifier: workspace:*
         version: link:../../packages/rbac
-      '@roadside/tow':
+      '@resqly/tow':
         specifier: workspace:*
         version: link:../../packages/tow
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../../packages/types
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../../packages/utils
-      '@roadside/white-label':
+      '@resqly/white-label':
         specifier: workspace:*
         version: link:../../packages/white-label
       zod:
@@ -160,16 +160,16 @@ importers:
 
   apps/customer-mobile:
     dependencies:
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../../packages/types
-      '@roadside/ui':
+      '@resqly/ui':
         specifier: workspace:*
         version: link:../../packages/ui
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../../packages/utils
-      '@roadside/white-label':
+      '@resqly/white-label':
         specifier: workspace:*
         version: link:../../packages/white-label
       '@supabase/supabase-js':
@@ -200,22 +200,22 @@ importers:
 
   apps/customer-web:
     dependencies:
-      '@roadside/database':
+      '@resqly/database':
         specifier: workspace:*
         version: link:../../packages/database
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../../packages/types
-      '@roadside/ui':
+      '@resqly/ui':
         specifier: workspace:*
         version: link:../../packages/ui
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../../packages/utils
-      '@roadside/web-kit':
+      '@resqly/web-kit':
         specifier: workspace:*
         version: link:../../packages/web-kit
-      '@roadside/white-label':
+      '@resqly/white-label':
         specifier: workspace:*
         version: link:../../packages/white-label
       next:
@@ -243,16 +243,16 @@ importers:
 
   apps/driver-mobile:
     dependencies:
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../../packages/types
-      '@roadside/ui':
+      '@resqly/ui':
         specifier: workspace:*
         version: link:../../packages/ui
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../../packages/utils
-      '@roadside/white-label':
+      '@resqly/white-label':
         specifier: workspace:*
         version: link:../../packages/white-label
       '@supabase/supabase-js':
@@ -283,25 +283,25 @@ importers:
 
   apps/portal-web:
     dependencies:
-      '@roadside/database':
+      '@resqly/database':
         specifier: workspace:*
         version: link:../../packages/database
-      '@roadside/rbac':
+      '@resqly/rbac':
         specifier: workspace:*
         version: link:../../packages/rbac
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../../packages/types
-      '@roadside/ui':
+      '@resqly/ui':
         specifier: workspace:*
         version: link:../../packages/ui
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../../packages/utils
-      '@roadside/web-kit':
+      '@resqly/web-kit':
         specifier: workspace:*
         version: link:../../packages/web-kit
-      '@roadside/white-label':
+      '@resqly/white-label':
         specifier: workspace:*
         version: link:../../packages/white-label
       next:
@@ -329,19 +329,19 @@ importers:
 
   apps/workers:
     dependencies:
-      '@roadside/database':
+      '@resqly/database':
         specifier: workspace:*
         version: link:../../packages/database
-      '@roadside/maps':
+      '@resqly/maps':
         specifier: workspace:*
         version: link:../../packages/maps
-      '@roadside/notifications':
+      '@resqly/notifications':
         specifier: workspace:*
         version: link:../../packages/notifications
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../../packages/types
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../../packages/utils
     devDependencies:
@@ -360,10 +360,10 @@ importers:
 
   packages/audit:
     dependencies:
-      '@roadside/database':
+      '@resqly/database':
         specifier: workspace:*
         version: link:../database
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
     devDependencies:
@@ -376,16 +376,16 @@ importers:
 
   packages/auth:
     dependencies:
-      '@roadside/database':
+      '@resqly/database':
         specifier: workspace:*
         version: link:../database
-      '@roadside/rbac':
+      '@resqly/rbac':
         specifier: workspace:*
         version: link:../rbac
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../utils
     devDependencies:
@@ -398,10 +398,10 @@ importers:
 
   packages/bankid:
     dependencies:
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../utils
     devDependencies:
@@ -417,7 +417,7 @@ importers:
 
   packages/billing:
     dependencies:
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
     devDependencies:
@@ -430,7 +430,7 @@ importers:
 
   packages/database:
     dependencies:
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../utils
       '@supabase/supabase-js':
@@ -449,7 +449,7 @@ importers:
 
   packages/dispatch:
     dependencies:
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
     devDependencies:
@@ -462,13 +462,13 @@ importers:
 
   packages/geodata:
     dependencies:
-      '@roadside/database':
+      '@resqly/database':
         specifier: workspace:*
         version: link:../database
-      '@roadside/maps':
+      '@resqly/maps':
         specifier: workspace:*
         version: link:../maps
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
     devDependencies:
@@ -481,10 +481,10 @@ importers:
 
   packages/insurance:
     dependencies:
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../utils
     devDependencies:
@@ -497,10 +497,10 @@ importers:
 
   packages/maps:
     dependencies:
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../utils
     devDependencies:
@@ -516,10 +516,10 @@ importers:
 
   packages/notifications:
     dependencies:
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../utils
     devDependencies:
@@ -535,10 +535,10 @@ importers:
 
   packages/rbac:
     dependencies:
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../utils
     devDependencies:
@@ -551,10 +551,10 @@ importers:
 
   packages/tow:
     dependencies:
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
-      '@roadside/utils':
+      '@resqly/utils':
         specifier: workspace:*
         version: link:../utils
     devDependencies:
@@ -580,10 +580,10 @@ importers:
 
   packages/ui:
     dependencies:
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
-      '@roadside/white-label':
+      '@resqly/white-label':
         specifier: workspace:*
         version: link:../white-label
     devDependencies:
@@ -608,19 +608,19 @@ importers:
 
   packages/web-kit:
     dependencies:
-      '@roadside/database':
+      '@resqly/database':
         specifier: workspace:*
         version: link:../database
-      '@roadside/rbac':
+      '@resqly/rbac':
         specifier: workspace:*
         version: link:../rbac
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
-      '@roadside/ui':
+      '@resqly/ui':
         specifier: workspace:*
         version: link:../ui
-      '@roadside/white-label':
+      '@resqly/white-label':
         specifier: workspace:*
         version: link:../white-label
       '@supabase/supabase-js':
@@ -648,7 +648,7 @@ importers:
 
   packages/white-label:
     dependencies:
-      '@roadside/types':
+      '@resqly/types':
         specifier: workspace:*
         version: link:../types
     devDependencies:

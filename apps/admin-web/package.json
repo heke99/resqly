@@ -1,5 +1,5 @@
 {
-  "name": "@roadside/admin-web",
+  "name": "@resqly/admin-web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -10,13 +10,13 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@roadside/database": "workspace:*",
-    "@roadside/rbac": "workspace:*",
-    "@roadside/types": "workspace:*",
-    "@roadside/ui": "workspace:*",
-    "@roadside/utils": "workspace:*",
-    "@roadside/web-kit": "workspace:*",
-    "@roadside/white-label": "workspace:*",
+    "@resqly/database": "workspace:*",
+    "@resqly/rbac": "workspace:*",
+    "@resqly/types": "workspace:*",
+    "@resqly/ui": "workspace:*",
+    "@resqly/utils": "workspace:*",
+    "@resqly/web-kit": "workspace:*",
+    "@resqly/white-label": "workspace:*",
     "next": "^16.2.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

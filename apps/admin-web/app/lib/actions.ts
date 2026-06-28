@@ -1,12 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getServiceClient } from "@roadside/web-kit/server";
+import { requirePlatformAdmin } from "./auth";
 
 /** Superadmin: create a tenant (insurance / tow company / etc.) with defaults. */
 export async function createTenant(formData: FormData): Promise<void> {
-  const db = getServiceClient();
-  if (!db) throw new Error("Supabase is not configured (set env vars).");
+  const { db, user } = await requirePlatformAdmin();
 
   const type = String(formData.get("type") ?? "");
   const name = String(formData.get("name") ?? "").trim();
@@ -41,6 +40,7 @@ export async function createTenant(formData: FormData): Promise<void> {
 
   await db.from("audit_logs" as never).insert({
     tenant_id: tenantId,
+    actor_user_id: user.id,
     action: "create",
     entity_type: "tenant",
     entity_id: tenantId,
@@ -52,8 +52,7 @@ export async function createTenant(formData: FormData): Promise<void> {
 
 /** Superadmin/tenant admin: update tenant branding + prefix. */
 export async function updateTenantBranding(formData: FormData): Promise<void> {
-  const db = getServiceClient();
-  if (!db) throw new Error("Supabase is not configured.");
+  const { db, user } = await requirePlatformAdmin();
   const tenantId = String(formData.get("tenant_id") ?? "");
   const productName = String(formData.get("product_name") ?? "");
   const colorPrimary = String(formData.get("color_primary") ?? "");
@@ -79,8 +78,7 @@ export async function updateTenantBranding(formData: FormData): Promise<void> {
 
 /** Superadmin: create the first tenant admin user (owner/admin). */
 export async function createTenantAdmin(formData: FormData): Promise<void> {
-  const db = getServiceClient();
-  if (!db) throw new Error("Supabase is not configured.");
+  const { db, user } = await requirePlatformAdmin();
   const tenantId = String(formData.get("tenant_id") ?? "");
   const email = String(formData.get("email") ?? "").trim();
   const fullName = String(formData.get("full_name") ?? "").trim();
@@ -101,6 +99,7 @@ export async function createTenantAdmin(formData: FormData): Promise<void> {
 
   await db.from("audit_logs" as never).insert({
     tenant_id: tenantId,
+    actor_user_id: user.id,
     action: "create",
     entity_type: "tenant_user",
     entity_id: userId,

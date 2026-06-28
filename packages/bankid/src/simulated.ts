@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { BankidEnv, BankidStatus } from "@roadside/types";
+import type { BankidEnv, BankidStatus } from "@resqly/types";
 import type {
   BankidCollectResult,
   BankidProvider,

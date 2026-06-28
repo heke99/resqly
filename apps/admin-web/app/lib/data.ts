@@ -1,4 +1,4 @@
-import { getServiceClient } from "@roadside/web-kit/server";
+import { requirePlatformAdmin } from "./auth";
 
 export interface TenantRow {
   id: string;
@@ -11,8 +11,7 @@ export interface TenantRow {
 }
 
 export async function listTenants(): Promise<TenantRow[]> {
-  const db = getServiceClient();
-  if (!db) return [];
+  const { db } = await requirePlatformAdmin();
   const { data } = await db
     .from("tenants" as never)
     .select("*")
@@ -21,15 +20,13 @@ export async function listTenants(): Promise<TenantRow[]> {
 }
 
 export async function getTenant(id: string): Promise<TenantRow | null> {
-  const db = getServiceClient();
-  if (!db) return null;
+  const { db } = await requirePlatformAdmin();
   const { data } = await db.from("tenants" as never).select("*").eq("id", id).maybeSingle();
   return (data as TenantRow | null) ?? null;
 }
 
 export async function listAuditLogs(): Promise<Array<Record<string, unknown>>> {
-  const db = getServiceClient();
-  if (!db) return [];
+  const { db } = await requirePlatformAdmin();
   const { data } = await db
     .from("audit_logs" as never)
     .select("*")

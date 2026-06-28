@@ -1,5 +1,5 @@
-import { Card, PageHeader } from "@roadside/web-kit";
-import { ALL_PERMISSIONS, ROLE_META, ROLE_PERMISSIONS } from "@roadside/rbac";
+import { Card, PageHeader } from "@resqly/web-kit";
+import { ALL_PERMISSIONS, ROLE_META, ROLE_PERMISSIONS } from "@resqly/rbac";
 
 export const dynamic = "force-dynamic";
 

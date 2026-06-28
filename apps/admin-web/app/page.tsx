@@ -1,4 +1,4 @@
-import { PageHeader, StatCard } from "@roadside/web-kit";
+import { PageHeader, StatCard } from "@resqly/web-kit";
 import { listTenants } from "./lib/data";
 
 export const dynamic = "force-dynamic";

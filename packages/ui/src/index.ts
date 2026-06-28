@@ -1,6 +1,6 @@
-import type { TowJobStatus } from "@roadside/types";
+import type { TowJobStatus } from "@resqly/types";
 
-export { themeToCssVars, themeToStyleString, buildResolvedTheme } from "@roadside/white-label";
+export { themeToCssVars, themeToStyleString, buildResolvedTheme } from "@resqly/white-label";
 
 /** Join class names, dropping falsy values. */
 export function cn(...parts: Array<string | false | null | undefined>): string {

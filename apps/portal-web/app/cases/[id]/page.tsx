@@ -1,4 +1,4 @@
-import { Badge, Button, Card, EmptyState, PageHeader } from "@roadside/web-kit";
+import { Badge, Button, Card, EmptyState, PageHeader } from "@resqly/web-kit";
 import { getActiveTenant } from "../../lib/tenant";
 import {
   getBankidStatus,
@@ -32,10 +32,10 @@ export default async function CaseDetail({
     );
   }
 
-  const bankid = await getBankidStatus(id);
-  const evidence = await getIncidentEvidence(id);
-  const job = await getIncidentTowJob(id);
-  const eta = job ? await getLatestEta(String(job.id)) : null;
+  const bankid = await getBankidStatus(tenant!.id, id);
+  const evidence = await getIncidentEvidence(tenant!.id, id);
+  const job = await getIncidentTowJob(tenant!.id, id);
+  const eta = job ? await getLatestEta(tenant!.id, String(job.id)) : null;
 
   return (
     <div>
@@ -76,10 +76,12 @@ export default async function CaseDetail({
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
           <form action={approveClaim}>
             <input type="hidden" name="incident_id" value={id} />
+            <input type="hidden" name="tenant_id" value={tenant!.id} />
             <Button type="submit">Approve</Button>
           </form>
           <form action={requestMoreInfo} style={{ display: "flex", gap: 8, alignItems: "end" }}>
             <input type="hidden" name="incident_id" value={id} />
+            <input type="hidden" name="tenant_id" value={tenant!.id} />
             <div>
               <label htmlFor="reason1">Request more info</label>
               <input id="reason1" name="reason" placeholder="What is needed" />
@@ -90,6 +92,7 @@ export default async function CaseDetail({
           </form>
           <form action={rejectClaim} style={{ display: "flex", gap: 8, alignItems: "end" }}>
             <input type="hidden" name="incident_id" value={id} />
+            <input type="hidden" name="tenant_id" value={tenant!.id} />
             <div>
               <label htmlFor="reason2">Reject reason</label>
               <input id="reason2" name="reason" placeholder="Reason" />

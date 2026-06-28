@@ -1,30 +1,21 @@
-import { getServiceClient } from "@roadside/web-kit/server";
+import { getPortalTenants, requirePortalTenant, type PortalTenant } from "./auth";
 
-export interface PortalTenant {
-  id: string;
-  name: string;
-  slug: string;
-  type: string;
-  case_number_prefix: string;
-}
+export type { PortalTenant };
 
 export async function listPortalTenants(): Promise<PortalTenant[]> {
-  const db = getServiceClient();
-  if (!db) return [];
-  const { data } = await db.from("tenants" as never).select("id, name, slug, type, case_number_prefix");
-  return (data as PortalTenant[] | null) ?? [];
+  const { tenants } = await getPortalTenants();
+  return tenants;
 }
 
 /**
- * Resolve the active tenant for the portal. In production this comes from the
- * authenticated user's session; here we accept ?tenant=<id> and otherwise fall
- * back to the first tenant (or null on an empty system).
+ * Resolve active tenant from the authenticated user's tenant memberships.
+ * The optional ?tenant=<id> parameter is accepted only when the user belongs to
+ * that tenant. There is no fallback to the first platform tenant.
  */
 export async function getActiveTenant(
   search?: Record<string, string | string[] | undefined>,
 ): Promise<PortalTenant | null> {
-  const tenants = await listPortalTenants();
   const requested = typeof search?.tenant === "string" ? search.tenant : undefined;
-  if (requested) return tenants.find((t) => t.id === requested) ?? null;
-  return tenants[0] ?? null;
+  const { tenant } = await requirePortalTenant(requested);
+  return tenant;
 }

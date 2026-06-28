@@ -1,5 +1,5 @@
-import type { Coordinate, TowJobStatus } from "@roadside/types";
-import { AppError } from "@roadside/utils";
+import type { Coordinate, TowJobStatus } from "@resqly/types";
+import { AppError } from "@resqly/utils";
 
 /**
  * The EXACT allow-list of customer fields a driver may receive (section 14).

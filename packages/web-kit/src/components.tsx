@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { TenantThemeTokens } from "@roadside/types";
-import { themeToCssVars, DEFAULT_THEME_TOKENS } from "@roadside/white-label";
+import type { TenantThemeTokens } from "@resqly/types";
+import { themeToCssVars, DEFAULT_THEME_TOKENS } from "@resqly/white-label";
 
 /** Applies white-label CSS variables to a wrapper around the app. */
 export function ThemeRoot({

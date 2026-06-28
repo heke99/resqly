@@ -4,4 +4,4 @@ export {
   createServiceClient,
   createAnonClient,
   type AppSupabaseClient,
-} from "@roadside/database";
+} from "@resqly/database";

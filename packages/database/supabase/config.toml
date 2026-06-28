@@ -2,7 +2,7 @@
 # Run `supabase start` (requires Docker) to bring up the full local stack, then
 # `supabase db reset` to apply all migrations in ./migrations.
 
-project_id = "roadside-platform"
+project_id = "resqly-platform"
 
 [db]
 port = 54322

@@ -1,4 +1,4 @@
-import type { BankidEnv } from "@roadside/types";
+import type { BankidEnv } from "@resqly/types";
 import type { BankidProvider } from "./provider";
 import { SimulatedBankidProvider } from "./simulated";
 

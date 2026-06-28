@@ -1,7 +1,7 @@
-import { allocateCaseNumber, type AppSupabaseClient } from "@roadside/database";
-import { findDriversWithinRadius } from "@roadside/geodata";
-import type { Coordinate, IncidentStatus, TowJobStatus } from "@roadside/types";
-import type { DispatchCandidate } from "@roadside/dispatch";
+import { allocateCaseNumber, type AppSupabaseClient } from "@resqly/database";
+import { findDriversWithinRadius } from "@resqly/geodata";
+import type { Coordinate, IncidentStatus, TowJobStatus } from "@resqly/types";
+import type { DispatchCandidate } from "@resqly/dispatch";
 import type {
   ApiClientRecord,
   ApiRepo,

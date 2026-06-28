@@ -1,4 +1,4 @@
-import { RateLimiter } from "@roadside/utils";
+import { RateLimiter } from "@resqly/utils";
 import type { ApiRepo } from "./repo/types";
 
 export interface AppConfig {
@@ -8,6 +8,7 @@ export interface AppConfig {
   /** Pepper for hashing personal numbers (ENCRYPTION_KEY). */
   encryptionKey: string;
   rateLimiter?: RateLimiter;
+  driverAuth?: { getUserIdFromAccessToken(token: string): Promise<string | null> };
 }
 
 export interface ApiContext {
@@ -17,6 +18,9 @@ export interface ApiContext {
   apiClientId: string;
   requestId: string;
   ip: string | null;
+  driverUserId?: string | null;
+  driverId?: string | null;
+  idempotencyKey?: string | null;
 }
 
 export function defaultRateLimiter(): RateLimiter {

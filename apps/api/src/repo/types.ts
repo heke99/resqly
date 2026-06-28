@@ -3,8 +3,8 @@ import type {
   IncidentStatus,
   IncidentType,
   TowJobStatus,
-} from "@roadside/types";
-import type { DispatchCandidate } from "@roadside/dispatch";
+} from "@resqly/types";
+import type { DispatchCandidate } from "@resqly/dispatch";
 
 export interface ApiClientRecord {
   id: string;

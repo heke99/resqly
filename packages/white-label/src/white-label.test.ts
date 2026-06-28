@@ -20,7 +20,7 @@ describe("resolveTenant precedence", () => {
 
   it("resolves a subdomain of the platform base domain", async () => {
     const r = await resolveTenant(
-      { host: "partner.app.roadside.example", platformBaseDomain: "app.roadside.example" },
+      { host: "partner.app.resqly.example", platformBaseDomain: "app.resqly.example" },
       dir,
     );
     expect(r).toEqual({ tenantId: "tenant-partner", method: "subdomain" });
@@ -29,8 +29,8 @@ describe("resolveTenant precedence", () => {
   it("ignores www and falls through to slug", async () => {
     const r = await resolveTenant(
       {
-        host: "www.app.roadside.example",
-        platformBaseDomain: "app.roadside.example",
+        host: "www.app.resqly.example",
+        platformBaseDomain: "app.resqly.example",
         slug: "folksam",
       },
       dir,

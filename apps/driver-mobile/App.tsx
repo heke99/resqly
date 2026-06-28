@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View, Linking } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { towStatusLabel } from "@roadside/ui";
+import { towStatusLabel } from "@resqly/ui";
 import { getSupabase, apiPost } from "./src/supabase";
 import { palette } from "./src/theme";
 
@@ -40,7 +40,7 @@ export default function App() {
   return (
     <View style={styles.root}>
       <StatusBar style="dark" />
-      <Text style={styles.brand}>Roadside Driver</Text>
+      <Text style={styles.brand}>Resqly Driver</Text>
       <View style={styles.body}>
         {screen === "login" ? <Login onDone={() => setScreen("jobs")} /> : null}
         {screen === "jobs" ? (
@@ -162,14 +162,13 @@ function JobDetail({ job, onBack }: { job: Job; onBack: () => void }) {
   }, [loadShare]);
 
   async function accept() {
-    const driverId = job.driver_id ?? "";
-    const res = await apiPost(`/api/v1/tow/jobs/${job.id}/accept`, { driver_id: driverId });
+    const res = await apiPost(`/api/v1/tow/jobs/${job.id}/accept`, {});
     setMessage(res ? "Accepted. Customer details unlocked." : "Backend not configured.");
     setStatus("accepted");
     await loadShare();
   }
   async function reject() {
-    await apiPost(`/api/v1/tow/jobs/${job.id}/reject`, { driver_id: job.driver_id ?? "" });
+    await apiPost(`/api/v1/tow/jobs/${job.id}/reject`, {});
     onBack();
   }
   async function setJobStatus(next: string) {

@@ -1,4 +1,4 @@
-import { Button, Card, EmptyState, PageHeader } from "@roadside/web-kit";
+import { Button, Card, EmptyState, PageHeader } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
 import { getTenantSettings } from "../lib/data";
 import { updateSettings } from "../lib/actions";

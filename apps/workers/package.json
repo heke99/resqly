@@ -1,5 +1,5 @@
 {
-  "name": "@roadside/workers",
+  "name": "@resqly/workers",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,11 +16,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@roadside/database": "workspace:*",
-    "@roadside/maps": "workspace:*",
-    "@roadside/notifications": "workspace:*",
-    "@roadside/types": "workspace:*",
-    "@roadside/utils": "workspace:*"
+    "@resqly/database": "workspace:*",
+    "@resqly/maps": "workspace:*",
+    "@resqly/notifications": "workspace:*",
+    "@resqly/types": "workspace:*",
+    "@resqly/utils": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

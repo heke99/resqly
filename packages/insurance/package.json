@@ -1,5 +1,5 @@
 {
-  "name": "@roadside/insurance",
+  "name": "@resqly/insurance",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,8 +15,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@roadside/types": "workspace:*",
-    "@roadside/utils": "workspace:*"
+    "@resqly/types": "workspace:*",
+    "@resqly/utils": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3",

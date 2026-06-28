@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 const TILES = [
   { href: "/cases/new?type=towing", label: "Start Case" },
-  { href: "/cases/new?type=roadside_assistance", label: "Roadside Assistance" },
+  { href: "/cases/new?type=roadside_assistance", label: "Roadside assistance" },
   { href: "/cases/new?type=damage_claim", label: "Damage Claim" },
   { href: "/vehicles", label: "My Vehicles" },
   { href: "/vehicles?add=1", label: "Add Vehicle" },

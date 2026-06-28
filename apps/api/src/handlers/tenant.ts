@@ -1,6 +1,6 @@
-import { tenantBrandingPatchSchema, tenantSettingsPatchSchema } from "@roadside/types";
-import { notFound } from "@roadside/utils";
-import { buildResolvedTheme, DEFAULT_THEME_TOKENS } from "@roadside/white-label";
+import { tenantBrandingPatchSchema, tenantSettingsPatchSchema } from "@resqly/types";
+import { notFound } from "@resqly/utils";
+import { buildResolvedTheme, DEFAULT_THEME_TOKENS } from "@resqly/white-label";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
 

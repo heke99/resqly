@@ -1,6 +1,6 @@
-# Roadside Assistance & Insurance Claims — White-Label SaaS Platform
+# Resqly — Roadside Assistance & Vehicle Claims Platform
 
-A multi-tenant, white-label SaaS platform for **roadside assistance, towing, and
+Resqly is a multi-tenant, white-label SaaS platform for **roadside assistance, towing, and
 vehicle-related insurance claims**. Insurance companies, towing companies,
 customers and drivers all use the same platform, but each tenant experiences it
 as their own branded product.
@@ -81,10 +81,10 @@ pnpm test
 ### Running an app
 
 ```bash
-pnpm --filter @roadside/customer-web dev
-pnpm --filter @roadside/portal-web dev
-pnpm --filter @roadside/admin-web dev
-pnpm --filter @roadside/api dev
+pnpm --filter @resqly/customer-web dev
+pnpm --filter @resqly/portal-web dev
+pnpm --filter @resqly/admin-web dev
+pnpm --filter @resqly/api dev
 ```
 
 ### Database / Supabase
@@ -97,7 +97,7 @@ cd packages/database
 supabase db push
 
 # Generate TypeScript types from the live schema:
-pnpm --filter @roadside/database gen:types
+pnpm --filter @resqly/database gen:types
 ```
 
 The RLS assumption tests (pgTAP-style) live in
@@ -145,3 +145,18 @@ seed or demo data. No real insurance submissions in the test phase.
 ## License
 
 Proprietary. © Diversa Solutions LLC.
+
+
+## Recommended production domains
+
+Use these domains/subdomains for the first production deployment:
+
+- Customer web/PWA: `app.resqly.com`
+- Partner portal: `portal.resqly.com`
+- Superadmin: `admin.resqly.com`
+- Partner API: `api.resqly.com`
+- Public website/marketing: `resqly.com` and `www.resqly.com`
+- White-label customer domains: `assist.<partner-domain>` or `<partner>.resqly.com`
+- Preview/staging: `staging.resqly.com`, `staging-portal.resqly.com`, `staging-admin.resqly.com`, `staging-api.resqly.com`
+
+See `docs/deployment-domains.md` for full Vercel/env mapping.

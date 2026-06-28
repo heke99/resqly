@@ -1,4 +1,4 @@
-import { DEFAULT_THEME_TOKENS } from "@roadside/white-label";
+import { DEFAULT_THEME_TOKENS } from "@resqly/white-label";
 
 export const palette = {
   primary: DEFAULT_THEME_TOKENS.color_primary,

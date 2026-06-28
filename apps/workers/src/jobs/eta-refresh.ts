@@ -1,5 +1,5 @@
-import { shouldRefreshEta } from "@roadside/maps";
-import type { TowJobStatus } from "@roadside/types";
+import { shouldRefreshEta } from "@resqly/maps";
+import type { TowJobStatus } from "@resqly/types";
 
 export interface ActiveJob {
   towJobId: string;

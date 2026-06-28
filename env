@@ -1,0 +1,62 @@
+# ---------------------------------------------------------------------------
+# Supabase
+# ---------------------------------------------------------------------------
+NEXT_PUBLIC_SUPABASE_URL=https://qcdfiqmwgyxzlqwdtuts.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFjZGZpcW13Z3l4emxxd2R0dXRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NTk5NDQsImV4cCI6MjA5ODIzNTk0NH0.j4Aau8ko4Am_TvBwWRyR05ASXwFa0gWEIMADP7bNeDE
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFjZGZpcW13Z3l4emxxd2R0dXRzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MjY1OTk0NCwiZXhwIjoyMDk4MjM1OTQ0fQ.6hy57Zq6lvUuIgYspS7NkyPySPVW1bLx7iCC6cTqCLY
+
+# ---------------------------------------------------------------------------
+# Google Maps Platform
+#   - BROWSER key: restricted, used by client SDK (Maps JS / RN map view)
+#   - SERVER key:  unrestricted-by-referrer, used ONLY server-side for
+#                  Geocoding / Routes / Route Matrix. Never expose to client.
+# ---------------------------------------------------------------------------
+GOOGLE_MAPS_BROWSER_KEY=
+GOOGLE_MAPS_SERVER_KEY=
+GOOGLE_MAPS_ROUTES_API_ENABLED=true
+
+# ---------------------------------------------------------------------------
+# BankID
+#   BANKID_ENV: mock | test | production
+#   When BANKID_MOCK_ENABLED=true the in-memory mock adapter is used and no
+#   external calls are made (recommended for local development & CI).
+# ---------------------------------------------------------------------------
+BANKID_ENV=test
+BANKID_API_URL=
+BANKID_CERT_PATH=
+BANKID_CERT_PASSWORD=
+BANKID_MOCK_ENABLED=true
+
+# ---------------------------------------------------------------------------
+# Platform
+# ---------------------------------------------------------------------------
+APP_ENV=development
+APP_BASE_URL=http://localhost:3000
+WEBHOOK_SIGNING_SECRET=
+# 32-byte (64 hex chars) key used for at-rest encryption of sensitive fields
+# and as the pepper for hashing personal numbers.
+ENCRYPTION_KEY=
+
+# Base domain used to detect tenant subdomains (e.g. partner.app.example.com)
+PLATFORM_BASE_DOMAIN=
+
+# Partner API server
+PORT=4000
+# Background workers poll interval
+WORKER_INTERVAL_MS=15000
+
+# ---------------------------------------------------------------------------
+# Client-exposed variables (web apps)
+#   Next.js only exposes NEXT_PUBLIC_* to the browser.
+# ---------------------------------------------------------------------------
+NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY=
+
+# ---------------------------------------------------------------------------
+# Client-exposed variables (Expo mobile apps)
+#   Expo only exposes EXPO_PUBLIC_* to the app bundle.
+# ---------------------------------------------------------------------------
+EXPO_PUBLIC_SUPABASE_URL=
+EXPO_PUBLIC_SUPABASE_ANON_KEY=
+EXPO_PUBLIC_API_URL=http://localhost:4000
+# Driver app access token used for driver lifecycle actions (test/dev only)
+EXPO_PUBLIC_DRIVER_TOKEN=

@@ -1,4 +1,4 @@
-import { Card, PageHeader, Button, EmptyState } from "@roadside/web-kit";
+import { Card, PageHeader, Button, EmptyState } from "@resqly/web-kit";
 import { getTenant } from "../../lib/data";
 import { updateTenantBranding, createTenantAdmin } from "../../lib/actions";
 
@@ -53,7 +53,7 @@ export default async function TenantDetailPage({ params }: { params: Promise<{ i
                 <>
                   <option value="insurance_owner_admin">Owner / Admin</option>
                   <option value="insurance_claims_handler">Claims Handler</option>
-                  <option value="insurance_roadside_handler">Roadside Handler</option>
+                  <option value="insurance_roadside_handler">Roadside Assistance Handler</option>
                 </>
               ) : (
                 <>

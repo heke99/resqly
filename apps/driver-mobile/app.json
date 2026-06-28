@@ -1,13 +1,13 @@
 {
   "expo": {
-    "name": "Roadside Driver",
-    "slug": "roadside-driver",
-    "scheme": "roadsidedriver",
+    "name": "Resqly Driver",
+    "slug": "resqly-driver",
+    "scheme": "resqlydriver",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "ios": { "supportsTablet": true },
-    "android": { "package": "com.roadside.driver" },
+    "android": { "package": "com.resqly.driver" },
     "plugins": ["expo-location"]
   }
 }
