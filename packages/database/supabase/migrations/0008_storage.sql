@@ -14,6 +14,15 @@ values
   ('tenant-assets', 'tenant-assets', true)
 on conflict (id) do nothing;
 
+-- Make this migration safe to rerun in development / SQL editor workflows.
+-- PostgreSQL does not support CREATE POLICY IF NOT EXISTS.
+drop policy if exists "incident_evidence_read" on storage.objects;
+drop policy if exists "incident_evidence_write" on storage.objects;
+drop policy if exists "tow_evidence_read" on storage.objects;
+drop policy if exists "tow_evidence_write" on storage.objects;
+drop policy if exists "tenant_assets_public_read" on storage.objects;
+drop policy if exists "tenant_assets_write" on storage.objects;
+
 -- ---- incident-evidence -------------------------------------------------
 create policy "incident_evidence_read" on storage.objects for select to authenticated
 using (

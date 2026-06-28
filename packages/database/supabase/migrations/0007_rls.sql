@@ -44,10 +44,50 @@ do $$
 declare r record;
 begin
   for r in
-    select tablename from pg_tables where schemaname = 'public'
+    select n.nspname as schema_name, c.relname as table_name
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relkind in ('r', 'p')
+      and c.relname <> 'spatial_ref_sys'
+      and not exists (
+        select 1
+        from pg_depend d
+        where d.classid = 'pg_class'::regclass
+          and d.objid = c.oid
+          and d.deptype = 'e'
+      )
+    order by c.relname
   loop
-    execute format('alter table public.%I enable row level security;', r.tablename);
-    execute format('alter table public.%I force row level security;', r.tablename);
+    execute format('alter table %I.%I enable row level security;', r.schema_name, r.table_name);
+    execute format('alter table %I.%I force row level security;', r.schema_name, r.table_name);
+  end loop;
+end $$;
+
+-- Make this migration safe to rerun in development / SQL editor workflows.
+-- PostgreSQL does not support CREATE POLICY IF NOT EXISTS, so we drop only
+-- existing policies on app-owned public tables before recreating them below.
+do $$
+declare p record;
+begin
+  for p in
+    select pol.polname as policy_name, n.nspname as schema_name, c.relname as table_name
+    from pg_policy pol
+    join pg_class c on c.oid = pol.polrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relkind in ('r', 'p')
+      and c.relname <> 'spatial_ref_sys'
+      and not exists (
+        select 1
+        from pg_depend d
+        where d.classid = 'pg_class'::regclass
+          and d.objid = c.oid
+          and d.deptype = 'e'
+      )
+    order by c.relname, pol.polname
+  loop
+    execute format('drop policy if exists %I on %I.%I;', p.policy_name, p.schema_name, p.table_name);
   end loop;
 end $$;
 

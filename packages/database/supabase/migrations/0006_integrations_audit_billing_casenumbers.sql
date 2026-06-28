@@ -252,3 +252,48 @@ as $$
     where id = p_driver and user_id = auth.uid()
   );
 $$;
+
+-- Is the current user a member of the tow company?
+create or replace function public.is_tow_company_member(p_company uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, auth
+as $$
+  select exists (
+    select 1 from public.tow_company_users
+    where user_id = auth.uid() and tow_company_id = p_company
+  );
+$$;
+
+-- Has the current user received an offer for the tow job through one of their driver records?
+create or replace function public.has_offer_for_job(p_job uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, auth
+as $$
+  select exists (
+    select 1 from public.tow_job_offers o
+    join public.tow_drivers d on d.id = o.driver_id
+    where o.tow_job_id = p_job and d.user_id = auth.uid()
+  );
+$$;
+
+-- Is the current user the assigned driver for the tow job?
+create or replace function public.is_assigned_driver_for_job(p_job uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, auth
+as $$
+  select exists (
+    select 1 from public.tow_jobs tj
+    join public.tow_drivers d on d.id = tj.driver_id
+    where tj.id = p_job and d.user_id = auth.uid()
+  );
+$$;
+
