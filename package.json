@@ -3,12 +3,18 @@
   "private": true,
   "version": "0.1.0",
   "description": "Multi-tenant, white-label SaaS platform for roadside assistance, towing, and vehicle insurance claims.",
-  "packageManager": "pnpm@10.33.3",
+  "packageManager": "pnpm@11.9.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "engines": {
     "node": ">=20"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "scripts": {
     "build": "turbo run build",
@@ -32,6 +38,7 @@
     "turbo": "^2.10.0",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0",
-    "vitest": "^2.1.8"
+    "vite": "^8.1.0",
+    "vitest": "^4.1.9"
   }
 }
