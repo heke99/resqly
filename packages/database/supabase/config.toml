@@ -1,0 +1,33 @@
+# Supabase local configuration.
+# Run `supabase start` (requires Docker) to bring up the full local stack, then
+# `supabase db reset` to apply all migrations in ./migrations.
+
+project_id = "roadside-platform"
+
+[db]
+port = 54322
+major_version = 15
+
+[db.pooler]
+enabled = false
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+
+[storage]
+enabled = true
+
+[realtime]
+enabled = true

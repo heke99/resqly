@@ -21,3 +21,5 @@ pnpm-debug.log*
 ios/Pods/
 android/.gradle/
 android/app/build/
+
+*.tsbuildinfo

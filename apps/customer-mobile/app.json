@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "Roadside Assistance",
+    "slug": "roadside-customer",
+    "scheme": "roadside",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": { "supportsTablet": true },
+    "android": { "package": "com.roadside.customer" },
+    "plugins": ["expo-location"]
+  }
+}

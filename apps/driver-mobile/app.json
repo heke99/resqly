@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "Roadside Driver",
+    "slug": "roadside-driver",
+    "scheme": "roadsidedriver",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": { "supportsTablet": true },
+    "android": { "package": "com.roadside.driver" },
+    "plugins": ["expo-location"]
+  }
+}

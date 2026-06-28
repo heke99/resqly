@@ -1,0 +1,9 @@
+{
+  "name": "Roadside Assistance",
+  "short_name": "Roadside",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0B5FFF",
+  "icons": []
+}
