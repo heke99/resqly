@@ -17,7 +17,7 @@
     "@roadside/utils": "workspace:*",
     "@roadside/white-label": "workspace:*",
     "@supabase/supabase-js": "^2.47.10",
-    "expo": "^56.0.0",
+    "expo": "^56.0.12",
     "expo-location": "^56.0.0",
     "expo-status-bar": "^56.0.0",
     "react": "19.0.0",
