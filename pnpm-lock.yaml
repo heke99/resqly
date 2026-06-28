@@ -45,6 +45,28 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.0)
 
+  packages/auth:
+    dependencies:
+      '@roadside/database':
+        specifier: workspace:*
+        version: link:../database
+      '@roadside/rbac':
+        specifier: workspace:*
+        version: link:../rbac
+      '@roadside/types':
+        specifier: workspace:*
+        version: link:../types
+      '@roadside/utils':
+        specifier: workspace:*
+        version: link:../utils
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)
+
   packages/database:
     dependencies:
       '@roadside/utils':
@@ -57,6 +79,22 @@ importers:
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)
+
+  packages/rbac:
+    dependencies:
+      '@roadside/types':
+        specifier: workspace:*
+        version: link:../types
+      '@roadside/utils':
+        specifier: workspace:*
+        version: link:../utils
+    devDependencies:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -82,6 +120,19 @@ importers:
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)
+
+  packages/white-label:
+    dependencies:
+      '@roadside/types':
+        specifier: workspace:*
+        version: link:../types
+    devDependencies:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
