@@ -1,6 +1,6 @@
 import type { TowJobCompleteInput } from "@roadside/types";
 
-export interface CompletionReportRow {
+export type CompletionReportRow = {
   tenant_id: string;
   tow_job_id: string;
   driver_id: string;

@@ -25,7 +25,7 @@ export const TOW_JOB_TRANSITIONS: Record<TowJobStatus, readonly TowJobStatus[]> 
 
 export const towJobStatusGuard = new TransitionGuard<TowJobStatus>(TOW_JOB_TRANSITIONS);
 
-export interface TowJobStatusEventRow {
+export type TowJobStatusEventRow = {
   tow_job_id: string;
   from_status: TowJobStatus | null;
   to_status: TowJobStatus;

@@ -50,7 +50,7 @@ export interface CustomerShareInput {
   reason?: string;
 }
 
-export interface CustomerShareRow {
+export type CustomerShareRow = {
   tenant_id: string;
   tow_job_id: string;
   driver_id: string;

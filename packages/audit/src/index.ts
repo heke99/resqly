@@ -15,7 +15,7 @@ export interface AuditInput {
   metadata?: Record<string, unknown> | null;
 }
 
-export interface AuditRow {
+export type AuditRow = {
   tenant_id: string | null;
   actor_user_id: string | null;
   action: AuditAction;

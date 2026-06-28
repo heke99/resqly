@@ -25,7 +25,7 @@ export interface BuildIncidentRowInput {
   caseNumber?: string | null;
 }
 
-export interface IncidentRow {
+export type IncidentRow = {
   tenant_id: string;
   customer_user_id: string;
   vehicle_id: string | null;

@@ -18,7 +18,7 @@ export const INCIDENT_TRANSITIONS: Record<IncidentStatus, readonly IncidentStatu
 
 export const incidentStatusGuard = new TransitionGuard<IncidentStatus>(INCIDENT_TRANSITIONS);
 
-export interface IncidentStatusEventRow {
+export type IncidentStatusEventRow = {
   incident_id: string;
   from_status: IncidentStatus | null;
   to_status: IncidentStatus;
