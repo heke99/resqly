@@ -168,3 +168,18 @@ begin
   return query select true, v_company, null::text;
 end;
 $$;
+
+-- ---------------------------------------------------------------------
+-- Allow the customer who owns the incident to read the tow job for their own
+-- case (status / assigned company / driver id only — the row carries NO PII).
+-- This lets the customer apps show live tow status, ETA and "driver assigned"
+-- via RLS without exposing any other tenant's data.
+-- ---------------------------------------------------------------------
+drop policy if exists tow_jobs_customer_read on public.tow_jobs;
+create policy tow_jobs_customer_read on public.tow_jobs for select to authenticated
+  using (
+    exists (
+      select 1 from public.incidents i
+      where i.id = tow_jobs.incident_id and i.customer_user_id = auth.uid()
+    )
+  );

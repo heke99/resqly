@@ -31,6 +31,7 @@ function NewCaseInner() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [vehicleId, setVehicleId] = useState(requestedVehicle);
+  const [mode, setMode] = useState<"insurance" | "private">("insurance");
   const [subtype, setSubtype] = useState(isDamage ? DAMAGE_TYPES[0]! : TOW_PROBLEMS[0]!);
   const [description, setDescription] = useState("");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -87,11 +88,15 @@ function NewCaseInner() {
     const accessToken = await token();
     if (!accessToken) { setStatus("not_authed"); return; }
     if (!vehicleId) { setStatus("Välj vilket fordon ärendet gäller."); return; }
-    if (!selectedPolicy) { setStatus("Koppla detta fordon till ett försäkringsbolag först."); return; }
+    const effectiveMode = isDamage ? "insurance" : mode;
+    if (effectiveMode === "insurance" && !selectedPolicy) {
+      setStatus("Koppla detta fordon till ett försäkringsbolag först, eller välj privat bärgning.");
+      return;
+    }
     const res = await fetch("/api/customer/cases", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ vehicle_id: vehicleId, type, subtype, description, coords }),
+      body: JSON.stringify({ vehicle_id: vehicleId, type, subtype, description, coords, mode: effectiveMode }),
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) { setStatus(json.error ?? "Could not create case."); return; }
@@ -131,7 +136,7 @@ function NewCaseInner() {
         <h1 style={{ fontSize: 24 }}>Ärende skapat</h1>
         <div className="status-card">
           <strong>{created.caseNumber}</strong>
-          <p className="vehicle-meta">{selectedVehicle?.registration_number} • {selectedPolicy?.insurance_companies?.name ?? "Försäkringspartner"}</p>
+          <p className="vehicle-meta">{selectedVehicle?.registration_number} • {selectedPolicy?.insurance_companies?.name ?? "Privat / direkt bärgning"}</p>
           {created.requiresBankid ? (
             <>
               <p>Detta ärende behöver BankID-verifieras innan det skickas vidare.</p>
@@ -168,6 +173,23 @@ function NewCaseInner() {
           })}
         </select>
         {selectedVehicle ? <p className="vehicle-meta">Detta ärende hanteras av {selectedPolicy?.insurance_companies?.name ?? "vald försäkringspartner saknas"}. <a href={`/insurances?vehicle=${selectedVehicle.id}`}>Byt/koppla försäkring</a></p> : null}
+
+        {!isDamage ? (
+          <div style={{ marginTop: 12 }}>
+            <label>Hur vill du bärga?</label>
+            <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
+              <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input type="radio" name="mode" checked={mode === "insurance"} onChange={() => setMode("insurance")} /> Via försäkring
+              </label>
+              <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input type="radio" name="mode" checked={mode === "private"} onChange={() => setMode("private")} /> Privat / direkt (utan försäkring)
+              </label>
+            </div>
+            {mode === "private" ? (
+              <p className="vehicle-meta">Privat bärgning skickas till bärgningsföretag som tar emot direkta uppdrag via marknadsplatsen.</p>
+            ) : null}
+          </div>
+        ) : null}
 
         <label htmlFor="subtype">{isDamage ? "Skadetyp" : "Problem"}</label>
         <select id="subtype" value={subtype} onChange={(e) => setSubtype(e.target.value)}>
