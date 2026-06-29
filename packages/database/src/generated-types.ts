@@ -32,6 +32,43 @@ export interface Database {
       };
       has_tenant_access: { Args: { p_tenant: string }; Returns: boolean };
       is_platform_admin: { Args: Record<string, never>; Returns: boolean };
+      tow_drivers_within_radius: {
+        Args: { p_lat: number; p_lng: number; p_radius_m: number; p_limit?: number };
+        Returns: Array<{
+          driver_id: string;
+          tow_company_id: string;
+          distance_m: number;
+          last_lat: number;
+          last_lng: number;
+        }>;
+      };
+      dispatch_eligible_candidates: {
+        Args: {
+          p_lat: number;
+          p_lng: number;
+          p_radius_m: number;
+          p_limit?: number;
+          p_payer_type?: string;
+          p_insurance_tenant_id?: string | null;
+          p_now?: string;
+        };
+        Returns: Array<{
+          driver_id: string;
+          tow_company_id: string;
+          duty_status: string;
+          is_online: boolean;
+          is_busy: boolean;
+          distance_m: number;
+          can_handle_ev: boolean;
+          has_flatbed: boolean;
+          can_tow_heavy_truck: boolean;
+          can_tow_motorcycle: boolean;
+        }>;
+      };
+      accept_tow_offer: {
+        Args: { p_job: string; p_driver: string };
+        Returns: Array<{ accepted: boolean; tow_company_id: string | null; reason: string | null }>;
+      };
     };
     Enums: Record<string, string>;
     CompositeTypes: Record<string, never>;

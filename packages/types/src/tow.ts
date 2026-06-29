@@ -70,8 +70,53 @@ export const towDriverSchema = z.object({
   rating: z.number().min(0).max(5).nullable().optional(),
   accept_rate: z.number().min(0).max(1).nullable().optional(),
   duty_status: dutyStatusSchema.default("off_duty"),
+  is_online: z.boolean().default(false),
+  status: z.enum(["active", "suspended", "inactive"]).default("active"),
 });
 export type TowDriver = z.infer<typeof towDriverSchema>;
+
+export const driverDeviceSchema = z.object({
+  id: uuidSchema,
+  driver_id: uuidSchema,
+  user_id: uuidSchema,
+  expo_push_token: z.string().min(1),
+  platform: z.enum(["ios", "android", "web", "unknown"]).default("unknown"),
+  device_name: z.string().nullable().optional(),
+  last_active_at: isoDateTimeSchema,
+  created_at: isoDateTimeSchema,
+  updated_at: isoDateTimeSchema,
+});
+export type DriverDevice = z.infer<typeof driverDeviceSchema>;
+
+export const towCompanyInsuranceAgreementSchema = z.object({
+  id: uuidSchema,
+  tow_company_id: uuidSchema,
+  insurance_tenant_id: uuidSchema,
+  status: z.enum(["active", "pending", "suspended", "terminated"]).default("active"),
+  coverage_area: z.record(z.unknown()).default({}),
+  priority: z.number().int().default(100),
+  sla_minutes: z.number().int().positive().default(45),
+  pricing_model: z.string().default("standard"),
+  active_from: isoDateTimeSchema,
+  active_to: isoDateTimeSchema.nullable().optional(),
+  created_at: isoDateTimeSchema,
+  updated_at: isoDateTimeSchema,
+});
+export type TowCompanyInsuranceAgreement = z.infer<typeof towCompanyInsuranceAgreementSchema>;
+
+export const towCompanyMarketplaceSettingsSchema = z.object({
+  id: uuidSchema,
+  tow_company_id: uuidSchema,
+  accepts_direct_orders: z.boolean().default(false),
+  private_customer_enabled: z.boolean().default(false),
+  coverage_area: z.record(z.unknown()).default({}),
+  min_price_minor: z.number().int().nonnegative().default(0),
+  currency: z.string().default("SEK"),
+  active: z.boolean().default(true),
+  created_at: isoDateTimeSchema,
+  updated_at: isoDateTimeSchema,
+});
+export type TowCompanyMarketplaceSettings = z.infer<typeof towCompanyMarketplaceSettingsSchema>;
 
 export const towJobSchema = z.object({
   id: uuidSchema,
@@ -98,6 +143,13 @@ export const towJobOfferSchema = z.object({
   status: offerStatusSchema.default("pending"),
   rank: z.number().int().nonnegative(),
   expires_at: isoDateTimeSchema,
+  offered_at: isoDateTimeSchema.optional(),
+  accepted_at: isoDateTimeSchema.nullable().optional(),
+  rejected_at: isoDateTimeSchema.nullable().optional(),
+  rejection_reason: z.string().nullable().optional(),
+  push_status: z.enum(["pending", "sent", "failed", "skipped"]).default("pending"),
+  push_sent_at: isoDateTimeSchema.nullable().optional(),
+  push_attempts: z.number().int().nonnegative().default(0),
   created_at: isoDateTimeSchema,
 });
 export type TowJobOffer = z.infer<typeof towJobOfferSchema>;
