@@ -1,13 +1,19 @@
 import { allocateCaseNumber, type AppSupabaseClient } from "@resqly/database";
-import { findDriversWithinRadius } from "@resqly/geodata";
 import type { Coordinate, IncidentStatus, TowJobStatus } from "@resqly/types";
 import type { DispatchCandidate } from "@resqly/dispatch";
 import type {
+  AcceptOfferResult,
   ApiClientRecord,
   ApiRepo,
   CustomerContact,
+  DispatchCandidateOptions,
+  DriverDeviceRecord,
+  DriverProfileRecord,
   EtaSnapshotRecord,
   IncidentRecord,
+  OfferRecord,
+  RoleContext,
+  RoleContextTenant,
   TenantRecord,
   TenantSettingsRecord,
   TowJobRecord,
@@ -211,14 +217,245 @@ export class SupabaseRepo implements ApiRepo {
     pickup: Coordinate,
     radiusKm: number,
     limit: number,
+    opts: DispatchCandidateOptions,
   ): Promise<DispatchCandidate[]> {
-    const drivers = await findDriversWithinRadius(this.db, pickup, radiusKm, limit);
-    return drivers.map((d) => ({
-      driverId: d.driverId,
-      towCompanyId: d.towCompanyId,
-      dutyStatus: "on_duty" as const,
-      distanceMeters: d.distanceMeters,
+    const { data, error } = await this.db.rpc("dispatch_eligible_candidates" as never, {
+      p_lat: pickup.lat,
+      p_lng: pickup.lng,
+      p_radius_m: radiusKm * 1000,
+      p_limit: limit,
+      p_payer_type: opts.payerType,
+      p_insurance_tenant_id: opts.insuranceTenantId ?? null,
+    } as never);
+    if (error) throw new Error(error.message);
+    const rows =
+      (data as Array<{
+        driver_id: string;
+        tow_company_id: string;
+        duty_status: string;
+        is_online: boolean;
+        is_busy: boolean;
+        distance_m: number;
+        can_handle_ev: boolean;
+        has_flatbed: boolean;
+        can_tow_heavy_truck: boolean;
+        can_tow_motorcycle: boolean;
+      }> | null) ?? [];
+    return rows.map((d) => ({
+      driverId: d.driver_id,
+      towCompanyId: d.tow_company_id,
+      dutyStatus: (d.duty_status as DispatchCandidate["dutyStatus"]) ?? "on_duty",
+      distanceMeters: d.distance_m,
+      isOnline: d.is_online,
+      isBusy: d.is_busy,
+      capabilities: {
+        canHandleEv: d.can_handle_ev,
+        hasFlatbed: d.has_flatbed,
+        canTowHeavy: d.can_tow_heavy_truck,
+        canTowMotorcycle: d.can_tow_motorcycle,
+      },
     }));
+  }
+
+  async acceptOffer(jobId: string, driverId: string): Promise<AcceptOfferResult> {
+    const { data, error } = await this.db.rpc("accept_tow_offer" as never, {
+      p_job: jobId,
+      p_driver: driverId,
+    } as never);
+    if (error) throw new Error(error.message);
+    const row = Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) : undefined;
+    return {
+      accepted: Boolean(row?.accepted),
+      towCompanyId: (row?.tow_company_id as string | null) ?? null,
+      reason: (row?.reason as string | null) ?? null,
+    };
+  }
+
+  async getOfferById(id: string): Promise<OfferRecord | null> {
+    const { data } = await this.table("tow_job_offers")
+      .select("id, tow_job_id, driver_id, tow_company_id, tenant_id, status, rank, expires_at")
+      .eq("id", id)
+      .maybeSingle();
+    return (data as OfferRecord | null) ?? null;
+  }
+
+  async rejectOffer(jobId: string, driverId: string, reason: string | null): Promise<void> {
+    await this.table("tow_job_offers")
+      .update({ status: "rejected", rejected_at: new Date().toISOString(), rejection_reason: reason } as never)
+      .eq("tow_job_id", jobId)
+      .eq("driver_id", driverId);
+  }
+
+  async getDriverProfile(driverId: string): Promise<DriverProfileRecord | null> {
+    const { data } = await this.table("tow_drivers")
+      .select("id, tenant_id, tow_company_id, user_id, full_name, is_online, status, duty_status")
+      .eq("id", driverId)
+      .maybeSingle();
+    return (data as DriverProfileRecord | null) ?? null;
+  }
+
+  async setDriverOnline(driverId: string, online: boolean): Promise<void> {
+    await this.table("tow_drivers")
+      .update({
+        is_online: online,
+        duty_status: online ? "on_duty" : "off_duty",
+        last_seen_at: new Date().toISOString(),
+      } as never)
+      .eq("id", driverId);
+  }
+
+  async updateDriverLocation(driverId: string, lat: number, lng: number): Promise<void> {
+    await this.table("tow_drivers")
+      .update({ last_lat: lat, last_lng: lng, last_seen_at: new Date().toISOString() } as never)
+      .eq("id", driverId);
+  }
+
+  async upsertDriverDevice(
+    driverId: string,
+    userId: string,
+    device: { expo_push_token: string; platform: string; device_name?: string | null },
+  ): Promise<void> {
+    await this.table("driver_devices").upsert(
+      {
+        driver_id: driverId,
+        user_id: userId,
+        expo_push_token: device.expo_push_token,
+        platform: device.platform,
+        device_name: device.device_name ?? null,
+        last_active_at: new Date().toISOString(),
+      } as never,
+      { onConflict: "expo_push_token" } as never,
+    );
+  }
+
+  async listDriverOffers(driverId: string) {
+    const { data } = await this.table("tow_job_offers")
+      .select("id, tow_job_id, status, rank, expires_at")
+      .eq("driver_id", driverId)
+      .eq("status", "pending")
+      .order("rank", { ascending: true });
+    const offers = (data as Array<{ id: string; tow_job_id: string; status: string; rank: number; expires_at: string }> | null) ?? [];
+    const result = [] as Awaited<ReturnType<ApiRepo["listDriverOffers"]>>;
+    for (const o of offers) {
+      const { data: job } = await this.table("tow_jobs")
+        .select("priority, payer_type, incident_id")
+        .eq("id", o.tow_job_id)
+        .maybeSingle();
+      const j = job as { priority: string; payer_type: string; incident_id: string } | null;
+      let problemType: string | null = null;
+      let approxArea: string | null = null;
+      if (j) {
+        const { data: inc } = await this.table("incidents")
+          .select("problem_type")
+          .eq("id", j.incident_id)
+          .maybeSingle();
+        problemType = (inc as { problem_type: string | null } | null)?.problem_type ?? null;
+        const { data: loc } = await this.table("incident_locations")
+          .select("lat, lng")
+          .eq("incident_id", j.incident_id)
+          .eq("kind", "pickup")
+          .maybeSingle();
+        const l = loc as { lat: number; lng: number } | null;
+        approxArea = l ? `${l.lat.toFixed(1)}, ${l.lng.toFixed(1)}` : null;
+      }
+      result.push({
+        offer_id: o.id,
+        tow_job_id: o.tow_job_id,
+        status: o.status,
+        rank: o.rank,
+        expires_at: o.expires_at,
+        priority: j?.priority ?? "normal",
+        payer_type: j?.payer_type ?? "insurance_company",
+        problem_type: problemType,
+        approx_area: approxArea,
+        distance_meters: null,
+      });
+    }
+    return result;
+  }
+
+  async listDriverDevices(driverId: string): Promise<DriverDeviceRecord[]> {
+    const { data } = await this.table("driver_devices")
+      .select("expo_push_token, platform")
+      .eq("driver_id", driverId);
+    return (data as DriverDeviceRecord[] | null) ?? [];
+  }
+
+  async markOfferPush(jobId: string, driverId: string, status: string, error?: string | null): Promise<void> {
+    const patch: Record<string, unknown> = { push_status: status };
+    if (status === "sent") patch.push_sent_at = new Date().toISOString();
+    if (error) patch.push_error = error;
+    await this.table("tow_job_offers").update(patch as never).eq("tow_job_id", jobId).eq("driver_id", driverId);
+  }
+
+  async loadRoleContext(userId: string): Promise<RoleContext | null> {
+    const { data: profile } = await this.table("user_profiles")
+      .select("id, email, full_name, is_platform_admin")
+      .eq("id", userId)
+      .maybeSingle();
+    if (!profile) return null;
+    const p = profile as { id: string; email: string | null; full_name: string | null; is_platform_admin: boolean };
+
+    const { data: memberships } = await this.table("tenant_users")
+      .select("tenant_id, status")
+      .eq("user_id", userId)
+      .eq("status", "active");
+    const tenantIds = ((memberships as Array<{ tenant_id: string }> | null) ?? []).map((m) => m.tenant_id);
+
+    const tenants: RoleContextTenant[] = [];
+    for (const tid of tenantIds) {
+      const { data: t } = await this.table("tenants").select("id, type, name").eq("id", tid).maybeSingle();
+      const tt = t as { id: string; type: string; name: string } | null;
+      if (!tt) continue;
+      const { data: roleRows } = await this.table("user_roles")
+        .select("role_key")
+        .eq("user_id", userId)
+        .eq("tenant_id", tid);
+      const roles = ((roleRows as Array<{ role_key: string }> | null) ?? []).map((r) => r.role_key);
+      tenants.push({ tenant_id: tt.id, tenant_type: tt.type, tenant_name: tt.name, roles });
+    }
+
+    const { data: driverRow } = await this.table("tow_drivers")
+      .select("id, tow_company_id, is_online, status")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const driver = driverRow
+      ? {
+          driver_id: (driverRow as { id: string }).id,
+          tow_company_id: (driverRow as { tow_company_id: string }).tow_company_id,
+          is_online: (driverRow as { is_online: boolean }).is_online,
+          status: (driverRow as { status: string }).status,
+        }
+      : null;
+
+    const { count: vehicleCount } = await this.table("vehicles")
+      .select("id", { count: "exact", head: true } as never)
+      .eq("owner_user_id", userId);
+    const { count: incidentCount } = await this.table("incidents")
+      .select("id", { count: "exact", head: true } as never)
+      .eq("customer_user_id", userId);
+    const isCustomer = (vehicleCount ?? 0) > 0 || (incidentCount ?? 0) > 0;
+
+    const insuranceAdmin = tenants.some((t) => t.tenant_type === "insurance_company");
+    const towAdmin = tenants.some((t) => t.tenant_type === "tow_company");
+
+    return {
+      user_id: p.id,
+      email: p.email,
+      full_name: p.full_name,
+      is_platform_admin: p.is_platform_admin,
+      is_customer: isCustomer,
+      driver,
+      tenants,
+      capabilities: {
+        customer: isCustomer,
+        driver: driver != null,
+        insurance_admin: insuranceAdmin,
+        tow_admin: towAdmin,
+        tenant_user: tenants.length > 0,
+        superadmin: p.is_platform_admin,
+      },
+    };
   }
 
   async createCustomerShare(row: Record<string, unknown>) {

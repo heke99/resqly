@@ -9,6 +9,8 @@ export interface AppConfig {
   encryptionKey: string;
   rateLimiter?: RateLimiter;
   driverAuth?: { getUserIdFromAccessToken(token: string): Promise<string | null> };
+  /** Expo push delivery configuration (disabled in tests by default). */
+  push?: { enabled?: boolean; url?: string; fetchImpl?: typeof fetch };
 }
 
 export interface ApiContext {
@@ -18,6 +20,8 @@ export interface ApiContext {
   apiClientId: string;
   requestId: string;
   ip: string | null;
+  /** The authenticated end-user id (from the user/driver access token), if any. */
+  userId?: string | null;
   driverUserId?: string | null;
   driverId?: string | null;
   idempotencyKey?: string | null;

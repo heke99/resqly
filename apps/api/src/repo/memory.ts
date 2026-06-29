@@ -2,16 +2,34 @@ import { newId } from "@resqly/utils";
 import { formatCaseNumber } from "@resqly/utils";
 import type { DispatchCandidate } from "@resqly/dispatch";
 import type {
+  AcceptOfferResult,
   ApiClientRecord,
   ApiRepo,
   CustomerContact,
+  DriverDeviceRecord,
+  DriverProfileRecord,
   EtaSnapshotRecord,
   IncidentRecord,
+  OfferRecord,
+  RoleContext,
   TenantRecord,
   TenantSettingsRecord,
   TowJobRecord,
 } from "./types";
 import type { IncidentStatus, TowJobStatus } from "@resqly/types";
+
+interface MemoryOffer {
+  id: string;
+  tow_job_id: string;
+  driver_id: string;
+  tow_company_id: string | null;
+  tenant_id: string | null;
+  status: string;
+  rank: number;
+  expires_at: string;
+  push_status: string;
+  rejection_reason?: string | null;
+}
 
 const DEFAULT_SETTINGS: TenantSettingsRecord = {
   default_dispatch_strategy: "eta_first",
@@ -33,7 +51,7 @@ export class MemoryRepo implements ApiRepo {
   incidents = new Map<string, IncidentRecord>();
   contacts = new Map<string, CustomerContact>(); // keyed by incident id
   towJobs = new Map<string, TowJobRecord>();
-  offers: Array<{ tow_job_id: string; driver_id: string; status: string }> = [];
+  offers: MemoryOffer[] = [];
   customerShares: Array<Record<string, unknown>> = [];
   etaSnapshots: EtaSnapshotRecord[] = [];
   completionReports: Array<Record<string, unknown>> = [];
@@ -42,6 +60,9 @@ export class MemoryRepo implements ApiRepo {
   apiRequestLogs: Array<Record<string, unknown>> = [];
   candidates: DispatchCandidate[] = [];
   driverUsers = new Map<string, string>(); // userId -> driverId
+  driverProfiles = new Map<string, DriverProfileRecord>(); // driverId -> profile
+  devices: Array<{ driver_id: string; user_id: string; expo_push_token: string; platform: string }> = [];
+  roleContexts = new Map<string, RoleContext>(); // userId -> context
   private seq = new Map<string, number>();
 
   // --- test fixtures (not part of ApiRepo) ---
@@ -64,6 +85,24 @@ export class MemoryRepo implements ApiRepo {
   }
   seedContact(incidentId: string, contact: CustomerContact) {
     this.contacts.set(incidentId, contact);
+  }
+  seedDriverProfile(p: Partial<DriverProfileRecord> & { id: string }): DriverProfileRecord {
+    const rec: DriverProfileRecord = {
+      id: p.id,
+      tenant_id: p.tenant_id ?? "tc-tenant",
+      tow_company_id: p.tow_company_id ?? "tc1",
+      user_id: p.user_id ?? null,
+      full_name: p.full_name ?? "Driver",
+      is_online: p.is_online ?? false,
+      status: p.status ?? "active",
+      duty_status: p.duty_status ?? "off_duty",
+    };
+    this.driverProfiles.set(rec.id, rec);
+    if (rec.user_id) this.driverUsers.set(rec.user_id, rec.id);
+    return rec;
+  }
+  seedRoleContext(ctx: RoleContext) {
+    this.roleContexts.set(ctx.user_id, ctx);
   }
 
   // --- ApiRepo ---
@@ -164,18 +203,127 @@ export class MemoryRepo implements ApiRepo {
   async createOffers(rows: Array<Record<string, unknown>>) {
     for (const r of rows) {
       this.offers.push({
+        id: newId(),
         tow_job_id: r.tow_job_id as string,
         driver_id: r.driver_id as string,
+        tow_company_id: (r.tow_company_id as string | undefined) ?? null,
+        tenant_id: (r.tenant_id as string | undefined) ?? null,
         status: "pending",
+        rank: (r.rank as number | undefined) ?? 0,
+        expires_at: (r.expires_at as string | undefined) ?? new Date(Date.now() + 120_000).toISOString(),
+        push_status: "pending",
       });
     }
   }
   async getOfferForDriver(jobId: string, driverId: string) {
-    return this.offers.find((o) => o.tow_job_id === jobId && o.driver_id === driverId) ?? null;
+    const o = this.offers.find((x) => x.tow_job_id === jobId && x.driver_id === driverId);
+    return o ? { status: o.status } : null;
   }
   async setOfferStatus(jobId: string, driverId: string, status: string) {
     const o = this.offers.find((x) => x.tow_job_id === jobId && x.driver_id === driverId);
     if (o) o.status = status;
+  }
+  async acceptOffer(jobId: string, driverId: string): Promise<AcceptOfferResult> {
+    const job = this.towJobs.get(jobId);
+    if (!job) return { accepted: false, towCompanyId: null, reason: "job_not_found" };
+    if (job.driver_id && job.driver_id !== driverId) {
+      return { accepted: false, towCompanyId: job.tow_company_id ?? null, reason: "already_assigned" };
+    }
+    const offer = this.offers.find((o) => o.tow_job_id === jobId && o.driver_id === driverId);
+    if (!offer || offer.status !== "pending") {
+      return { accepted: false, towCompanyId: job.tow_company_id ?? null, reason: "no_pending_offer" };
+    }
+    offer.status = "accepted";
+    for (const o of this.offers) {
+      if (o.tow_job_id === jobId && o.id !== offer.id && o.status === "pending") o.status = "cancelled";
+    }
+    job.status = "accepted";
+    job.driver_id = driverId;
+    job.tow_company_id = offer.tow_company_id ?? job.tow_company_id;
+    return { accepted: true, towCompanyId: offer.tow_company_id ?? job.tow_company_id ?? null, reason: null };
+  }
+  async getOfferById(id: string): Promise<OfferRecord | null> {
+    const o = this.offers.find((x) => x.id === id);
+    if (!o) return null;
+    return {
+      id: o.id,
+      tow_job_id: o.tow_job_id,
+      driver_id: o.driver_id,
+      tow_company_id: o.tow_company_id ?? "",
+      tenant_id: o.tenant_id ?? "",
+      status: o.status,
+      rank: o.rank,
+      expires_at: o.expires_at,
+    };
+  }
+  async rejectOffer(jobId: string, driverId: string, reason: string | null) {
+    const o = this.offers.find((x) => x.tow_job_id === jobId && x.driver_id === driverId);
+    if (o) {
+      o.status = "rejected";
+      o.rejection_reason = reason;
+    }
+  }
+  async getDriverProfile(driverId: string) {
+    return this.driverProfiles.get(driverId) ?? null;
+  }
+  async setDriverOnline(driverId: string, online: boolean) {
+    const p = this.driverProfiles.get(driverId);
+    if (p) {
+      p.is_online = online;
+      p.duty_status = online ? "on_duty" : "off_duty";
+    }
+  }
+  async updateDriverLocation(driverId: string, lat: number, lng: number) {
+    void driverId;
+    void lat;
+    void lng;
+  }
+  async upsertDriverDevice(
+    driverId: string,
+    userId: string,
+    device: { expo_push_token: string; platform: string; device_name?: string | null },
+  ) {
+    const existing = this.devices.find((d) => d.expo_push_token === device.expo_push_token);
+    if (existing) {
+      existing.driver_id = driverId;
+      existing.user_id = userId;
+      existing.platform = device.platform;
+    } else {
+      this.devices.push({ driver_id: driverId, user_id: userId, expo_push_token: device.expo_push_token, platform: device.platform });
+    }
+  }
+  async listDriverOffers(driverId: string) {
+    return this.offers
+      .filter((o) => o.driver_id === driverId && o.status === "pending")
+      .sort((a, b) => a.rank - b.rank)
+      .map((o) => {
+        const job = this.towJobs.get(o.tow_job_id);
+        const incident = job ? this.incidents.get(job.incident_id) : null;
+        return {
+          offer_id: o.id,
+          tow_job_id: o.tow_job_id,
+          status: o.status,
+          rank: o.rank,
+          expires_at: o.expires_at,
+          priority: job?.priority ?? "normal",
+          payer_type: job?.payer_type ?? "insurance_company",
+          problem_type: incident?.problem_type ?? null,
+          approx_area: null,
+          distance_meters: null,
+        };
+      });
+  }
+  async listDriverDevices(driverId: string): Promise<DriverDeviceRecord[]> {
+    return this.devices
+      .filter((d) => d.driver_id === driverId)
+      .map((d) => ({ expo_push_token: d.expo_push_token, platform: d.platform }));
+  }
+  async markOfferPush(jobId: string, driverId: string, status: string) {
+    const o = this.offers.find((x) => x.tow_job_id === jobId && x.driver_id === driverId);
+    if (o) o.push_status = status;
+  }
+  async loadRoleContext(userId: string): Promise<RoleContext | null> {
+    return this.roleContexts.get(userId) ?? null;
   }
   async getDispatchCandidates() {
     return this.candidates;
