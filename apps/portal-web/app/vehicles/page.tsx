@@ -1,7 +1,8 @@
-import { Button, Card, DataTable, PageHeader, type Column } from "@resqly/web-kit";
+import { Button, Card, DataTable, PageHeader, StatusChip, type Column } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
 import { listTowVehicles } from "../lib/data";
 import { createTowVehicle } from "../lib/actions";
+import { NoTenant, WrongTenantType } from "../lib/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -9,9 +10,9 @@ type Row = Record<string, unknown>;
 
 const columns: Column<Row>[] = [
   { key: "reg", header: "Reg #", render: (r) => String(r.registration_number ?? "") },
-  { key: "type", header: "Type", render: (r) => String(r.vehicle_type ?? "") },
+  { key: "type", header: "Type", render: (r) => String(r.vehicle_type ?? "").replaceAll("_", " ") },
   { key: "weight", header: "Max kg", render: (r) => String(r.max_weight_kg ?? "-") },
-  { key: "status", header: "Status", render: (r) => String(r.status ?? "") },
+  { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "active")} /> },
 ];
 
 const VEHICLE_TYPES = [
@@ -33,7 +34,9 @@ export default async function VehiclesPage({
 }) {
   const sp = await searchParams;
   const tenant = await getActiveTenant(sp);
-  const vehicles = tenant ? await listTowVehicles(tenant.id) : [];
+  if (!tenant) return <NoTenant />;
+  if (tenant.type !== "tow_company") return <WrongTenantType need="tow_company" />;
+  const vehicles = await listTowVehicles(tenant.id);
   return (
     <div>
       <PageHeader title="Tow vehicles" subtitle="Fleet & capabilities" />
@@ -42,7 +45,7 @@ export default async function VehiclesPage({
         <Card>
           <h3 style={{ marginTop: 0 }}>Add tow vehicle</h3>
           <form action={createTowVehicle}>
-            <input type="hidden" name="tenant_id" value={tenant?.id ?? ""} />
+            <input type="hidden" name="tenant_id" value={tenant.id} />
             <label htmlFor="registration_number">Registration number</label>
             <input id="registration_number" name="registration_number" required />
             <label htmlFor="vehicle_type">Type</label>

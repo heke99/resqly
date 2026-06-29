@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import { AppShell, Sidebar, ThemeRoot } from "@resqly/web-kit";
+import { getOptionalActiveTenant } from "./lib/auth";
+import { navForTenantType } from "./lib/nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,23 +10,22 @@ export const metadata: Metadata = {
   description: "Insurance and towing company portal",
 };
 
-const NAV = [
-  { href: "/", label: "Dashboard" },
-  { href: "/cases", label: "Cases / claims" },
-  { href: "/jobs", label: "Tow / dispatch" },
-  { href: "/drivers", label: "Drivers" },
-  { href: "/vehicles", label: "Tow vehicles" },
-  { href: "/settings", label: "White-label settings" },
-  { href: "/integrations", label: "API & webhooks" },
-  { href: "/roles", label: "Users & roles" },
-];
+export const dynamic = "force-dynamic";
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const tenant = await getOptionalActiveTenant();
+  const nav = navForTenantType(tenant?.type);
+  const brand =
+    tenant?.type === "tow_company"
+      ? "Resqly · Tow"
+      : tenant?.type === "insurance_company"
+        ? "Resqly · Insurance"
+        : "Resqly Portal";
   return (
     <html lang="en">
       <body>
         <ThemeRoot>
-          <AppShell sidebar={<Sidebar brand="Resqly Portal" items={NAV} />}>{children}</AppShell>
+          <AppShell sidebar={<Sidebar brand={brand} items={nav} />}>{children}</AppShell>
         </ThemeRoot>
       </body>
     </html>

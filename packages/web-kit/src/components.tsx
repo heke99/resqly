@@ -117,6 +117,130 @@ export function Badge({ children }: { children: ReactNode }) {
   );
 }
 
+type ChipTone = "neutral" | "info" | "success" | "warning" | "danger";
+
+const CHIP_TONES: Record<ChipTone, { bg: string; fg: string }> = {
+  neutral: { bg: "rgba(100,116,139,0.14)", fg: "#475569" },
+  info: { bg: "rgba(37,99,235,0.14)", fg: "#1d4ed8" },
+  success: { bg: "rgba(22,163,74,0.16)", fg: "#15803d" },
+  warning: { bg: "rgba(217,119,6,0.16)", fg: "#b45309" },
+  danger: { bg: "rgba(220,38,38,0.16)", fg: "#b91c1c" },
+};
+
+/** Maps a status-ish string to a semantic tone for consistent status chips. */
+export function statusTone(status: string): ChipTone {
+  const s = status.toLowerCase();
+  if (["completed", "invoiced", "closed", "accepted", "active", "delivered", "sent", "verified", "approved"].includes(s))
+    return "success";
+  if (["manual_review", "more_info_required", "awaiting_bankid", "awaiting_handler", "pending", "offered", "matching"].includes(s))
+    return "warning";
+  if (["cancelled", "rejected", "failed", "expired", "suspended", "terminated"].includes(s)) return "danger";
+  if (["driver_en_route", "driver_arrived", "transporting", "vehicle_loaded", "in_progress", "submitted", "received"].includes(s))
+    return "info";
+  return "neutral";
+}
+
+export function StatusChip({ status, tone }: { status: string; tone?: ChipTone }) {
+  const t = CHIP_TONES[tone ?? statusTone(status)];
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "2px 10px",
+        borderRadius: 999,
+        background: t.bg,
+        color: t.fg,
+        fontSize: 12,
+        fontWeight: 600,
+        textTransform: "capitalize",
+      }}
+    >
+      {status.replaceAll("_", " ")}
+    </span>
+  );
+}
+
+/** KPI grid that lays out StatCards responsively. */
+export function KpiGrid({ children, min = 180 }: { children: ReactNode; min?: number }) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(auto-fill, minmax(${min}px, 1fr))`,
+        gap: 16,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** A GET filter bar; children are inputs/selects with `name` attributes. */
+export function Filters({ children, action }: { children: ReactNode; action?: string }) {
+  return (
+    <Card style={{ marginBottom: 20 }}>
+      <form
+        method="get"
+        action={action}
+        style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}
+      >
+        {children}
+        <button
+          type="submit"
+          style={{
+            background: "var(--rs-color-primary)",
+            color: "var(--rs-color-on-primary)",
+            border: "none",
+            borderRadius: "var(--rs-radius-base)",
+            padding: "9px 16px",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Apply
+        </button>
+      </form>
+    </Card>
+  );
+}
+
+export function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, opacity: 0.8 }}>
+      {label}
+      {children}
+    </label>
+  );
+}
+
+/** Simple horizontal bar breakdown (no external chart dependency). */
+export function Bars({ data }: { data: Array<{ label: string; value: number }> }) {
+  const max = Math.max(1, ...data.map((d) => d.value));
+  if (data.length === 0) {
+    return <p style={{ opacity: 0.6, fontSize: 14 }}>No data for this period.</p>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {data.map((d) => (
+        <div key={d.label} style={{ display: "grid", gridTemplateColumns: "160px 1fr 48px", gap: 12, alignItems: "center" }}>
+          <span style={{ fontSize: 13, textTransform: "capitalize" }}>{d.label.replaceAll("_", " ")}</span>
+          <span style={{ background: "rgba(0,0,0,0.06)", borderRadius: 999, height: 10, overflow: "hidden" }}>
+            <span
+              style={{
+                display: "block",
+                height: "100%",
+                width: `${Math.round((d.value / max) * 100)}%`,
+                background: "var(--rs-color-primary)",
+              }}
+            />
+          </span>
+          <span style={{ fontSize: 13, fontWeight: 600, textAlign: "right" }}>{d.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function EmptyState({ title, hint }: { title: string; hint?: string }) {
   return (
     <Card style={{ textAlign: "center", padding: 48 }}>

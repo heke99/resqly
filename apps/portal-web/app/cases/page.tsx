@@ -1,6 +1,7 @@
-import { Card, DataTable, PageHeader, type Column } from "@resqly/web-kit";
+import { Card, DataTable, PageHeader, StatusChip, type Column } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
 import { listIncidents } from "../lib/data";
+import { NoTenant, WrongTenantType } from "../lib/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +13,10 @@ const columns: Column<Row>[] = [
     header: "Case #",
     render: (r) => <a href={`/cases/${r.id}`}>{String(r.case_number ?? r.id)}</a>,
   },
-  { key: "type", header: "Type", render: (r) => String(r.type ?? "") },
-  { key: "status", header: "Status", render: (r) => String(r.status ?? "") },
+  { key: "type", header: "Type", render: (r) => String(r.type ?? "").replaceAll("_", " ") },
+  { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "")} /> },
   { key: "bankid", header: "BankID", render: (r) => (r.bankid_verified ? "Verified" : "Pending") },
-  { key: "created_at", header: "Created", render: (r) => String(r.created_at ?? "") },
+  { key: "created_at", header: "Created", render: (r) => String(r.created_at ?? "").slice(0, 16).replace("T", " ") },
 ];
 
 export default async function CasesPage({
@@ -25,8 +26,10 @@ export default async function CasesPage({
 }) {
   const sp = await searchParams;
   const tenant = await getActiveTenant(sp);
+  if (!tenant) return <NoTenant />;
+  if (tenant.type !== "insurance_company") return <WrongTenantType need="insurance_company" />;
   const q = typeof sp.q === "string" ? sp.q : undefined;
-  const incidents = tenant ? await listIncidents(tenant.id, q) : [];
+  const incidents = await listIncidents(tenant.id, q);
 
   return (
     <div>

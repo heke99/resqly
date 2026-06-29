@@ -72,3 +72,32 @@ export async function requirePortalTenant(tenantId?: string | null): Promise<{ d
   if (!tenant) redirect("/login?error=no_tenant_access");
   return { db, userId, tenant };
 }
+
+/**
+ * Best-effort active tenant for layout/navigation. Never redirects (so it is
+ * safe on /login and /set-password). Returns null when unauthenticated.
+ */
+export async function getOptionalActiveTenant(): Promise<PortalTenant | null> {
+  try {
+    const accessToken = await token();
+    if (!accessToken) return null;
+    const db = getServiceClient();
+    if (!db) return null;
+    const { data, error } = await db.auth.getUser(accessToken);
+    if (error || !data.user) return null;
+    const { data: memberships } = await db
+      .from("tenant_users" as never)
+      .select("tenant_id")
+      .eq("user_id", data.user.id)
+      .eq("status", "active");
+    const ids = ((memberships as Array<{ tenant_id: string }> | null) ?? []).map((m) => m.tenant_id);
+    if (ids.length === 0) return null;
+    const { data: tenants } = await db
+      .from("tenants" as never)
+      .select("id, name, slug, type, case_number_prefix")
+      .in("id", ids);
+    return ((tenants as PortalTenant[] | null) ?? [])[0] ?? null;
+  } catch {
+    return null;
+  }
+}

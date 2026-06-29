@@ -109,3 +109,133 @@ export async function getPortalDashboardData(tenantId: string): Promise<PortalDa
   ]);
   return { incidents, jobs, drivers, towVehicles, apiClients, webhooks };
 }
+
+// ---------------------------------------------------------------------------
+// Tow-company scoped helpers.
+//
+// tow_jobs / tow_job_offers carry the INSURER tenant_id, not the tow company's
+// tenant. A tow company sees its work via tow_company_id. We resolve the tow
+// company id from the tenant (tow_companies has a unique tenant_id).
+// ---------------------------------------------------------------------------
+export async function getTowCompanyId(tenantId: string): Promise<string | null> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("tow_companies" as never)
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  return (data as { id: string } | null)?.id ?? null;
+}
+
+async function byCompany(table: string, tenantId: string, limit = 200): Promise<Row[]> {
+  const companyId = await getTowCompanyId(tenantId);
+  if (!companyId) return [];
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from(table as never)
+    .select("*")
+    .eq("tow_company_id", companyId)
+    .limit(limit);
+  return (data as Row[] | null) ?? [];
+}
+
+export const listCompanyJobs = (tenantId: string) => byCompany("tow_jobs", tenantId);
+export const listCompanyOffers = (tenantId: string) => byCompany("tow_job_offers", tenantId);
+export const listCompletionReports = (tenantId: string) => byCompany("tow_job_completion_reports", tenantId);
+export const listInvoices = (tenantId: string) => byCompany("tow_job_invoices", tenantId);
+export const listAvailabilityWindows = (tenantId: string) => selectAll("tow_availability_windows", tenantId);
+
+export async function listAgreements(tenantId: string): Promise<Row[]> {
+  const companyId = await getTowCompanyId(tenantId);
+  if (!companyId) return [];
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("tow_company_insurance_agreements" as never)
+    .select("*")
+    .eq("tow_company_id", companyId)
+    .order("created_at", { ascending: false });
+  return (data as Row[] | null) ?? [];
+}
+
+export async function getMarketplaceSettings(tenantId: string): Promise<Row | null> {
+  const companyId = await getTowCompanyId(tenantId);
+  if (!companyId) return null;
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("tow_company_marketplace_settings" as never)
+    .select("*")
+    .eq("tow_company_id", companyId)
+    .maybeSingle();
+  return (data as Row | null) ?? null;
+}
+
+// --- Damage claims / SLA / partners (insurance side) ---
+export const listClaims = (tenantId: string) => selectAll("insurance_claims", tenantId);
+
+export async function listInsuranceTowJobs(tenantId: string): Promise<Row[]> {
+  // For an insurer tenant, tow_jobs.tenant_id IS the insurer tenant.
+  return selectAll("tow_jobs", tenantId);
+}
+
+// --- Statistics views ---
+export async function getInsuranceDashboardStats(tenantId: string): Promise<Row | null> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("insurance_dashboard_stats" as never)
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  return (data as Row | null) ?? null;
+}
+
+export async function getTowCompanyDashboardStats(tenantId: string): Promise<Row | null> {
+  const companyId = await getTowCompanyId(tenantId);
+  if (!companyId) return null;
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("tow_company_dashboard_stats" as never)
+    .select("*")
+    .eq("tow_company_id", companyId)
+    .maybeSingle();
+  return (data as Row | null) ?? null;
+}
+
+export async function getDriverPerformance(tenantId: string): Promise<Row[]> {
+  const companyId = await getTowCompanyId(tenantId);
+  if (!companyId) return [];
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("driver_performance_stats" as never)
+    .select("*")
+    .eq("tow_company_id", companyId);
+  return (data as Row[] | null) ?? [];
+}
+
+export async function getInsurancePartnerPerformance(tenantId: string): Promise<Row[]> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("insurance_partner_performance_stats" as never)
+    .select("*")
+    .eq("insurance_tenant_id", tenantId);
+  return (data as Row[] | null) ?? [];
+}
+
+export async function listInsuranceTenants(tenantId: string): Promise<Array<{ id: string; name: string }>> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("tenants" as never)
+    .select("id, name")
+    .eq("type", "insurance_company")
+    .order("name");
+  return (data as Array<{ id: string; name: string }> | null) ?? [];
+}
+
+/** Group rows by a key into counts for breakdown charts. */
+export function countBy(rows: Row[], key: string): Array<{ label: string; value: number }> {
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    const k = String(r[key] ?? "unknown");
+    map.set(k, (map.get(k) ?? 0) + 1);
+  }
+  return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+}
