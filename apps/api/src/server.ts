@@ -19,6 +19,10 @@ function buildApp(): App {
       mockEnabled: boolEnv("BANKID_MOCK_ENABLED", true),
     },
     encryptionKey: optionalEnv("ENCRYPTION_KEY", "dev-pepper-change-me"),
+    push: {
+      enabled: boolEnv("EXPO_PUSH_ENABLED", true),
+      url: optionalEnv("EXPO_PUSH_URL") || undefined,
+    },
     driverAuth: {
       async getUserIdFromAccessToken(token: string) {
         const { data, error } = await db.auth.getUser(token);

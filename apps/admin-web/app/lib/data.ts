@@ -101,6 +101,49 @@ export async function listAuditLogs(): Promise<Array<Record<string, unknown>>> {
   return (data as Array<Record<string, unknown>> | null) ?? [];
 }
 
+export async function getPlatformStats(): Promise<Record<string, unknown> | null> {
+  const { db } = await requirePlatformAdmin();
+  const { data } = await db.from("superadmin_platform_stats" as never).select("*").maybeSingle();
+  return (data as Record<string, unknown> | null) ?? null;
+}
+
+export interface CompanyOption {
+  id: string;
+  name: string;
+  tenant_id: string;
+}
+
+export async function listTowCompanies(): Promise<CompanyOption[]> {
+  const { db } = await requirePlatformAdmin();
+  const { data } = await db.from("tow_companies" as never).select("id, name, tenant_id").order("name");
+  return (data as CompanyOption[] | null) ?? [];
+}
+
+export async function listInsuranceTenantOptions(): Promise<Array<{ id: string; name: string }>> {
+  const { db } = await requirePlatformAdmin();
+  const { data } = await db
+    .from("tenants" as never)
+    .select("id, name")
+    .eq("type", "insurance_company")
+    .order("name");
+  return (data as Array<{ id: string; name: string }> | null) ?? [];
+}
+
+export async function listAllAgreements(): Promise<Array<Record<string, unknown>>> {
+  const { db } = await requirePlatformAdmin();
+  const { data } = await db
+    .from("tow_company_insurance_agreements" as never)
+    .select("*")
+    .order("created_at", { ascending: false });
+  return (data as Array<Record<string, unknown>> | null) ?? [];
+}
+
+export async function listAllMarketplaceSettings(): Promise<Array<Record<string, unknown>>> {
+  const { db } = await requirePlatformAdmin();
+  const { data } = await db.from("tow_company_marketplace_settings" as never).select("*");
+  return (data as Array<Record<string, unknown>> | null) ?? [];
+}
+
 export async function getDashboardData(): Promise<AdminDashboardData> {
   const { db } = await requirePlatformAdmin();
   const tenants = await listTenants();

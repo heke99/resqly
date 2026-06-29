@@ -28,22 +28,42 @@ export function filterCandidates(
   candidates: DispatchCandidate[],
   request: DispatchRequest,
 ): DispatchCandidate[] {
+  // Availability: online (default true when unknown), not busy, on/ on-call.
   const available = candidates.filter(
-    (c) => !c.isBusy && (c.dutyStatus === "on_duty" || c.dutyStatus === "on_call"),
+    (c) =>
+      (c.isOnline ?? true) &&
+      !c.isBusy &&
+      (c.dutyStatus === "on_duty" || c.dutyStatus === "on_call"),
   );
   const capable = available.filter((c) => meetsRequirements(c, request.requirements));
 
+  // Coverage gate.
+  const inCoverage =
+    typeof request.maxDistanceMeters === "number"
+      ? capable.filter((c) => c.distanceMeters <= request.maxDistanceMeters!)
+      : capable;
+
+  // Hard eligibility gate (agreement set for insurance, marketplace set for
+  // direct). A candidate outside this set is never offered the job.
+  let eligible = inCoverage;
+  if (request.eligibleCompanyIds) {
+    const allow = new Set(request.eligibleCompanyIds);
+    eligible = inCoverage.filter((c) => allow.has(c.towCompanyId));
+  }
+
+  // For insurance cases, optionally prefer the contracted network for ranking,
+  // falling back to the broader (already-eligible) pool when allowed.
   if (request.payerType === "insurance_company" && request.preferredCompanyIds?.length) {
-    const preferred = capable.filter((c) =>
+    const preferred = eligible.filter((c) =>
       request.preferredCompanyIds!.includes(c.towCompanyId),
     );
     if (preferred.length > 0) return preferred;
     if (request.allowMarketplaceFallback || request.strategy === "fallback_marketplace") {
-      return capable;
+      return eligible;
     }
     return [];
   }
-  return capable;
+  return eligible;
 }
 
 const COMPARATORS: Record<

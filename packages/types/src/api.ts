@@ -72,6 +72,34 @@ export const towJobCompleteInputSchema = z.object({
 });
 export type TowJobCompleteInput = z.infer<typeof towJobCompleteInputSchema>;
 
+export const driverLocationInputSchema = z.object({
+  location: coordinateSchema,
+  heading: z.number().min(0).max(360).optional(),
+  speed_mps: z.number().nonnegative().optional(),
+});
+export type DriverLocationInput = z.infer<typeof driverLocationInputSchema>;
+
+export const driverDeviceInputSchema = z.object({
+  expo_push_token: z.string().min(1),
+  platform: z.enum(["ios", "android", "web", "unknown"]).default("unknown"),
+  device_name: z.string().optional(),
+});
+export type DriverDeviceInput = z.infer<typeof driverDeviceInputSchema>;
+
+export const offerRejectInputSchema = z.object({
+  reason: z.string().max(500).optional(),
+});
+export type OfferRejectInput = z.infer<typeof offerRejectInputSchema>;
+
+export const dispatchRunInputSchema = z.object({
+  tow_job_id: uuidSchema,
+  pickup: coordinateSchema,
+  payer_type: z.enum(["insurance_company", "customer_private"]).default("insurance_company"),
+  priority: z.enum(["normal", "high", "urgent"]).default("normal"),
+  dispatch_strategy: dispatchStrategySchema.optional(),
+});
+export type DispatchRunInput = z.infer<typeof dispatchRunInputSchema>;
+
 export const etaCalculateInputSchema = z.object({
   origin: coordinateSchema,
   destination: coordinateSchema,

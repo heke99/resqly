@@ -55,32 +55,34 @@ export async function getTowJob(ctx: ApiContext, id: string): Promise<RouteResul
   return { status: 200, body: job };
 }
 
-export async function acceptTowJob(
+const ACCEPT_FAILURE_MESSAGES: Record<string, string> = {
+  no_pending_offer: "No pending offer for this driver on this job",
+  already_assigned: "This job has already been assigned to another driver",
+  job_not_offerable: "This job is no longer available",
+  job_not_found: "Tow job not found",
+  forbidden: "You are not allowed to accept this job",
+};
+
+/**
+ * Shared accept flow used by both job-centric and offer-centric endpoints.
+ * Acceptance is race-safe (DB locks the job + cancels other offers); customer
+ * PII is shared exactly once, only after a successful accept.
+ */
+export async function acceptJobForDriver(
   ctx: ApiContext,
-  id: string,
-  body: unknown,
+  jobId: string,
+  driverId: string,
 ): Promise<RouteResult> {
-  acceptSchema.parse(body);
-  const driver_id = requireAuthenticatedDriver(ctx);
-  const job = await ctx.repo.getTowJob(ctx.tenantId, id);
+  const job = await ctx.repo.getTowJob(ctx.tenantId, jobId);
   if (!job) throw notFound("Tow job not found");
 
-  const offer = await ctx.repo.getOfferForDriver(id, driver_id);
-  if (!offer || offer.status !== "pending") {
-    throw new AppError("conflict", "No pending offer for this driver on this job");
+  const result = await ctx.repo.acceptOffer(jobId, driverId);
+  if (!result.accepted) {
+    throw new AppError(
+      "conflict",
+      ACCEPT_FAILURE_MESSAGES[result.reason ?? ""] ?? "Cannot accept this offer",
+    );
   }
-
-  // Validate and apply the status transition (offered -> accepted).
-  transitionTowJob({ towJobId: id, from: job.status, to: "accepted", actorUserId: driver_id });
-  await ctx.repo.setOfferStatus(id, driver_id, "accepted");
-  await ctx.repo.assignTowJob(id, driver_id, job.tow_company_id ?? "");
-  await ctx.repo.setTowJobStatus(id, "accepted");
-  await ctx.repo.addTowJobStatusEvent({
-    tow_job_id: id,
-    from_status: job.status,
-    to_status: "accepted",
-    actor_user_id: driver_id,
-  });
 
   // ---- The critical step: share customer data ONLY now, after accept. ----
   const contact = await ctx.repo.getCustomerContact(job.incident_id);
@@ -88,8 +90,8 @@ export async function acceptTowJob(
 
   const share = buildCustomerShare({
     tenantId: job.tenant_id,
-    towJobId: id,
-    driverId: driver_id,
+    towJobId: jobId,
+    driverId,
     jobStatus: "accepted",
     customer: { name: contact.name, phone: contact.phone, email: contact.email },
     registrationNumber: contact.registration_number,
@@ -104,9 +106,9 @@ export async function acceptTowJob(
   await ctx.repo.recordAudit(
     buildCustomerShareAudit({
       tenantId: job.tenant_id,
-      actorUserId: driver_id,
-      driverId: driver_id,
-      towJobId: id,
+      actorUserId: driverId,
+      driverId,
+      towJobId: jobId,
       fields: [...SHAREABLE_CUSTOMER_FIELDS],
       reason: "driver accepted job",
       ip: ctx.ip,
@@ -115,8 +117,23 @@ export async function acceptTowJob(
 
   return {
     status: 200,
-    body: { status: "accepted", customer_shared: true, shared_fields: SHAREABLE_CUSTOMER_FIELDS },
+    body: {
+      status: "accepted",
+      customer_shared: true,
+      shared_fields: SHAREABLE_CUSTOMER_FIELDS,
+      tow_company_id: result.towCompanyId,
+    },
   };
+}
+
+export async function acceptTowJob(
+  ctx: ApiContext,
+  id: string,
+  body: unknown,
+): Promise<RouteResult> {
+  acceptSchema.parse(body);
+  const driverId = requireAuthenticatedDriver(ctx);
+  return acceptJobForDriver(ctx, id, driverId);
 }
 
 export async function rejectTowJob(

@@ -11,13 +11,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const { data: incident } = await db
     .from("incidents" as never)
-    .select("id, tenant_id, type, status, requires_bankid, bankid_verified, customer_user_id")
+    .select("id, tenant_id, type, status, requires_bankid, bankid_verified, customer_user_id, insurance_company_id")
     .eq("id", id)
     .eq("customer_user_id", user.id)
     .maybeSingle();
-  const inc = incident as { id: string; tenant_id: string; type: string; status: string; requires_bankid: boolean; bankid_verified: boolean } | null;
+  const inc = incident as {
+    id: string;
+    tenant_id: string;
+    type: string;
+    status: string;
+    requires_bankid: boolean;
+    bankid_verified: boolean;
+    insurance_company_id: string | null;
+  } | null;
   if (!inc) return jsonError(404, "Case not found.");
   if (inc.requires_bankid && !inc.bankid_verified) return jsonError(409, "BankID must be completed before requesting tow.");
+
+  // Insurance vs direct/private determines which dispatch eligibility path runs.
+  const payerType = inc.insurance_company_id ? "insurance_company" : "customer_private";
 
   const { data: existing } = await db
     .from("tow_jobs" as never)
@@ -33,7 +44,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       tenant_id: inc.tenant_id,
       incident_id: inc.id,
       status: "manual_review",
-      payer_type: "insurance_company",
+      payer_type: payerType,
       priority,
     } as never)
     .select("id, status")

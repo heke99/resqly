@@ -79,6 +79,69 @@ export interface EtaSnapshotRecord {
   created_at: string;
 }
 
+export interface DriverProfileRecord {
+  id: string;
+  tenant_id: string;
+  tow_company_id: string;
+  user_id: string | null;
+  full_name: string;
+  is_online: boolean;
+  status: string;
+  duty_status: string;
+}
+
+export interface OfferRecord {
+  id: string;
+  tow_job_id: string;
+  driver_id: string;
+  tow_company_id: string;
+  tenant_id: string;
+  status: string;
+  rank: number;
+  expires_at: string;
+}
+
+export interface DispatchCandidateOptions {
+  payerType: string;
+  insuranceTenantId?: string | null;
+}
+
+export interface AcceptOfferResult {
+  accepted: boolean;
+  towCompanyId: string | null;
+  reason: string | null;
+}
+
+export interface RoleContextTenant {
+  tenant_id: string;
+  tenant_type: string;
+  tenant_name: string;
+  roles: string[];
+}
+
+export interface RoleContext {
+  user_id: string;
+  email: string | null;
+  full_name: string | null;
+  is_platform_admin: boolean;
+  is_customer: boolean;
+  driver: { driver_id: string; tow_company_id: string; is_online: boolean; status: string } | null;
+  tenants: RoleContextTenant[];
+  capabilities: {
+    customer: boolean;
+    driver: boolean;
+    insurance_admin: boolean;
+    tow_admin: boolean;
+    tenant_user: boolean;
+    superadmin: boolean;
+  };
+}
+
+export interface DriverDeviceRecord {
+  expo_push_token: string;
+  platform: string;
+}
+
 /**
  * Persistence boundary for the API. The in-memory implementation backs tests;
  * the Supabase implementation backs production. Keeping handlers behind this
@@ -123,11 +186,53 @@ export interface ApiRepo {
   getOfferForDriver(jobId: string, driverId: string): Promise<{ status: string } | null>;
   setOfferStatus(jobId: string, driverId: string, status: string): Promise<void>;
 
-  /** Driver candidates near a pickup point (already PostGIS rough-filtered). */
+  /**
+   * Race-safe offer acceptance. Locks the job, accepts the driver's pending
+   * offer, cancels the rest, and assigns the job atomically.
+   */
+  acceptOffer(jobId: string, driverId: string): Promise<AcceptOfferResult>;
+  getOfferById(id: string): Promise<OfferRecord | null>;
+  rejectOffer(jobId: string, driverId: string, reason: string | null): Promise<void>;
+
+  /** Driver self-service. */
+  getDriverProfile(driverId: string): Promise<DriverProfileRecord | null>;
+  setDriverOnline(driverId: string, online: boolean): Promise<void>;
+  updateDriverLocation(driverId: string, lat: number, lng: number): Promise<void>;
+  upsertDriverDevice(
+    driverId: string,
+    userId: string,
+    device: { expo_push_token: string; platform: string; device_name?: string | null },
+  ): Promise<void>;
+  listDriverOffers(driverId: string): Promise<
+    Array<{
+      offer_id: string;
+      tow_job_id: string;
+      status: string;
+      rank: number;
+      expires_at: string;
+      priority: string;
+      payer_type: string;
+      problem_type: string | null;
+      approx_area: string | null;
+      distance_meters: number | null;
+    }>
+  >;
+  listDriverDevices(driverId: string): Promise<DriverDeviceRecord[]>;
+  markOfferPush(jobId: string, driverId: string, status: string, error?: string | null): Promise<void>;
+
+  /** Aggregate role/capability context for a user across all apps. */
+  loadRoleContext(userId: string): Promise<RoleContext | null>;
+
+  /**
+   * Driver candidates near a pickup point that are also eligible for the case
+   * (active insurance agreement for insurance jobs, marketplace-enabled for
+   * direct jobs). Already PostGIS rough-filtered and online-only.
+   */
   getDispatchCandidates(
     pickup: Coordinate,
     radiusKm: number,
     limit: number,
+    opts: DispatchCandidateOptions,
   ): Promise<DispatchCandidate[]>;
 
   createCustomerShare(row: Record<string, unknown>): Promise<void>;

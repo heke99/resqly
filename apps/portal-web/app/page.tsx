@@ -1,87 +1,163 @@
-import { Card, EmptyState, PageHeader, StatCard, DataTable, Badge, type Column } from "@resqly/web-kit";
+import {
+  Card,
+  DataTable,
+  KpiGrid,
+  PageHeader,
+  StatCard,
+  StatusChip,
+  type Column,
+} from "@resqly/web-kit";
 import { getActiveTenant } from "./lib/tenant";
-import { getPortalDashboardData } from "./lib/data";
+import {
+  getInsuranceDashboardStats,
+  getTowCompanyDashboardStats,
+  listCompanyJobs,
+  listCompanyOffers,
+  listIncidents,
+  listInsuranceTowJobs,
+} from "./lib/data";
+import { NoTenant, formatMoneyMinor, formatSeconds, num } from "./lib/ui";
 
 export const dynamic = "force-dynamic";
 
 type Row = Record<string, unknown>;
 
 const incidentColumns: Column<Row>[] = [
-  { key: "case", header: "Case", render: (r) => <a href={`/cases/${String(r.id)}`}>{String(r.case_number ?? String(r.id).slice(0, 8))}</a> },
+  {
+    key: "case",
+    header: "Case",
+    render: (r) => (
+      <a href={`/cases/${String(r.id)}`}>{String(r.case_number ?? String(r.id).slice(0, 8))}</a>
+    ),
+  },
   { key: "type", header: "Type", render: (r) => String(r.type ?? "—").replaceAll("_", " ") },
-  { key: "status", header: "Status", render: (r) => <Badge>{String(r.status ?? "—")}</Badge> },
+  { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "—")} /> },
   { key: "created", header: "Created", render: (r) => String(r.created_at ?? "").slice(0, 16).replace("T", " ") },
 ];
 
 const jobColumns: Column<Row>[] = [
   { key: "job", header: "Job", render: (r) => String(r.id ?? "").slice(0, 8) },
-  { key: "status", header: "Status", render: (r) => <Badge>{String(r.status ?? "—")}</Badge> },
+  { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "—")} /> },
   { key: "priority", header: "Priority", render: (r) => String(r.priority ?? "normal") },
   { key: "created", header: "Created", render: (r) => String(r.created_at ?? "").slice(0, 16).replace("T", " ") },
 ];
 
-export default async function Dashboard({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+export default async function Dashboard({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const sp = await searchParams;
   const tenant = await getActiveTenant(sp);
-  if (!tenant) {
+  if (!tenant) return <NoTenant />;
+
+  if (tenant.type === "tow_company") {
+    const [stats, jobs, offers] = await Promise.all([
+      getTowCompanyDashboardStats(tenant.id),
+      listCompanyJobs(tenant.id),
+      listCompanyOffers(tenant.id),
+    ]);
+    const s = stats ?? {};
+    const activeJobs = jobs.filter(
+      (j) => !["closed", "cancelled", "completed", "invoiced", "manual_review"].includes(String(j.status)),
+    );
     return (
       <div>
-        <PageHeader title="Partner portal" />
-        <EmptyState title="No tenant available" hint="A superadmin must create your tenant first, then your users." />
+        <PageHeader
+          title={`${tenant.name} — Dispatch & fleet control`}
+          subtitle="Live view of offers, jobs, drivers and revenue"
+          actions={<a href="/offers">View new offers</a>}
+        />
+        <KpiGrid>
+          <StatCard label="New offers" value={num(s.new_offers)} />
+          <StatCard label="Active jobs" value={num(s.active_jobs)} />
+          <StatCard label="Drivers online" value={num(s.drivers_online)} />
+          <StatCard label="Available vehicles" value={num(s.vehicles_available)} />
+          <StatCard label="Accepted jobs" value={num(s.accepted_jobs)} />
+          <StatCard label="Rejected jobs" value={num(s.rejected_jobs)} />
+          <StatCard label="Missed jobs" value={num(s.missed_jobs)} />
+          <StatCard label="Completed jobs" value={num(s.completed_jobs)} />
+          <StatCard label="Avg accept time" value={formatSeconds(s.avg_accept_seconds)} />
+          <StatCard label="Avg arrival time" value={formatSeconds(s.avg_arrival_seconds)} />
+          <StatCard label="SLA hit / miss" value={`${num(s.sla_hit)} / ${num(s.sla_miss)}`} />
+          <StatCard label="Invoice basis" value={formatMoneyMinor(s.revenue_minor)} />
+        </KpiGrid>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 24, alignItems: "start" }}>
+          <div>
+            <h3>Active jobs</h3>
+            <DataTable columns={jobColumns} rows={activeJobs.slice(0, 8)} empty="No active jobs" />
+          </div>
+          <div>
+            <h3>Latest offers</h3>
+            <DataTable
+              columns={[
+                { key: "job", header: "Job", render: (r) => String(r.tow_job_id ?? "").slice(0, 8) },
+                { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "—")} /> },
+                { key: "expires", header: "Expires", render: (r) => String(r.expires_at ?? "").slice(11, 16) },
+              ]}
+              rows={offers.slice(0, 8)}
+              empty="No offers yet"
+            />
+          </div>
+        </div>
+
+        <Card style={{ marginTop: 24 }}>
+          <strong>Next actions</strong>
+          <p style={{ opacity: 0.72, marginBottom: 0 }}>
+            Respond to new offers quickly to protect your accept rate. Keep drivers online and vehicles available to
+            receive more dispatch offers from your insurance partners and the direct marketplace.
+          </p>
+        </Card>
       </div>
     );
   }
-  const data = await getPortalDashboardData(tenant.id);
-  const open = data.incidents.filter((i) => !["closed", "cancelled", "rejected", "completed"].includes(String(i.status)));
-  const awaitingBankid = data.incidents.filter((i) => String(i.status) === "awaiting_bankid");
-  const moreInfo = data.incidents.filter((i) => String(i.status) === "more_info_required");
-  const activeJobs = data.jobs.filter((j) => !["closed", "cancelled", "completed", "invoiced"].includes(String(j.status)));
-  const manual = data.jobs.filter((j) => String(j.status) === "manual_review");
-  const onDuty = data.drivers.filter((d) => ["on_duty", "on_call"].includes(String(d.duty_status)));
-  const isInsurance = tenant.type === "insurance_company";
 
+  // Insurance company (default).
+  const [stats, incidents, jobs] = await Promise.all([
+    getInsuranceDashboardStats(tenant.id),
+    listIncidents(tenant.id),
+    listInsuranceTowJobs(tenant.id),
+  ]);
+  const s = stats ?? {};
   return (
     <div>
       <PageHeader
-        title={`${tenant.name} — Dashboard`}
-        subtitle={`${tenant.type} • prefix ${tenant.case_number_prefix}`}
-        actions={<a href={isInsurance ? "/cases" : "/jobs"}>{isInsurance ? "Review cases" : "Dispatch jobs"}</a>}
+        title={`${tenant.name} — Operations & claims control`}
+        subtitle="Cases, towing, SLA and partner performance at a glance"
+        actions={<a href="/cases">Review cases</a>}
       />
-      {isInsurance ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16 }}>
-          <StatCard label="New/open cases" value={open.length} />
-          <StatCard label="Awaiting BankID" value={awaitingBankid.length} />
-          <StatCard label="More info required" value={moreInfo.length} />
-          <StatCard label="Active towing" value={activeJobs.length} />
-          <StatCard label="Manual review" value={manual.length} />
-          <StatCard label="Webhooks" value={data.webhooks.length} />
-          <StatCard label="API clients" value={data.apiClients.length} />
-          <StatCard label="Total cases" value={data.incidents.length} />
-        </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16 }}>
-          <StatCard label="New offers / jobs" value={activeJobs.length} />
-          <StatCard label="Manual review" value={manual.length} />
-          <StatCard label="Drivers on duty" value={onDuty.length} />
-          <StatCard label="Tow vehicles" value={data.towVehicles.length} />
-          <StatCard label="Completion reports missing" value={activeJobs.length} />
-          <StatCard label="Invoice basis ready" value={data.jobs.filter((j) => String(j.status) === "completed").length} />
-          <StatCard label="API clients" value={data.apiClients.length} />
-          <StatCard label="Total jobs" value={data.jobs.length} />
-        </div>
-      )}
+      <KpiGrid>
+        <StatCard label="New cases" value={num(s.new_cases)} />
+        <StatCard label="Active towing" value={num(s.active_towing)} />
+        <StatCard label="Damage claims" value={num(s.damage_claims)} />
+        <StatCard label="Awaiting BankID" value={num(s.awaiting_bankid)} />
+        <StatCard label="Awaiting handler" value={num(s.awaiting_handler)} />
+        <StatCard label="SLA risk" value={num(s.sla_risk)} />
+        <StatCard label="Avg ETA" value={formatSeconds(s.avg_eta_seconds)} />
+        <StatCard label="Avg resolution" value={formatSeconds(s.avg_resolution_seconds)} />
+        <StatCard label="Completed cases" value={num(s.completed_cases)} />
+        <StatCard label="Cancelled cases" value={num(s.cancelled_cases)} />
+        <StatCard label="Cost (period)" value={formatMoneyMinor(s.total_cost_minor)} />
+        <StatCard label="Webhook errors" value={num(s.webhook_errors)} />
+      </KpiGrid>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 24, alignItems: "start" }}>
-        <DataTable columns={incidentColumns} rows={data.incidents.slice(0, 8)} empty="No cases yet" />
-        <DataTable columns={jobColumns} rows={data.jobs.slice(0, 8)} empty="No tow jobs yet" />
+        <div>
+          <h3>Recent cases</h3>
+          <DataTable columns={incidentColumns} rows={incidents.slice(0, 8)} empty="No cases yet" />
+        </div>
+        <div>
+          <h3>Active towing</h3>
+          <DataTable columns={jobColumns} rows={jobs.slice(0, 8)} empty="No tow jobs yet" />
+        </div>
       </div>
 
       <Card style={{ marginTop: 24 }}>
-        <strong>{isInsurance ? "Insurance workflow" : "Towing workflow"}</strong>
+        <strong>Next actions</strong>
         <p style={{ opacity: 0.72, marginBottom: 0 }}>
-          {isInsurance
-            ? "Review BankID status, damage claims, towing progress, SLA risk, photos and invoice basis from this portal."
-            : "Manage dispatch, drivers, towing vehicles, completion reports and invoice basis from this portal."}
+          Prioritise cases awaiting a handler and any SLA risks. Review damage claims and monitor your tow partners&apos;
+          performance from the Statistics and Tow partners views.
         </p>
       </Card>
     </div>

@@ -6,6 +6,9 @@ import * as incidents from "./handlers/incidents";
 import * as tow from "./handlers/tow";
 import * as eta from "./handlers/eta";
 import * as tenant from "./handlers/tenant";
+import * as me from "./handlers/me";
+import * as drivers from "./handlers/drivers";
+import * as dispatch from "./handlers/dispatch";
 
 export interface RawRequest {
   method: string;
@@ -60,6 +63,21 @@ export class App {
     r.patch("/api/v1/tenant/branding", (ctx, a) => tenant.patchTenantBranding(ctx, a.body));
     r.get("/api/v1/tenant/settings", (ctx) => tenant.getTenantSettings(ctx));
     r.patch("/api/v1/tenant/settings", (ctx, a) => tenant.patchTenantSettings(ctx, a.body));
+
+    // Authenticated end-user role/capability context (mobile + apps).
+    r.get("/api/v1/me/role-context", (ctx) => me.getRoleContext(ctx));
+
+    // Driver self-service.
+    r.post("/api/v1/drivers/me/online", (ctx) => drivers.goOnline(ctx, true));
+    r.post("/api/v1/drivers/me/offline", (ctx) => drivers.goOnline(ctx, false));
+    r.post("/api/v1/drivers/me/location", (ctx, a) => drivers.updateLocation(ctx, a.body));
+    r.post("/api/v1/drivers/me/device", (ctx, a) => drivers.registerDevice(ctx, a.body));
+    r.get("/api/v1/drivers/me/offers", (ctx) => drivers.listOffers(ctx));
+    r.post("/api/v1/drivers/offers/:id/accept", (ctx, a) => drivers.acceptOffer(ctx, a.params.id!));
+    r.post("/api/v1/drivers/offers/:id/reject", (ctx, a) => drivers.rejectOffer(ctx, a.params.id!, a.body));
+
+    // Manual / re-run dispatch for an existing tow job.
+    r.post("/api/v1/dispatch/run", (ctx, a) => dispatch.runDispatch(ctx, a.body));
   }
 
   async handle(req: RawRequest): Promise<RouteResult> {
@@ -93,13 +111,17 @@ export class App {
       };
     }
 
-    const driverAccessToken =
-      extractBearer(req.headers["x-driver-authorization"]) ?? req.headers["x-driver-access-token"] ?? null;
-    const driverUserId =
-      driverAccessToken && this.config.driverAuth
-        ? await this.config.driverAuth.getUserIdFromAccessToken(driverAccessToken)
+    const userAccessToken =
+      extractBearer(req.headers["x-driver-authorization"]) ??
+      req.headers["x-driver-access-token"] ??
+      extractBearer(req.headers["x-user-authorization"]) ??
+      req.headers["x-user-access-token"] ??
+      null;
+    const userId =
+      userAccessToken && this.config.driverAuth
+        ? await this.config.driverAuth.getUserIdFromAccessToken(userAccessToken)
         : null;
-    const driverId = driverUserId ? await this.config.repo.getDriverIdForUser(driverUserId) : null;
+    const driverId = userId ? await this.config.repo.getDriverIdForUser(userId) : null;
 
     const ctx: ApiContext = {
       config: this.config,
@@ -108,7 +130,8 @@ export class App {
       apiClientId: client.id,
       requestId,
       ip: req.ip ?? null,
-      driverUserId,
+      userId,
+      driverUserId: userId,
       driverId,
       idempotencyKey: req.headers["idempotency-key"] ?? req.headers["x-idempotency-key"] ?? null,
     };

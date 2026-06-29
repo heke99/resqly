@@ -154,6 +154,71 @@ export async function createWebhook(formData: FormData): Promise<void> {
   revalidatePath("/integrations");
 }
 
+async function towCompanyIdFor(client: Awaited<ReturnType<typeof portalDb>>["db"], tenantId: string): Promise<string> {
+  const { data: company } = await client
+    .from("tow_companies" as never)
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  const companyId = (company as { id?: string } | null)?.id;
+  if (!companyId) throw new Error("This tenant is not a tow company.");
+  return companyId;
+}
+
+export async function saveMarketplaceSettings(formData: FormData): Promise<void> {
+  const tenantId = String(formData.get("tenant_id"));
+  const { db: client, tenant } = await portalDb(tenantId);
+  assertTenant(tenant.id, tenantId);
+  const companyId = await towCompanyIdFor(client, tenantId);
+  const row = {
+    tow_company_id: companyId,
+    accepts_direct_orders: formData.get("accepts_direct_orders") === "on",
+    private_customer_enabled: formData.get("private_customer_enabled") === "on",
+    active: formData.get("active") === "on",
+    min_price_minor: Math.max(0, Math.round(Number(formData.get("min_price_sek") ?? "0") * 100) || 0),
+  };
+  await client
+    .from("tow_company_marketplace_settings" as never)
+    .upsert(row as never, { onConflict: "tow_company_id" } as never);
+  revalidatePath("/marketplace");
+}
+
+export async function saveAgreement(formData: FormData): Promise<void> {
+  const tenantId = String(formData.get("tenant_id"));
+  const { db: client, tenant } = await portalDb(tenantId);
+  assertTenant(tenant.id, tenantId);
+  const companyId = await towCompanyIdFor(client, tenantId);
+  const insurerTenantId = String(formData.get("insurance_tenant_id") ?? "");
+  if (!insurerTenantId) throw new Error("Select an insurance company.");
+  const row = {
+    tow_company_id: companyId,
+    insurance_tenant_id: insurerTenantId,
+    status: String(formData.get("status") ?? "active"),
+    priority: Number(formData.get("priority") ?? "100") || 100,
+    sla_minutes: Number(formData.get("sla_minutes") ?? "45") || 45,
+    pricing_model: String(formData.get("pricing_model") ?? "standard"),
+  };
+  await client
+    .from("tow_company_insurance_agreements" as never)
+    .upsert(row as never, { onConflict: "tow_company_id,insurance_tenant_id" } as never);
+  revalidatePath("/agreements");
+}
+
+export async function setDriverVehicle(formData: FormData): Promise<void> {
+  const tenantId = String(formData.get("tenant_id"));
+  const { db: client, tenant } = await portalDb(tenantId);
+  assertTenant(tenant.id, tenantId);
+  const driverId = String(formData.get("driver_id") ?? "");
+  const vehicleId = String(formData.get("vehicle_id") ?? "") || null;
+  if (!driverId) throw new Error("Driver is required.");
+  await client
+    .from("tow_drivers" as never)
+    .update({ current_vehicle_id: vehicleId } as never)
+    .eq("id", driverId)
+    .eq("tenant_id", tenantId);
+  revalidatePath("/drivers");
+}
+
 /** Create an API key; the raw key is shown once (stored only as a hash). */
 export async function createApiKey(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));

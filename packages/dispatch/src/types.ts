@@ -24,6 +24,8 @@ export interface DispatchCandidate {
   /** For round-robin: lower means "longer since last dispatched". */
   roundRobinKey?: number;
   isBusy?: boolean;
+  /** Whether the driver is currently online. Defaults to online when omitted. */
+  isOnline?: boolean;
 }
 
 export interface DispatchRequirements {
@@ -40,6 +42,16 @@ export interface DispatchRequest {
   requirements?: DispatchRequirements;
   /** Insurer's contracted tow companies (used for insurance cases). */
   preferredCompanyIds?: string[];
+  /**
+   * Hard eligibility gate. When provided, only candidates whose tow company is
+   * in this set are ever considered. For insurance cases this is the set of
+   * companies with an active agreement; for direct/private cases it is the set
+   * of marketplace-enabled companies. A candidate outside this set is NEVER
+   * offered the job, regardless of distance or ranking.
+   */
+  eligibleCompanyIds?: string[];
+  /** Coverage gate: candidates farther than this are excluded. */
+  maxDistanceMeters?: number;
   allowMarketplaceFallback?: boolean;
   maxCandidates?: number;
 }

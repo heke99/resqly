@@ -4,13 +4,12 @@ import {
   createIncidentInputSchema,
   requestTowInputSchema,
 } from "@resqly/types";
-import { AppError, badRequest, notFound } from "@resqly/utils";
+import { AppError, notFound } from "@resqly/utils";
 import { buildIncidentRow, determineRequiresBankid } from "@resqly/insurance";
 import { getBankidProvider, buildSignatureRecord } from "@resqly/bankid";
-import { selectDispatch, type DispatchRequest } from "@resqly/dispatch";
-import type { DispatchStrategy } from "@resqly/types";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
+import { runDispatchForJob } from "./dispatch";
 
 export async function createIncident(ctx: ApiContext, body: unknown): Promise<RouteResult> {
   const input = createIncidentInputSchema.parse(body);
@@ -140,7 +139,6 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
     throw new AppError("conflict", "BankID verification is required before requesting a tow");
   }
 
-  const settings = await ctx.repo.getTenantSettings(ctx.tenantId);
   const job = await ctx.repo.createTowJob({
     tenant_id: ctx.tenantId,
     incident_id: incident.id,
@@ -149,76 +147,23 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
     priority: input.priority,
   });
 
-  await ctx.repo.setTowJobStatus(job.id, "matching");
-  await ctx.repo.addTowJobStatusEvent({
-    tow_job_id: job.id,
-    from_status: "created",
-    to_status: "matching",
-  });
-
-  const candidates = await ctx.repo.getDispatchCandidates(
-    input.pickup,
-    settings.max_dispatch_radius_km,
-    settings.max_dispatch_candidates,
-  );
-
-  const strategy = (input.dispatch_strategy ??
-    settings.default_dispatch_strategy) as DispatchStrategy;
-  const request: DispatchRequest = {
-    strategy,
+  const outcome = await runDispatchForJob(ctx, {
+    job,
+    pickup: input.pickup,
     payerType: input.payer_type,
     priority: input.priority,
-    requirements: incident.problem_type === "ev_out_of_battery" ? { needsEv: true } : undefined,
-    allowMarketplaceFallback: settings.allow_marketplace_fallback,
-    maxCandidates: settings.max_dispatch_candidates,
-  };
-  const dispatch = selectDispatch(candidates, request);
-
-  if (dispatch.offers.length > 0) {
-    await ctx.repo.createOffers(
-      dispatch.offers.map((o) => ({
-        tenant_id: ctx.tenantId,
-        tow_job_id: job.id,
-        driver_id: o.driverId,
-        tow_company_id: o.towCompanyId,
-        rank: o.rank,
-        expires_at: new Date(Date.now() + settings.offer_expiry_seconds * 1000).toISOString(),
-      })),
-    );
-    await ctx.repo.setTowJobStatus(job.id, "offered");
-    await ctx.repo.addTowJobStatusEvent({
-      tow_job_id: job.id,
-      from_status: "matching",
-      to_status: "offered",
-    });
-  } else {
-    await ctx.repo.setTowJobStatus(job.id, "manual_review");
-    await ctx.repo.addTowJobStatusEvent({
-      tow_job_id: job.id,
-      from_status: "matching",
-      to_status: "manual_review",
-    });
-  }
-
-  await ctx.repo.recordAudit({
-    tenant_id: ctx.tenantId,
-    action: "dispatch",
-    entity_type: "tow_job",
-    entity_id: job.id,
-    fields: ["strategy"],
-    metadata: { strategy: dispatch.strategy, offers: dispatch.offers.length },
+    strategy: input.dispatch_strategy,
+    problemType: incident.problem_type,
   });
-
-  if (!input.pickup) throw badRequest("pickup is required");
 
   return {
     status: 201,
     body: {
       tow_job_id: job.id,
-      status: dispatch.offers.length > 0 ? "offered" : "manual_review",
-      offered_drivers: dispatch.offers.map((o) => o.driverId),
-      requires_manual_review: dispatch.requiresManualReview,
-      strategy: dispatch.strategy,
+      status: outcome.status,
+      offered_drivers: outcome.offeredDrivers,
+      requires_manual_review: outcome.requiresManualReview,
+      strategy: outcome.strategy,
     },
   };
 }

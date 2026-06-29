@@ -228,6 +228,104 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     expect(res.status).toBe(422);
   });
 
+  it("locks a job to the first accepting driver (no double-accept)", async () => {
+    const repo = env.repo;
+    // Seed a tow job with two pending offers to two drivers.
+    const job = await repo.createTowJob({
+      tenant_id: "t-if",
+      incident_id: "inc-1",
+      status: "offered",
+      payer_type: "insurance_company",
+      priority: "normal",
+    });
+    await repo.createOffers([
+      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv1", tow_company_id: "tc1", rank: 0, expires_at: new Date(Date.now() + 60000).toISOString() },
+      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv2", tow_company_id: "tc1", rank: 1, expires_at: new Date(Date.now() + 60000).toISOString() },
+    ]);
+    repo.seedContact("inc-1", {
+      name: "A", phone: "+460", email: null, registration_number: "X1", problem_summary: "x",
+      pickup: { lat: 59, lng: 18 }, pickup_address: null, destination_address: null, customer_notes: null,
+    });
+
+    const first = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/tow/jobs/${job.id}/accept`,
+      headers: driverAuth(),
+      body: {},
+    });
+    expect(first.status).toBe(200);
+
+    // The job is now locked to drv1 and drv2's competing offer is cancelled.
+    const stored = await repo.getTowJob("t-if", job.id);
+    expect(stored?.driver_id).toBe("drv1");
+    expect(repo.offers.find((o) => o.tow_job_id === job.id && o.driver_id === "drv2")?.status).toBe("cancelled");
+
+    // A second accept attempt on the same job no longer has a pending offer -> conflict.
+    const second = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/tow/jobs/${job.id}/accept`,
+      headers: driverAuth(),
+      body: {},
+    });
+    expect(second.status).toBe(409);
+  });
+
+  it("lists driver offers without customer PII (pre-accept minimization)", async () => {
+    const repo = env.repo;
+    const job = await repo.createTowJob({
+      tenant_id: "t-if", incident_id: "inc-2", status: "offered", payer_type: "insurance_company", priority: "high",
+    });
+    await repo.createOffers([
+      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv1", tow_company_id: "tc1", rank: 0, expires_at: new Date(Date.now() + 60000).toISOString() },
+    ]);
+    const res = await env.app.handle({ method: "GET", path: "/api/v1/drivers/me/offers", headers: driverAuth() });
+    expect(res.status).toBe(200);
+    const body = res.body as { offers: Array<Record<string, unknown>> };
+    expect(body.offers.length).toBeGreaterThan(0);
+    const offer = body.offers[0]!;
+    expect(Object.keys(offer)).not.toContain("customer_name");
+    expect(Object.keys(offer)).not.toContain("customer_phone");
+    expect(offer.tow_job_id).toBe(job.id);
+  });
+
+  it("rejecting an offer marks it rejected", async () => {
+    const repo = env.repo;
+    const job = await repo.createTowJob({
+      tenant_id: "t-if", incident_id: "inc-3", status: "offered", payer_type: "insurance_company", priority: "normal",
+    });
+    await repo.createOffers([
+      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv1", tow_company_id: "tc1", rank: 0, expires_at: new Date(Date.now() + 60000).toISOString() },
+    ]);
+    const offer = repo.offers.find((o) => o.tow_job_id === job.id && o.driver_id === "drv1")!;
+    const res = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/drivers/offers/${offer.id}/reject`,
+      headers: driverAuth(),
+      body: { reason: "busy" },
+    });
+    expect(res.status).toBe(200);
+    expect(repo.offers.find((o) => o.id === offer.id)?.status).toBe("rejected");
+  });
+
+  it("requires an authenticated user for role-context", async () => {
+    const noUser = await env.app.handle({ method: "GET", path: "/api/v1/me/role-context", headers: auth() });
+    expect(noUser.status).toBe(403);
+
+    env.repo.seedRoleContext({
+      user_id: "user-drv1",
+      email: "drv1@example.com",
+      full_name: "Driver One",
+      is_platform_admin: false,
+      is_customer: false,
+      driver: { driver_id: "drv1", tow_company_id: "tc1", is_online: false, status: "active" },
+      tenants: [],
+      capabilities: { customer: false, driver: true, insurance_admin: false, tow_admin: false, tenant_user: false, superadmin: false },
+    });
+    const res = await env.app.handle({ method: "GET", path: "/api/v1/me/role-context", headers: driverAuth() });
+    expect(res.status).toBe(200);
+    expect((res.body as { capabilities: { driver: boolean } }).capabilities.driver).toBe(true);
+  });
+
   it("calculates ETA (fallback when Google disabled)", async () => {
     const res = await env.app.handle({
       method: "POST",
