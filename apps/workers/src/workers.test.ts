@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { processDelivery } from "./jobs/webhook-delivery";
 import { evaluateOfferExpiry, type OfferRow } from "./jobs/offer-expiry";
+import { selectOfferPushRetries, type OfferPushRow } from "./jobs/offer-push";
 import { jobsNeedingEtaRefresh } from "./jobs/eta-refresh";
 
 describe("webhook delivery", () => {
@@ -70,6 +71,32 @@ describe("offer expiry", () => {
       offer({ id: "o2", status: "pending", expires_at: new Date(0).toISOString() }),
     ];
     expect(evaluateOfferExpiry(offers, 10_000).expire).toEqual([]);
+  });
+});
+
+describe("offer push retries", () => {
+  const row = (over: Partial<OfferPushRow>): OfferPushRow => ({
+    tow_job_id: "j1",
+    driver_id: "d1",
+    status: "pending",
+    push_status: "failed",
+    push_attempts: 0,
+    ...over,
+  });
+
+  it("retries failed pushes for still-pending offers", () => {
+    const retries = selectOfferPushRetries([row({})]);
+    expect(retries).toHaveLength(1);
+    expect(retries[0]).toMatchObject({ towJobId: "j1", driverId: "d1", attempt: 1 });
+  });
+
+  it("does not retry sent pushes or non-pending offers", () => {
+    expect(selectOfferPushRetries([row({ push_status: "sent" })])).toHaveLength(0);
+    expect(selectOfferPushRetries([row({ status: "accepted" })])).toHaveLength(0);
+  });
+
+  it("stops retrying after the attempt cap", () => {
+    expect(selectOfferPushRetries([row({ push_attempts: 3 })], 3)).toHaveLength(0);
   });
 });
 

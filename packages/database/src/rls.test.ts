@@ -44,6 +44,30 @@ describe("RLS migration (0007)", () => {
   });
 });
 
+describe("Driver ops & agreements RLS (0011/0012/0014)", () => {
+  const sql = mig("0011_driver_ops.sql") + "\n" + mig("0012_agreements_marketplace.sql") + "\n" + mig("0014_dispatch_rpc_rls.sql");
+
+  it("forces RLS on the new tables", () => {
+    expect(sql).toContain("alter table public.driver_devices enable row level security");
+    expect(sql).toContain("alter table public.tow_company_insurance_agreements enable row level security");
+    expect(sql).toContain("alter table public.tow_company_marketplace_settings enable row level security");
+  });
+
+  it("scopes driver devices to the owning user", () => {
+    expect(sql).toContain("create policy driver_devices_owner_read on public.driver_devices");
+    expect(sql).toMatch(/driver_devices[\s\S]*user_id = auth\.uid\(\)/);
+  });
+
+  it("lets the customer read only their own tow job status (no PII columns on the row)", () => {
+    expect(sql).toContain("create policy tow_jobs_customer_read on public.tow_jobs");
+    expect(sql).toMatch(/tow_jobs_customer_read[\s\S]*customer_user_id = auth\.uid\(\)/);
+  });
+
+  it("requires driver ownership to accept via JWT (defense in depth)", () => {
+    expect(sql).toMatch(/accept_tow_offer[\s\S]*tow_drivers where id = p_driver and user_id = auth\.uid\(\)/);
+  });
+});
+
 describe("Storage policies (0008)", () => {
   const sql = mig("0008_storage.sql");
   it("creates the three buckets", () => {

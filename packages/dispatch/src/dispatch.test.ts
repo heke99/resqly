@@ -61,6 +61,83 @@ describe("filterCandidates", () => {
     };
     expect(filterCandidates(candidates, req).map((c) => c.driverId)).toEqual(["other"]);
   });
+
+  it("only offers insurance jobs to companies with an active agreement (If-only)", () => {
+    const candidates = [
+      base({ driverId: "if_driver", towCompanyId: "if_partner" }),
+      base({ driverId: "no_agreement", towCompanyId: "random_co" }),
+    ];
+    const req: DispatchRequest = {
+      strategy: "eta_first",
+      payerType: "insurance_company",
+      priority: "normal",
+      eligibleCompanyIds: ["if_partner"], // companies with an active If agreement
+    };
+    expect(filterCandidates(candidates, req).map((c) => c.driverId)).toEqual(["if_driver"]);
+  });
+
+  it("excludes a tow company without an If agreement from If jobs", () => {
+    const candidates = [base({ driverId: "no_agreement", towCompanyId: "random_co" })];
+    const req: DispatchRequest = {
+      strategy: "eta_first",
+      payerType: "insurance_company",
+      priority: "normal",
+      eligibleCompanyIds: ["if_partner"],
+    };
+    expect(filterCandidates(candidates, req)).toHaveLength(0);
+  });
+
+  it("only offers direct/private jobs to marketplace-enabled companies", () => {
+    const candidates = [
+      base({ driverId: "market_driver", towCompanyId: "market_co" }),
+      base({ driverId: "closed_driver", towCompanyId: "closed_co" }),
+    ];
+    const req: DispatchRequest = {
+      strategy: "eta_first",
+      payerType: "customer_private",
+      priority: "normal",
+      eligibleCompanyIds: ["market_co"], // companies that accept direct orders
+    };
+    expect(filterCandidates(candidates, req).map((c) => c.driverId)).toEqual(["market_driver"]);
+  });
+
+  it("excludes offline drivers", () => {
+    const candidates = [
+      base({ driverId: "online", isOnline: true }),
+      base({ driverId: "offline", isOnline: false }),
+    ];
+    const req: DispatchRequest = { strategy: "eta_first", payerType: "customer_private", priority: "normal" };
+    expect(filterCandidates(candidates, req).map((c) => c.driverId)).toEqual(["online"]);
+  });
+
+  it("excludes drivers outside the coverage radius", () => {
+    const candidates = [
+      base({ driverId: "near", distanceMeters: 5000 }),
+      base({ driverId: "far", distanceMeters: 80000 }),
+    ];
+    const req: DispatchRequest = {
+      strategy: "nearest_available",
+      payerType: "customer_private",
+      priority: "normal",
+      maxDistanceMeters: 50000,
+    };
+    expect(filterCandidates(candidates, req).map((c) => c.driverId)).toEqual(["near"]);
+  });
+
+  it("excludes drivers without the required vehicle capability", () => {
+    const candidates = [
+      base({ driverId: "ev_ok", capabilities: { canHandleEv: true } }),
+      base({ driverId: "no_ev", capabilities: { canHandleEv: false } }),
+    ];
+    const req: DispatchRequest = {
+      strategy: "eta_first",
+      payerType: "insurance_company",
+      priority: "normal",
+      requirements: { needsEv: true },
+      eligibleCompanyIds: ["c"],
+    };
+    expect(filterCandidates(candidates, req).map((c) => c.driverId)).toEqual(["ev_ok"]);
+  });
 });
 
 describe("selectDispatch", () => {

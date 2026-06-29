@@ -52,4 +52,46 @@ describe("migrations", () => {
     expect(sql).toContain("idx_vip_one_active_per_vehicle");
     expect(sql).toContain("vehicle_policies_owner_write");
   });
+
+  it("adds driver operational fields, devices and offer lifecycle columns", () => {
+    expect(sql).toContain("add column if not exists is_online boolean");
+    expect(sql).toContain("create table if not exists public.driver_devices");
+    expect(sql).toContain("expo_push_token");
+    expect(sql).toContain("add column if not exists accepted_at");
+    expect(sql).toContain("add column if not exists rejection_reason");
+  });
+
+  it("adds agreement and marketplace tables that drive dispatch eligibility", () => {
+    expect(sql).toContain("create table if not exists public.tow_company_insurance_agreements");
+    expect(sql).toContain("create table if not exists public.tow_company_marketplace_settings");
+    expect(sql).toContain("accepts_direct_orders");
+    expect(sql).toContain("insurance_tenant_id");
+  });
+
+  it("defines all six statistics views as security_invoker", () => {
+    for (const view of [
+      "insurance_dashboard_stats",
+      "tow_company_dashboard_stats",
+      "superadmin_platform_stats",
+      "driver_performance_stats",
+      "tow_company_performance_stats",
+      "insurance_partner_performance_stats",
+    ]) {
+      expect(sql).toContain(`create or replace view public.${view}`);
+    }
+    expect(sql).toContain("security_invoker = on");
+  });
+
+  it("enforces dispatch eligibility (agreement vs marketplace) in the candidate RPC", () => {
+    expect(sql).toContain("function public.dispatch_eligible_candidates");
+    expect(sql).toContain("public.tow_company_insurance_agreements a");
+    expect(sql).toContain("public.tow_company_marketplace_settings m");
+    expect(sql).toContain("m.accepts_direct_orders = true");
+  });
+
+  it("accepts offers race-safely with a row lock", () => {
+    expect(sql).toContain("function public.accept_tow_offer");
+    expect(sql).toContain("for update");
+    expect(sql).toContain("on conflict (tow_job_id) do nothing");
+  });
 });
