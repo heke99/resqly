@@ -340,6 +340,59 @@ export async function updateTenantBranding(formData: FormData): Promise<void> {
   revalidatePath(`/tenants/${tenantId}`);
 }
 
+/** Superadmin: create/update an agreement between a tow company and an insurer. */
+export async function upsertAgreement(formData: FormData): Promise<void> {
+  const { db, user } = await requirePlatformAdmin();
+  const towCompanyId = text(formData, "tow_company_id");
+  const insurerTenantId = text(formData, "insurance_tenant_id");
+  if (!towCompanyId || !insurerTenantId) throw new Error("Tow company and insurance company are required.");
+  await db.from("tow_company_insurance_agreements" as never).upsert(
+    {
+      tow_company_id: towCompanyId,
+      insurance_tenant_id: insurerTenantId,
+      status: text(formData, "status") ?? "active",
+      priority: numberOrNull(formData, "priority") ?? 100,
+      sla_minutes: numberOrNull(formData, "sla_minutes") ?? 45,
+      pricing_model: text(formData, "pricing_model") ?? "standard",
+    } as never,
+    { onConflict: "tow_company_id,insurance_tenant_id" } as never,
+  );
+  await db.from("audit_logs" as never).insert({
+    tenant_id: insurerTenantId,
+    actor_user_id: user.id,
+    action: "update",
+    entity_type: "tow_company_insurance_agreement",
+    entity_id: towCompanyId,
+    fields: ["status", "priority", "sla_minutes"],
+  } as never);
+  revalidatePath("/agreements");
+}
+
+/** Superadmin: update a tow company's direct marketplace settings. */
+export async function upsertMarketplace(formData: FormData): Promise<void> {
+  const { db, user } = await requirePlatformAdmin();
+  const towCompanyId = text(formData, "tow_company_id");
+  if (!towCompanyId) throw new Error("Tow company is required.");
+  await db.from("tow_company_marketplace_settings" as never).upsert(
+    {
+      tow_company_id: towCompanyId,
+      accepts_direct_orders: bool(formData, "accepts_direct_orders"),
+      private_customer_enabled: bool(formData, "private_customer_enabled"),
+      active: bool(formData, "active"),
+      min_price_minor: Math.max(0, Math.round((numberOrNull(formData, "min_price_sek") ?? 0) * 100)),
+    } as never,
+    { onConflict: "tow_company_id" } as never,
+  );
+  await db.from("audit_logs" as never).insert({
+    actor_user_id: user.id,
+    action: "update",
+    entity_type: "tow_company_marketplace_settings",
+    entity_id: towCompanyId,
+    fields: ["accepts_direct_orders", "active"],
+  } as never);
+  revalidatePath("/agreements");
+}
+
 /** Superadmin: create a tenant admin user (owner/admin/role-specific). */
 export async function createTenantAdmin(formData: FormData): Promise<void> {
   const { db, user } = await requirePlatformAdmin();
