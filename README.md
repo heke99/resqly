@@ -151,12 +151,12 @@ Proprietary. © Diversa Solutions LLC.
 
 Use these domains/subdomains for the first production deployment:
 
-- Customer web/PWA: `app.resqly.com`
-- Partner portal: `portal.resqly.com`
-- Superadmin: `admin.resqly.com`
-- Partner API: `api.resqly.com`
-- Public website/marketing: `resqly.com` and `www.resqly.com`
-- White-label customer domains: `assist.<partner-domain>` or `<partner>.resqly.com`
-- Preview/staging: `staging.resqly.com`, `staging-portal.resqly.com`, `staging-admin.resqly.com`, `staging-api.resqly.com`
+- Customer web/PWA: `app.resqly.se`
+- Partner portal: `portal.resqly.se`
+- Superadmin: `admin.resqly.se`
+- Partner API: `api.resqly.se`
+- Public website/marketing: `resqly.se` and `www.resqly.se`
+- White-label customer domains: `assist.<partner-domain>` or `<partner>.resqly.se`
+- Preview/staging: `staging.resqly.se`, `staging-portal.resqly.se`, `staging-admin.resqly.se`, `staging-api.resqly.se`
 
 See `docs/deployment-domains.md` for full Vercel/env mapping.

@@ -2,7 +2,7 @@
 -- 0010  Universal customer domain + vehicle-policy based white-label
 -- =====================================================================
 
--- The customer app can run on one domain (app.resqly.com) while each vehicle
+-- The customer app can run on one domain (app.resqly.se) while each vehicle
 -- points to its active insurance tenant. Partner paths such as /partner/if are
 -- onboarding hints; the selected vehicle policy is the final tenant source.
 

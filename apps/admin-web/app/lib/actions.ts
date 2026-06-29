@@ -66,6 +66,66 @@ function assertRoleMatchesTenant(type: string, roleKey: string): void {
   }
 }
 
+function portalBaseUrl(): string {
+  return (process.env.NEXT_PUBLIC_PORTAL_WEB_URL ?? "https://portal.resqly.se").replace(/\/$/, "");
+}
+
+type AdminAuthUser = { id: string; email?: string | null };
+type AdminAuthError = { message: string } | null;
+
+async function findExistingAuthUserIdByEmail(db: Awaited<ReturnType<typeof requirePlatformAdmin>>["db"], email: string): Promise<string | null> {
+  const { data: profile } = await db
+    .from("user_profiles" as never)
+    .select("id, email")
+    .eq("email", email)
+    .maybeSingle();
+  const profileId = (profile as { id?: string } | null)?.id;
+  if (profileId) return profileId;
+
+  const admin = db.auth.admin as unknown as {
+    listUsers(options?: { page?: number; perPage?: number }): Promise<{ data: { users: AdminAuthUser[] }; error: AdminAuthError }>;
+  };
+  const { data, error } = await admin.listUsers({ page: 1, perPage: 1000 });
+  if (error) return null;
+  return data.users.find((user) => user.email?.toLowerCase() === email)?.id ?? null;
+}
+
+async function invitePortalUser(input: {
+  db: Awaited<ReturnType<typeof requirePlatformAdmin>>["db"];
+  tenantType: string;
+  email: string;
+  fullName: string | null;
+  roleKey: string;
+}): Promise<{ userId: string; invitationSent: boolean; invitationError?: string }> {
+  const admin = input.db.auth.admin as unknown as {
+    inviteUserByEmail(
+      email: string,
+      options?: { redirectTo?: string; data?: Record<string, unknown> },
+    ): Promise<{ data: { user: AdminAuthUser | null }; error: AdminAuthError }>;
+  };
+
+  const redirectTo = `${portalBaseUrl()}/set-password`;
+  const { data, error } = await admin.inviteUserByEmail(input.email, {
+    redirectTo,
+    data: {
+      full_name: input.fullName ?? undefined,
+      tenant_type: input.tenantType,
+      role_key: input.roleKey,
+    },
+  });
+
+  if (!error && data.user?.id) {
+    return { userId: data.user.id, invitationSent: true };
+  }
+
+  const existingUserId = await findExistingAuthUserIdByEmail(input.db, input.email);
+  if (existingUserId) {
+    return { userId: existingUserId, invitationSent: false, invitationError: error?.message };
+  }
+
+  throw new Error(error?.message ?? "Could not invite portal user.");
+}
+
 async function createTenantAdminForTenant(input: {
   tenantId: string;
   tenantType: string;
@@ -76,26 +136,32 @@ async function createTenantAdminForTenant(input: {
 }) {
   assertRoleMatchesTenant(input.tenantType, input.roleKey);
   const { db } = await requirePlatformAdmin();
-  const { data: created, error } = await db.auth.admin.createUser({
+  const invite = await invitePortalUser({
+    db,
+    tenantType: input.tenantType,
     email: input.email,
-    email_confirm: true,
-    user_metadata: { full_name: input.fullName ?? undefined },
+    fullName: input.fullName,
+    roleKey: input.roleKey,
   });
-  if (error) throw new Error(error.message);
-  const userId = created.user.id;
+  const userId = invite.userId;
 
   await db.from("user_profiles" as never).upsert({ id: userId, email: input.email, full_name: input.fullName } as never);
   await db.from("tenant_users" as never).upsert({ tenant_id: input.tenantId, user_id: userId, status: "active" } as never, { onConflict: "tenant_id,user_id" } as never);
-  await db.from("user_roles" as never).insert({ tenant_id: input.tenantId, user_id: userId, role_key: input.roleKey } as never);
+  await db.from("user_roles" as never).upsert({ tenant_id: input.tenantId, user_id: userId, role_key: input.roleKey } as never, { onConflict: "tenant_id,user_id,role_key" } as never);
 
   await db.from("audit_logs" as never).insert({
     tenant_id: input.tenantId,
     actor_user_id: input.actorUserId,
-    action: "create",
+    action: "invite",
     entity_type: "tenant_user",
     entity_id: userId,
-    fields: ["email", "role_key"],
-    metadata: { role_key: input.roleKey },
+    fields: ["email", "role_key", "invitation"],
+    metadata: {
+      role_key: input.roleKey,
+      invitation_sent: invite.invitationSent,
+      invitation_error: invite.invitationError ?? null,
+      set_password_url: `${portalBaseUrl()}/set-password`,
+    },
   } as never);
 }
 
@@ -198,7 +264,7 @@ export async function createTenant(formData: FormData): Promise<void> {
     entity_type: "tenant",
     entity_id: tenantId,
     fields: ["name", "slug", "case_number_prefix", "branding", "settings"],
-    metadata: { customer_link: `${process.env.NEXT_PUBLIC_CUSTOMER_WEB_URL ?? "https://app.resqly.com"}/partner/${slug}` },
+    metadata: { customer_link: `${process.env.NEXT_PUBLIC_CUSTOMER_WEB_URL ?? "https://app.resqly.se"}/partner/${slug}` },
   } as never);
 
   revalidatePath("/");

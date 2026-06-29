@@ -30,7 +30,7 @@ export default async function DashboardPage() {
         <StatCard label="All cases" value={data.incidentCount} />
         <StatCard label="Manual reviews" value={data.manualReviewCount} />
         <StatCard label="Webhook/API failures" value={data.webhookFailures} />
-        <StatCard label="Customer app" value="app.resqly.com" />
+        <StatCard label="Customer app" value="app.resqly.se" />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1.25fr 0.75fr", gap: 24, marginTop: 24, alignItems: "start" }}>
@@ -40,7 +40,7 @@ export default async function DashboardPage() {
             <h3 style={{ marginTop: 0 }}>Quick actions</h3>
             <p><a href="/tenants">Create insurance company or tow company</a></p>
             <p><a href="/audit">Open audit log</a></p>
-            <p><a href={process.env.NEXT_PUBLIC_CUSTOMER_WEB_URL ?? "https://app.resqly.com"}>Open customer app</a></p>
+            <p><a href={process.env.NEXT_PUBLIC_CUSTOMER_WEB_URL ?? "https://app.resqly.se"}>Open customer app</a></p>
             <p style={{ opacity: 0.72, marginBottom: 0 }}>
               Start with one insurance tenant, set branding, create the first portal admin and test a vehicle-based case.
             </p>

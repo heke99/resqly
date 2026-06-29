@@ -36,9 +36,9 @@ This zip contains the corrected Resqly project after the production-hardening pa
 
 ## Recommended domains
 
-- `resqly.com` and `www.resqly.com` — public marketing/legal site
-- `app.resqly.com` — customer web/PWA
-- `portal.resqly.com` — insurance/towing tenant portal
-- `admin.resqly.com` — superadmin portal
-- `api.resqly.com` — partner API/mobile backend
-- `<partner>.resqly.com` or `assist.partner.se` — white-label customer domains
+- `resqly.se` and `www.resqly.se` — public marketing/legal site
+- `app.resqly.se` — customer web/PWA
+- `portal.resqly.se` — insurance/towing tenant portal
+- `admin.resqly.se` — superadmin portal
+- `api.resqly.se` — partner API/mobile backend
+- `<partner>.resqly.se` or `assist.partner.se` — white-label customer domains

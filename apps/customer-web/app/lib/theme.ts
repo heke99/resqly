@@ -57,7 +57,7 @@ async function loadTheme(tenantId: string, method: string): Promise<ActiveTheme>
 
 /**
  * Resolve white-label for the request. Domain/subdomain is still supported,
- * but app.resqly.com can also carry a partner slug via middleware header from:
+ * but app.resqly.se can also carry a partner slug via middleware header from:
  *   /partner/[slug]
  *   /start?partner=[slug]
  *   /?partner=[slug]

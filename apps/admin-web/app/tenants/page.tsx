@@ -26,7 +26,7 @@ export default async function TenantsPage() {
           <Card style={{ marginTop: 16 }}>
             <strong>Customer links</strong>
             <p style={{ opacity: 0.72, marginBottom: 0 }}>
-              Resqly can run without one subdomain per insurer. Every partner gets a path like <code>app.resqly.com/partner/if</code>.
+              Resqly can run without one subdomain per insurer. Every partner gets a path like <code>app.resqly.se/partner/if</code>.
               Custom domains can be added later as premium white-label.
             </p>
           </Card>
@@ -106,7 +106,7 @@ export default async function TenantsPage() {
             <label htmlFor="privacy_policy">Privacy policy</label>
             <textarea id="privacy_policy" name="privacy_policy" rows={3} placeholder="Partner privacy text shown in customer flow." />
 
-            <h4>5. First portal admin</h4>
+            <h4>5. First portal admin invitation</h4>
             <label htmlFor="admin_full_name">Full name</label>
             <input id="admin_full_name" name="admin_full_name" placeholder="Anna Admin" />
             <label htmlFor="admin_email">Email</label>

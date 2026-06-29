@@ -63,7 +63,7 @@ export default async function TenantDetailPage({ params }: { params: Promise<{ i
   const settings = tenant.settings ?? {};
   const flags = tenant.flags ?? {};
   const legal = tenant.legal ?? {};
-  const customerBase = process.env.NEXT_PUBLIC_CUSTOMER_WEB_URL ?? "https://app.resqly.com";
+  const customerBase = process.env.NEXT_PUBLIC_CUSTOMER_WEB_URL ?? "https://app.resqly.se";
   const customerLink = `${customerBase}/partner/${tenant.slug}`;
   const casePreview = `${tenant.case_number_prefix}-${new Date().getFullYear()}-000001`;
   const productName = str(branding.product_name, tenant.name);
@@ -153,7 +153,7 @@ export default async function TenantDetailPage({ params }: { params: Promise<{ i
         </Card>
 
         <Card>
-          <h3 style={{ marginTop: 0 }}>Create portal user</h3>
+          <h3 style={{ marginTop: 0 }}>Invite portal user</h3>
           <form action={createTenantAdmin}>
             <input type="hidden" name="tenant_id" value={tenant.id} />
             <label htmlFor="full_name">Full name</label>
@@ -180,15 +180,15 @@ export default async function TenantDetailPage({ params }: { params: Promise<{ i
                 </>
               )}
             </select>
-            <div style={{ marginTop: 16 }}><Button type="submit">Create user</Button></div>
+            <div style={{ marginTop: 16 }}><Button type="submit">Send invite</Button></div>
           </form>
         </Card>
 
         <Card>
           <h3 style={{ marginTop: 0 }}>Configuration summary</h3>
           <p><Badge>{tenant.type}</Badge></p>
-          <p><strong>Portal:</strong> {process.env.NEXT_PUBLIC_PORTAL_WEB_URL ?? "https://portal.resqly.com"}</p>
-          <p><strong>API:</strong> {process.env.NEXT_PUBLIC_API_URL ?? "https://api.resqly.com"}</p>
+          <p><strong>Portal:</strong> {process.env.NEXT_PUBLIC_PORTAL_WEB_URL ?? "https://portal.resqly.se"}</p>
+          <p><strong>API:</strong> {process.env.NEXT_PUBLIC_API_URL ?? "https://api.resqly.se"}</p>
           <p><strong>Customer link:</strong><br /><a href={customerLink}>{customerLink}</a></p>
           <p><strong>Case number:</strong> {casePreview}</p>
         </Card>
