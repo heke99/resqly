@@ -16,46 +16,31 @@ export const viewport: Viewport = {
 };
 
 const NAV = [
-  { href: "/", label: "Home" },
-  { href: "/cases", label: "Cases" },
-  { href: "/vehicles", label: "Vehicles" },
-  { href: "/profile", label: "Profile" },
+  { href: "/", label: "Hem" },
+  { href: "/cases", label: "Ärenden" },
+  { href: "/vehicles", label: "Fordon" },
+  { href: "/profile", label: "Profil" },
 ];
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const theme = await getActiveTheme();
   return (
-    <html lang="en">
+    <html lang="sv">
       <body>
         <ThemeRoot tokens={theme.tokens}>
-          <header
-            style={{
-              padding: "16px 20px",
-              fontWeight: 800,
-              fontSize: 18,
-              color: "var(--rs-color-primary)",
-            }}
-          >
-            {theme.productName}
+          <header className="app-header">
+            <a href="/" className="brand-lockup">
+              {theme.logoUrl ? <img src={theme.logoUrl} alt="" className="brand-logo" /> : <span className="brand-mark" />}
+              <span>{theme.productName}</span>
+            </a>
+            {theme.method ? <span className="context-pill">Partnerläge</span> : null}
           </header>
-          <div className="container" style={{ paddingBottom: 80 }}>
+          <div className="container" style={{ paddingBottom: 88 }}>
             {children}
           </div>
-          <nav
-            style={{
-              position: "fixed",
-              bottom: 0,
-              left: 0,
-              right: 0,
-              display: "flex",
-              justifyContent: "space-around",
-              padding: "10px 0",
-              background: "var(--rs-color-surface)",
-              borderTop: "1px solid rgba(0,0,0,0.08)",
-            }}
-          >
+          <nav className="bottom-nav">
             {NAV.map((n) => (
-              <a key={n.href} href={n.href} style={{ fontWeight: 600, fontSize: 14 }}>
+              <a key={n.href} href={n.href}>
                 {n.label}
               </a>
             ))}

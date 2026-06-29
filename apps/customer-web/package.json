@@ -10,6 +10,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@resqly/bankid": "workspace:*",
     "@resqly/database": "workspace:*",
     "@resqly/types": "workspace:*",
     "@resqly/ui": "workspace:*",

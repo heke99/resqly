@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useSupabase } from "../lib/supabase-client";
 
 interface Vehicle {
@@ -9,10 +10,13 @@ interface Vehicle {
   make: string | null;
   model: string | null;
   is_default: boolean;
+  insurance_company_id: string | null;
 }
 
-export default function VehiclesPage() {
+function VehiclesInner() {
   const supabase = useSupabase();
+  const params = useSearchParams();
+  const partner = params.get("partner") ?? params.get("tenant");
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [reg, setReg] = useState("");
   const [make, setMake] = useState("");
@@ -26,7 +30,11 @@ export default function VehiclesPage() {
       setStatus("not_authed");
       return;
     }
-    const { data } = await supabase.from("vehicles").select("*").eq("owner_user_id", auth.user.id);
+    const { data } = await supabase
+      .from("vehicles")
+      .select("id, registration_number, make, model, is_default, insurance_company_id")
+      .eq("owner_user_id", auth.user.id)
+      .order("created_at", { ascending: false });
     setVehicles(((data as Vehicle[] | null) ?? []) as Vehicle[]);
   }, [supabase]);
 
@@ -42,6 +50,7 @@ export default function VehiclesPage() {
       setStatus("not_authed");
       return;
     }
+    await supabase.from("user_profiles").upsert({ id: auth.user.id, email: auth.user.email ?? null } as never);
     const normalized = reg.toUpperCase().replace(/[\s-]/g, "");
     const { error } = await supabase.from("vehicles").insert({
       owner_user_id: auth.user.id,
@@ -55,6 +64,7 @@ export default function VehiclesPage() {
       setReg("");
       setMake("");
       setModel("");
+      setStatus("Fordon sparat. Koppla nu rätt försäkring.");
       await load();
     }
   }
@@ -69,20 +79,22 @@ export default function VehiclesPage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 22 }}>My Vehicles</h1>
+      <div className="section-title"><h1 style={{ fontSize: 24 }}>Mina fordon</h1></div>
+      <p style={{ opacity: 0.72 }}>
+        Varje fordon kan kopplas till ett eget försäkringsbolag. När du startar ett ärende väljer Resqly rätt partner från bilen.
+      </p>
       {vehicles.length === 0 ? (
         <p style={{ opacity: 0.7 }}>No vehicles yet. Add your first below.</p>
       ) : (
-        <ul style={{ listStyle: "none", padding: 0 }}>
-          {vehicles.map((v) => (
-            <li key={v.id} className="tile" style={{ marginBottom: 10 }}>
-              {v.make} {v.model} — {v.registration_number}
-              {v.is_default ? " (default)" : ""}
-            </li>
-          ))}
-        </ul>
+        vehicles.map((v) => (
+          <div key={v.id} className="vehicle-card">
+            <strong>{v.registration_number}</strong>
+            <div className="vehicle-meta">{[v.make, v.model].filter(Boolean).join(" ") || "Fordon"}{v.is_default ? " • default" : ""}</div>
+            <a className="tile" href={`/insurances?vehicle=${v.id}${partner ? `&partner=${partner}` : ""}`}>Koppla/ändra försäkring</a>
+          </div>
+        ))
       )}
-      <h2 style={{ fontSize: 18, marginTop: 24 }}>Add vehicle</h2>
+      <h2 style={{ fontSize: 18, marginTop: 24 }}>Lägg till fordon</h2>
       <form onSubmit={add}>
         <label htmlFor="reg">Registration number</label>
         <input id="reg" value={reg} onChange={(e) => setReg(e.target.value)} placeholder="ABC123" required />
@@ -91,12 +103,18 @@ export default function VehiclesPage() {
         <label htmlFor="model">Model</label>
         <input id="model" value={model} onChange={(e) => setModel(e.target.value)} placeholder="XC60" />
         <div style={{ marginTop: 16 }}>
-          <button className="bigbtn" type="submit">
-            Add vehicle
-          </button>
+          <button className="bigbtn" type="submit">Add vehicle</button>
         </div>
       </form>
       {status && status !== "not_authed" ? <p>{status}</p> : null}
     </div>
+  );
+}
+
+export default function VehiclesPage() {
+  return (
+    <Suspense fallback={<p>Laddar…</p>}>
+      <VehiclesInner />
+    </Suspense>
   );
 }

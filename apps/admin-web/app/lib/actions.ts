@@ -3,33 +3,182 @@
 import { revalidatePath } from "next/cache";
 import { requirePlatformAdmin } from "./auth";
 
-/** Superadmin: create a tenant (insurance / tow company / etc.) with defaults. */
+type TenantType =
+  | "insurance_company"
+  | "tow_company"
+  | "fleet_company"
+  | "leasing_company"
+  | "workshop_partner"
+  | "platform_internal";
+
+const INSURANCE_ROLES = new Set([
+  "insurance_owner_admin",
+  "insurance_claims_handler",
+  "insurance_roadside_handler",
+  "insurance_fraud_reviewer",
+  "insurance_finance",
+  "insurance_support",
+  "insurance_integration_manager",
+  "insurance_viewer",
+]);
+const TOW_ROLES = new Set([
+  "tow_owner_admin",
+  "tow_dispatcher",
+  "tow_driver",
+  "tow_vehicle_manager",
+  "tow_finance",
+  "tow_viewer",
+]);
+
+function text(formData: FormData, key: string): string | null {
+  const value = String(formData.get(key) ?? "").trim();
+  return value.length > 0 ? value : null;
+}
+
+function bool(formData: FormData, key: string): boolean {
+  return formData.get(key) === "on" || formData.get(key) === "true";
+}
+
+function numberOrNull(formData: FormData, key: string): number | null {
+  const raw = text(formData, key);
+  if (!raw) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function normaliseSlug(slug: string): string {
+  return slug
+    .trim()
+    .toLowerCase()
+    .replace(/å/g, "a")
+    .replace(/ä/g, "a")
+    .replace(/ö/g, "o")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function assertRoleMatchesTenant(type: string, roleKey: string): void {
+  if (type === "insurance_company" && !INSURANCE_ROLES.has(roleKey)) {
+    throw new Error("Insurance tenants can only receive insurance roles.");
+  }
+  if (type === "tow_company" && !TOW_ROLES.has(roleKey)) {
+    throw new Error("Tow tenants can only receive towing roles.");
+  }
+}
+
+async function createTenantAdminForTenant(input: {
+  tenantId: string;
+  tenantType: string;
+  email: string;
+  fullName: string | null;
+  roleKey: string;
+  actorUserId: string;
+}) {
+  assertRoleMatchesTenant(input.tenantType, input.roleKey);
+  const { db } = await requirePlatformAdmin();
+  const { data: created, error } = await db.auth.admin.createUser({
+    email: input.email,
+    email_confirm: true,
+    user_metadata: { full_name: input.fullName ?? undefined },
+  });
+  if (error) throw new Error(error.message);
+  const userId = created.user.id;
+
+  await db.from("user_profiles" as never).upsert({ id: userId, email: input.email, full_name: input.fullName } as never);
+  await db.from("tenant_users" as never).upsert({ tenant_id: input.tenantId, user_id: userId, status: "active" } as never, { onConflict: "tenant_id,user_id" } as never);
+  await db.from("user_roles" as never).insert({ tenant_id: input.tenantId, user_id: userId, role_key: input.roleKey } as never);
+
+  await db.from("audit_logs" as never).insert({
+    tenant_id: input.tenantId,
+    actor_user_id: input.actorUserId,
+    action: "create",
+    entity_type: "tenant_user",
+    entity_id: userId,
+    fields: ["email", "role_key"],
+    metadata: { role_key: input.roleKey },
+  } as never);
+}
+
+/** Superadmin: create a complete white-label tenant with defaults, branding and optional first admin. */
 export async function createTenant(formData: FormData): Promise<void> {
   const { db, user } = await requirePlatformAdmin();
 
-  const type = String(formData.get("type") ?? "");
-  const name = String(formData.get("name") ?? "").trim();
-  const slug = String(formData.get("slug") ?? "")
-    .trim()
-    .toLowerCase();
-  const prefix = String(formData.get("case_number_prefix") ?? "")
-    .trim()
-    .toUpperCase();
-  if (!name || !slug || !prefix || !type) throw new Error("All fields are required.");
+  const type = String(formData.get("type") ?? "") as TenantType;
+  const name = text(formData, "name");
+  const slug = normaliseSlug(text(formData, "slug") ?? "");
+  const prefix = (text(formData, "case_number_prefix") ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!name || !slug || !prefix || !type) throw new Error("Type, name, slug and case prefix are required.");
+
+  const productName = text(formData, "product_name") ?? name;
+  const logoUrl = text(formData, "logo_url");
+  const logoDarkUrl = text(formData, "logo_dark_url");
+  const faviconUrl = text(formData, "favicon_url");
+  const supportPhone = text(formData, "support_phone");
+  const supportEmail = text(formData, "support_email");
+  const supportUrl = text(formData, "support_url");
+  const customDomain = text(formData, "custom_domain")?.toLowerCase();
+  const colorPrimary = text(formData, "color_primary") ?? "#0B5FFF";
+  const colorSecondary = text(formData, "color_secondary") ?? "#1F2937";
+  const colorBackground = text(formData, "color_background") ?? "#FFFFFF";
+  const terms = text(formData, "terms_of_service");
+  const privacy = text(formData, "privacy_policy");
+  const adminEmail = text(formData, "admin_email")?.toLowerCase();
+  const adminName = text(formData, "admin_full_name");
+  let roleKey = text(formData, "admin_role_key") ?? (type === "tow_company" ? "tow_owner_admin" : "insurance_owner_admin");
+  if (type === "tow_company" && roleKey.startsWith("insurance_")) roleKey = "tow_owner_admin";
+  if (type === "insurance_company" && roleKey.startsWith("tow_")) roleKey = "insurance_owner_admin";
+
+  if (adminEmail && (type === "insurance_company" || type === "tow_company")) {
+    assertRoleMatchesTenant(type, roleKey);
+  }
 
   const { data, error } = await db
     .from("tenants" as never)
-    .insert({ type, name, slug, case_number_prefix: prefix } as never)
+    .insert({ type, name, slug, case_number_prefix: prefix, status: "active" } as never)
     .select("id")
     .single();
   if (error) throw new Error(error.message);
   const tenantId = (data as { id: string }).id;
 
-  // Default config rows so the tenant is immediately usable.
-  await db.from("tenant_settings" as never).insert({ tenant_id: tenantId } as never);
-  await db.from("tenant_branding" as never).insert({ tenant_id: tenantId, product_name: name } as never);
-  await db.from("tenant_theme_tokens" as never).insert({ tenant_id: tenantId } as never);
-  await db.from("tenant_feature_flags" as never).insert({ tenant_id: tenantId } as never);
+  await db.from("tenant_branding" as never).insert({
+    tenant_id: tenantId,
+    product_name: productName,
+    logo_url: logoUrl,
+    logo_dark_url: logoDarkUrl,
+    favicon_url: faviconUrl,
+    support_phone: supportPhone,
+    support_email: supportEmail,
+    support_url: supportUrl,
+  } as never);
+  await db.from("tenant_theme_tokens" as never).insert({
+    tenant_id: tenantId,
+    color_primary: colorPrimary,
+    color_secondary: colorSecondary,
+    color_background: colorBackground,
+  } as never);
+  await db.from("tenant_settings" as never).insert({
+    tenant_id: tenantId,
+    default_dispatch_strategy: text(formData, "default_dispatch_strategy") ?? "eta_first",
+    bankid_required_for_claims: bool(formData, "bankid_required_for_claims"),
+    bankid_required_for_tow: bool(formData, "bankid_required_for_tow"),
+    allow_marketplace_fallback: bool(formData, "allow_marketplace_fallback"),
+    max_dispatch_radius_km: numberOrNull(formData, "max_dispatch_radius_km") ?? 50,
+  } as never);
+  await db.from("tenant_feature_flags" as never).insert({
+    tenant_id: tenantId,
+    damage_claims_enabled: bool(formData, "damage_claims_enabled"),
+    marketplace_enabled: bool(formData, "marketplace_enabled"),
+    realtime_tracking_enabled: true,
+  } as never);
+  await db.from("tenant_legal_texts" as never).insert({
+    tenant_id: tenantId,
+    locale: "sv-SE",
+    terms_of_service: terms,
+    privacy_policy: privacy,
+  } as never);
+  if (customDomain) {
+    await db.from("tenant_domains" as never).insert({ tenant_id: tenantId, domain: customDomain, is_primary: true, verified: false } as never);
+  }
 
   if (type === "insurance_company") {
     await db.from("insurance_companies" as never).insert({ tenant_id: tenantId, name } as never);
@@ -38,73 +187,106 @@ export async function createTenant(formData: FormData): Promise<void> {
     await db.from("tow_companies" as never).insert({ tenant_id: tenantId, name } as never);
   }
 
+  if (adminEmail && (type === "insurance_company" || type === "tow_company")) {
+    await createTenantAdminForTenant({ tenantId, tenantType: type, email: adminEmail, fullName: adminName, roleKey, actorUserId: user.id });
+  }
+
   await db.from("audit_logs" as never).insert({
     tenant_id: tenantId,
     actor_user_id: user.id,
     action: "create",
     entity_type: "tenant",
     entity_id: tenantId,
-    fields: ["name", "slug", "case_number_prefix"],
+    fields: ["name", "slug", "case_number_prefix", "branding", "settings"],
+    metadata: { customer_link: `${process.env.NEXT_PUBLIC_CUSTOMER_WEB_URL ?? "https://app.resqly.com"}/partner/${slug}` },
   } as never);
 
+  revalidatePath("/");
   revalidatePath("/tenants");
-}
-
-/** Superadmin/tenant admin: update tenant branding + prefix. */
-export async function updateTenantBranding(formData: FormData): Promise<void> {
-  const { db, user } = await requirePlatformAdmin();
-  const tenantId = String(formData.get("tenant_id") ?? "");
-  const productName = String(formData.get("product_name") ?? "");
-  const colorPrimary = String(formData.get("color_primary") ?? "");
-  const prefix = String(formData.get("case_number_prefix") ?? "").toUpperCase();
-
-  if (productName) {
-    await db
-      .from("tenant_branding" as never)
-      .update({ product_name: productName } as never)
-      .eq("tenant_id", tenantId);
-  }
-  if (colorPrimary) {
-    await db
-      .from("tenant_theme_tokens" as never)
-      .update({ color_primary: colorPrimary } as never)
-      .eq("tenant_id", tenantId);
-  }
-  if (prefix) {
-    await db.from("tenants" as never).update({ case_number_prefix: prefix } as never).eq("id", tenantId);
-  }
   revalidatePath(`/tenants/${tenantId}`);
 }
 
-/** Superadmin: create the first tenant admin user (owner/admin). */
-export async function createTenantAdmin(formData: FormData): Promise<void> {
+/** Superadmin/tenant admin: update tenant branding + prefix + white-label settings. */
+export async function updateTenantBranding(formData: FormData): Promise<void> {
   const { db, user } = await requirePlatformAdmin();
   const tenantId = String(formData.get("tenant_id") ?? "");
-  const email = String(formData.get("email") ?? "").trim();
-  const fullName = String(formData.get("full_name") ?? "").trim();
-  const roleKey = String(formData.get("role_key") ?? "insurance_owner_admin");
-  if (!email) throw new Error("Email is required.");
+  if (!tenantId) throw new Error("tenant_id is required.");
 
-  const { data: created, error } = await db.auth.admin.createUser({
-    email,
-    email_confirm: true,
-    user_metadata: { full_name: fullName },
-  });
-  if (error) throw new Error(error.message);
-  const userId = created.user.id;
+  const prefix = text(formData, "case_number_prefix")?.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (prefix) {
+    await db.from("tenants" as never).update({ case_number_prefix: prefix } as never).eq("id", tenantId);
+  }
 
-  await db.from("user_profiles" as never).upsert({ id: userId, email, full_name: fullName } as never);
-  await db.from("tenant_users" as never).insert({ tenant_id: tenantId, user_id: userId } as never);
-  await db.from("user_roles" as never).insert({ tenant_id: tenantId, user_id: userId, role_key: roleKey } as never);
+  await db.from("tenant_branding" as never).upsert({
+    tenant_id: tenantId,
+    product_name: text(formData, "product_name"),
+    logo_url: text(formData, "logo_url"),
+    logo_dark_url: text(formData, "logo_dark_url"),
+    favicon_url: text(formData, "favicon_url"),
+    support_phone: text(formData, "support_phone"),
+    support_email: text(formData, "support_email"),
+    support_url: text(formData, "support_url"),
+  } as never);
+
+  await db.from("tenant_theme_tokens" as never).upsert({
+    tenant_id: tenantId,
+    color_primary: text(formData, "color_primary") ?? "#0B5FFF",
+    color_secondary: text(formData, "color_secondary") ?? "#1F2937",
+    color_background: text(formData, "color_background") ?? "#FFFFFF",
+  } as never);
+
+  await db.from("tenant_settings" as never).upsert({
+    tenant_id: tenantId,
+    default_dispatch_strategy: text(formData, "default_dispatch_strategy") ?? "eta_first",
+    bankid_required_for_claims: bool(formData, "bankid_required_for_claims"),
+    bankid_required_for_tow: bool(formData, "bankid_required_for_tow"),
+    allow_marketplace_fallback: bool(formData, "allow_marketplace_fallback"),
+    max_dispatch_radius_km: numberOrNull(formData, "max_dispatch_radius_km") ?? 50,
+  } as never);
+
+  await db.from("tenant_feature_flags" as never).upsert({
+    tenant_id: tenantId,
+    damage_claims_enabled: bool(formData, "damage_claims_enabled"),
+    marketplace_enabled: bool(formData, "marketplace_enabled"),
+    realtime_tracking_enabled: true,
+  } as never);
+
+  await db.from("tenant_legal_texts" as never).upsert({
+    tenant_id: tenantId,
+    locale: "sv-SE",
+    terms_of_service: text(formData, "terms_of_service"),
+    privacy_policy: text(formData, "privacy_policy"),
+  } as never, { onConflict: "tenant_id,locale" } as never);
+
+  const domain = text(formData, "custom_domain")?.toLowerCase();
+  if (domain) {
+    await db.from("tenant_domains" as never).upsert({ tenant_id: tenantId, domain, is_primary: true } as never, { onConflict: "domain" } as never);
+  }
 
   await db.from("audit_logs" as never).insert({
     tenant_id: tenantId,
     actor_user_id: user.id,
-    action: "create",
-    entity_type: "tenant_user",
-    entity_id: userId,
-    fields: ["email", "role_key"],
+    action: "update",
+    entity_type: "tenant_branding",
+    entity_id: tenantId,
+    fields: ["branding", "theme", "settings", "legal"],
   } as never);
+  revalidatePath(`/tenants/${tenantId}`);
+}
 
+/** Superadmin: create a tenant admin user (owner/admin/role-specific). */
+export async function createTenantAdmin(formData: FormData): Promise<void> {
+  const { db, user } = await requirePlatformAdmin();
+  const tenantId = String(formData.get("tenant_id") ?? "");
+  const email = text(formData, "email")?.toLowerCase();
+  const fullName = text(formData, "full_name");
+  const roleKey = text(formData, "role_key") ?? "insurance_owner_admin";
+  if (!email) throw new Error("Email is required.");
+
+  const { data: tenant } = await db.from("tenants" as never).select("type").eq("id", tenantId).maybeSingle();
+  const tenantType = (tenant as { type?: string } | null)?.type;
+  if (!tenantType) throw new Error("Tenant not found.");
+
+  await createTenantAdminForTenant({ tenantId, tenantType, email, fullName, roleKey, actorUserId: user.id });
   revalidatePath(`/tenants/${tenantId}`);
 }

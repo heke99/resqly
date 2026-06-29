@@ -34,7 +34,7 @@ const STATUS_BUTTONS: Array<{ label: string; status: string }> = [
 ];
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("jobs");
+  const [screen, setScreen] = useState<Screen>("login");
   const [activeJob, setActiveJob] = useState<Job | null>(null);
 
   return (
@@ -102,9 +102,17 @@ function Login({ onDone }: { onDone: () => void }) {
 function Jobs({ onOpen }: { onOpen: (j: Job) => void }) {
   const supabase = getSupabase();
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [message, setMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!supabase) return;
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth.user) {
+      setMessage("Log in before viewing jobs.");
+      setJobs([]);
+      return;
+    }
+    setMessage(null);
     // RLS only returns jobs offered to or assigned to this driver.
     const { data } = await supabase
       .from("tow_jobs")
@@ -124,7 +132,7 @@ function Jobs({ onOpen }: { onOpen: (j: Job) => void }) {
       data={jobs}
       keyExtractor={(j) => j.id}
       ListHeaderComponent={<Text style={styles.h1}>Jobs</Text>}
-      ListEmptyComponent={<Text style={styles.muted}>No jobs offered to you right now.</Text>}
+      ListEmptyComponent={<Text style={styles.muted}>{message ?? "No jobs offered to you right now."}</Text>}
       renderItem={({ item }) => (
         <Pressable style={styles.card} onPress={() => onOpen(item)}>
           <Text style={{ fontWeight: "700" }}>{towStatusLabel(item.status as never)}</Text>

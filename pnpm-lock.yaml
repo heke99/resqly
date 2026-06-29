@@ -200,6 +200,9 @@ importers:
 
   apps/customer-web:
     dependencies:
+      '@resqly/bankid':
+        specifier: workspace:*
+        version: link:../../packages/bankid
       '@resqly/database':
         specifier: workspace:*
         version: link:../../packages/database

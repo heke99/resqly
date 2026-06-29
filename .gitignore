@@ -31,3 +31,6 @@ apps/*/.env.*.local
 packages/*/.env
 packages/*/.env.local
 packages/*/.env.*.local
+
+# Never commit local env files without a dot either
+env

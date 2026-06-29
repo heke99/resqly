@@ -53,3 +53,122 @@ label {
   border: none;
   cursor: pointer;
 }
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--rs-color-background);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 850;
+  font-size: 18px;
+  color: var(--rs-color-primary);
+}
+.brand-logo {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  background: var(--rs-color-primary);
+  display: inline-block;
+}
+.context-pill,
+.badge {
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-around;
+  padding: 10px 0 calc(10px + env(safe-area-inset-bottom));
+  background: var(--rs-color-surface);
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  z-index: 30;
+}
+.bottom-nav a {
+  font-weight: 700;
+  font-size: 14px;
+}
+.hero-card {
+  background: linear-gradient(135deg, var(--rs-color-primary), var(--rs-color-secondary, #1f2937));
+  color: var(--rs-color-on-primary);
+  border-radius: 24px;
+  padding: 24px;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.16);
+}
+.hero-card h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.05;
+}
+.hero-card p {
+  opacity: 0.9;
+}
+.hero-card .bigbtn {
+  background: var(--rs-color-on-primary);
+  color: var(--rs-color-primary);
+  margin-top: 18px;
+}
+.eyebrow {
+  margin: 0 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  font-weight: 800;
+}
+.secondary-link {
+  display: block;
+  margin-top: 12px;
+  color: inherit;
+  font-weight: 700;
+  text-align: center;
+}
+.vehicle-card,
+.status-card {
+  display: block;
+  padding: 18px;
+  border-radius: 18px;
+  background: var(--rs-color-surface);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  margin-bottom: 12px;
+}
+.vehicle-card strong {
+  display: block;
+  font-size: 18px;
+}
+.vehicle-meta {
+  opacity: 0.72;
+  margin: 6px 0 12px;
+}
+.action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 16px 0;
+}
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 24px;
+}

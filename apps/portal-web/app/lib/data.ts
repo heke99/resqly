@@ -88,3 +88,24 @@ export async function getTenantSettings(tenantId: string): Promise<Row | null> {
   const { data } = await db.from("tenant_settings" as never).select("*").eq("tenant_id", tenantId).maybeSingle();
   return (data as Row | null) ?? null;
 }
+
+export interface PortalDashboardData {
+  incidents: Row[];
+  jobs: Row[];
+  drivers: Row[];
+  towVehicles: Row[];
+  apiClients: Row[];
+  webhooks: Row[];
+}
+
+export async function getPortalDashboardData(tenantId: string): Promise<PortalDashboardData> {
+  const [incidents, jobs, drivers, towVehicles, apiClients, webhooks] = await Promise.all([
+    listIncidents(tenantId),
+    listTowJobs(tenantId),
+    listDrivers(tenantId),
+    listTowVehicles(tenantId),
+    listApiClients(tenantId),
+    listWebhooks(tenantId),
+  ]);
+  return { incidents, jobs, drivers, towVehicles, apiClients, webhooks };
+}

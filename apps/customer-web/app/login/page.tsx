@@ -24,8 +24,15 @@ export default function LoginPage() {
     const { error } = await fn;
     if (error) setMessage(error.message);
     else {
+      const { data: userData } = await supabase!.auth.getUser();
+      if (userData.user) {
+        await supabase!.from("user_profiles").upsert({
+          id: userData.user.id,
+          email: userData.user.email ?? null,
+        } as never);
+      }
       setMessage(mode === "sign_up" ? "Account created. You can now use the app." : "Signed in.");
-      if (mode === "sign_in") window.location.href = "/";
+      window.location.href = "/";
     }
   }
 

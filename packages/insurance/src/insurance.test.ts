@@ -73,7 +73,7 @@ describe("incident building", () => {
       tenantId: "t1",
       customerUserId: "u1",
       requiresBankid: true,
-      input: { type: "towing", problem_type: "dead_battery" },
+      input: { type: "towing", customer_user_id: "00000000-0000-4000-8000-000000000001", problem_type: "dead_battery" },
     });
     expect(row.status).toBe("awaiting_bankid");
     expect(row.bankid_verified).toBe(false);

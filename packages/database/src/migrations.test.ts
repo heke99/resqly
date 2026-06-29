@@ -46,4 +46,10 @@ describe("migrations", () => {
     expect(sql).toContain("create extension if not exists postgis");
     expect(sql).toContain("geography(Point, 4326)");
   });
+
+  it("supports universal customer domain with vehicle-based insurance context", () => {
+    expect(sql).toContain("customer_insurance_connections");
+    expect(sql).toContain("idx_vip_one_active_per_vehicle");
+    expect(sql).toContain("vehicle_policies_owner_write");
+  });
 });

@@ -5,18 +5,18 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Resqly Portal",
-  description: "Insurance & towing company portal",
+  description: "Insurance and towing company portal",
 };
 
 const NAV = [
   { href: "/", label: "Dashboard" },
-  { href: "/cases", label: "Cases & claims" },
-  { href: "/jobs", label: "Tow jobs" },
+  { href: "/cases", label: "Cases / claims" },
+  { href: "/jobs", label: "Tow / dispatch" },
   { href: "/drivers", label: "Drivers" },
   { href: "/vehicles", label: "Tow vehicles" },
-  { href: "/settings", label: "Settings & branding" },
+  { href: "/settings", label: "White-label settings" },
   { href: "/integrations", label: "API & webhooks" },
-  { href: "/roles", label: "Roles & permissions" },
+  { href: "/roles", label: "Users & roles" },
 ];
 
 export default function RootLayout({ children }: { children: ReactNode }) {

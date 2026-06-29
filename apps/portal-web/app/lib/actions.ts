@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { newApiKey, sha256Hex, newId } from "@resqly/utils";
+import { redirect } from "next/navigation";
+import { randomBytes } from "node:crypto";
+import { newApiKey, sha256Hex } from "@resqly/utils";
 import { requirePortalTenant } from "./auth";
 
 async function portalDb(tenantId?: string | null) {
@@ -147,7 +149,7 @@ export async function createWebhook(formData: FormData): Promise<void> {
     tenant_id: tenantId,
     url,
     events,
-    secret: newId(),
+    secret: randomBytes(32).toString("base64url"),
   } as never);
   revalidatePath("/integrations");
 }
@@ -155,7 +157,7 @@ export async function createWebhook(formData: FormData): Promise<void> {
 /** Create an API key; the raw key is shown once (stored only as a hash). */
 export async function createApiKey(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant, userId } = await portalDb(tenantId);
   assertTenant(tenant.id, tenantId);
   const name = String(formData.get("name") ?? "API client");
   const { key, last4 } = newApiKey("rk_live");
@@ -165,6 +167,14 @@ export async function createApiKey(formData: FormData): Promise<void> {
     api_key_hash: sha256Hex(key),
     key_last4: last4,
   } as never);
-  // In production the raw key is surfaced once via a flash message; omitted here.
-  revalidatePath("/integrations");
+  await client.from("audit_logs" as never).insert({
+    tenant_id: tenantId,
+    actor_user_id: userId,
+    action: "create",
+    entity_type: "api_key",
+    entity_id: name,
+    fields: ["name", "key_last4"],
+    metadata: { key_last4: last4, raw_key_shown_once: true },
+  } as never);
+  redirect(`/integrations?new_key=${encodeURIComponent(key)}`);
 }

@@ -11,6 +11,8 @@ interface Incident {
   type: string;
   status: string;
   description: string | null;
+  requires_bankid: boolean;
+  bankid_verified: boolean;
 }
 
 export default function CaseDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -20,22 +22,16 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
   const [towStatus, setTowStatus] = useState<TowJobStatus | null>(null);
   const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
   const [authed, setAuthed] = useState<boolean | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!supabase) return;
     const { data: auth } = await supabase.auth.getUser();
-    if (!auth.user) {
-      setAuthed(false);
-      return;
-    }
+    if (!auth.user) { setAuthed(false); return; }
     setAuthed(true);
     const { data: inc } = await supabase.from("incidents").select("*").eq("id", id).maybeSingle();
     setIncident((inc as Incident | null) ?? null);
-    const { data: job } = await supabase
-      .from("tow_jobs")
-      .select("id, status")
-      .eq("incident_id", id)
-      .maybeSingle();
+    const { data: job } = await supabase.from("tow_jobs").select("id, status").eq("incident_id", id).maybeSingle();
     const jobRow = job as { id: string; status: TowJobStatus } | null;
     if (jobRow) {
       setTowStatus(jobRow.status);
@@ -53,41 +49,76 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
 
   useEffect(() => {
     void load();
-    const t = setInterval(() => void load(), 15000); // polling fallback when realtime is down
+    const t = setInterval(() => void load(), 15000);
     return () => clearInterval(t);
   }, [load]);
 
+  async function accessToken() {
+    if (!supabase) return null;
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token ?? null;
+  }
+
+  async function mockSign() {
+    const token = await accessToken();
+    if (!token) return;
+    const res = await fetch(`/api/customer/cases/${id}/bankid/mock-sign`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) setMessage(json.error ?? "BankID failed.");
+    else { setMessage("BankID verifierad."); await load(); }
+  }
+
+  async function requestTow() {
+    const token = await accessToken();
+    if (!token) return;
+    const res = await fetch(`/api/customer/cases/${id}/request-tow`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify({ priority: "normal" }) });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) setMessage(json.error ?? "Could not request tow.");
+    else { setMessage(`Bärgning begärd: ${json.status}`); await load(); }
+  }
+
   if (!supabase) return <p>Unavailable until Supabase is configured.</p>;
-  if (authed === false)
-    return (
-      <p>
-        Please <a href="/login">log in</a>.
-      </p>
-    );
+  if (authed === false) return <p>Please <a href="/login">log in</a>.</p>;
   if (!incident) return <p>Loading case…</p>;
 
   return (
     <div>
-      <h1 style={{ fontSize: 22 }}>{incident.case_number ?? "Case"}</h1>
-      <p style={{ opacity: 0.7 }}>
-        {incident.type} • {incident.status}
-      </p>
+      <h1 style={{ fontSize: 24 }}>{incident.case_number ?? "Case"}</h1>
+      <p style={{ opacity: 0.7 }}>{incident.type} • {incident.status}</p>
+
+      {incident.requires_bankid && !incident.bankid_verified ? (
+        <div className="status-card">
+          <strong>BankID krävs</strong>
+          <p className="vehicle-meta">Verifiera ärendet innan det skickas vidare till försäkringsbolag/bärgning.</p>
+          <button className="bigbtn" onClick={mockSign}>Verifiera med BankID mock/test</button>
+        </div>
+      ) : null}
+
+      {incident.bankid_verified && !towStatus && incident.type !== "damage_claim" ? (
+        <div className="status-card">
+          <strong>Redo för bärgning</strong>
+          <p className="vehicle-meta">Vi kan nu begära bärgning för ärendet.</p>
+          <button className="bigbtn" onClick={requestTow}>Begär bärgning</button>
+        </div>
+      ) : null}
 
       {towStatus ? (
-        <div className="tile" style={{ marginTop: 12 }}>
+        <div className="status-card" style={{ marginTop: 12 }}>
           <strong>{towStatusLabel(towStatus)}</strong>
           <p style={{ margin: "6px 0 0" }}>{whatHappensNext(towStatus)}</p>
           {etaSeconds != null ? <p style={{ margin: "6px 0 0" }}>ETA: {formatEta(etaSeconds)}</p> : null}
         </div>
+      ) : incident.type === "damage_claim" ? (
+        <p style={{ opacity: 0.7 }}>Skadeärendet är synligt i försäkringsbolagets portal efter BankID-verifiering.</p>
       ) : (
         <p style={{ opacity: 0.7 }}>{whatHappensNext("matching")}</p>
       )}
 
-      <div className="tile" style={{ marginTop: 12, background: "transparent", padding: 0 }}>
-        <a className="bigbtn" href="tel:+46000000000" style={{ marginTop: 12 }}>
-          Call tow driver
-        </a>
+      <div className="status-card" style={{ marginTop: 12 }}>
+        <strong>Vad händer nu?</strong>
+        <p className="vehicle-meta">Status uppdateras här. Om realtime är nere hämtar appen ny status via polling.</p>
       </div>
+      {message ? <p>{message}</p> : null}
     </div>
   );
 }
