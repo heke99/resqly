@@ -44,8 +44,9 @@ NOTIFICATIONS_EMAIL_ENABLED=true
 # Expo push / driver mobile
 EXPO_PUSH_ENABLED=true
 EXPO_PUSH_URL=https://exp.host/--/api/v2/push/send
-EXPO_PROJECT_ID=
-EXPO_PUBLIC_PROJECT_ID=
+EXPO_PUSH_ENABLED=true
+EXPO_PUSH_URL=https://exp.host/--/api/v2/push/send
+EXPO_PROJECT_ID=1ab3212c-fd1a-41df-8df3-ce2625ccfb6c
 EXPO_PUBLIC_SUPABASE_URL=xfffff
 EXPO_PUBLIC_SUPABASE_ANON_KEY=
 EXPO_PUBLIC_API_URL=https://api.resqly.se
