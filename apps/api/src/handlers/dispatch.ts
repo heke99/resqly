@@ -1,11 +1,13 @@
 import { dispatchRunInputSchema } from "@resqly/types";
 import type { Coordinate, DispatchStrategy } from "@resqly/types";
 import { notFound } from "@resqly/utils";
-import { selectDispatch, type DispatchRequest } from "@resqly/dispatch";
+import { selectDispatch, type DispatchCandidate, type DispatchRequest } from "@resqly/dispatch";
+import { MapsClient } from "@resqly/maps";
 import { buildOfferPushMessage, sendExpoPush } from "@resqly/notifications";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
 import type { TowJobRecord } from "../repo/types";
+import { enqueueWebhookEvent } from "../services/notifications";
 
 export interface RunDispatchInput {
   job: TowJobRecord;
@@ -42,8 +44,13 @@ export async function runDispatchForJob(
     from_status: job.status,
     to_status: "matching",
   });
+  await enqueueWebhookEvent(ctx, "tow.dispatch_started", {
+    tow_job_id: job.id,
+    incident_id: job.incident_id,
+    pickup,
+  });
 
-  const candidates = await ctx.repo.getDispatchCandidates(
+  const rawCandidates = await ctx.repo.getDispatchCandidates(
     pickup,
     settings.max_dispatch_radius_km,
     settings.max_dispatch_candidates,
@@ -52,6 +59,7 @@ export async function runDispatchForJob(
       insuranceTenantId: input.payerType === "insurance_company" ? job.tenant_id : null,
     },
   );
+  const candidates = await enrichCandidatesWithGoogleEta(ctx, rawCandidates, pickup);
 
   const strategy = (input.strategy ?? settings.default_dispatch_strategy) as DispatchStrategy;
   const request: DispatchRequest = {
@@ -83,6 +91,11 @@ export async function runDispatchForJob(
       from_status: "matching",
       to_status: "offered",
     });
+    await enqueueWebhookEvent(ctx, "tow.offered", {
+      tow_job_id: job.id,
+      incident_id: job.incident_id,
+      offered_drivers: dispatch.offers.map((o) => o.driverId),
+    });
     await sendOfferPushes(ctx, job, dispatch.offers, pickup, input.problemType ?? null, expiresAt);
   } else {
     await ctx.repo.setTowJobStatus(job.id, "manual_review");
@@ -90,6 +103,11 @@ export async function runDispatchForJob(
       tow_job_id: job.id,
       from_status: "matching",
       to_status: "manual_review",
+    });
+    await enqueueWebhookEvent(ctx, "tow.manual_review", {
+      tow_job_id: job.id,
+      incident_id: job.incident_id,
+      reason: "no_eligible_driver",
     });
   }
 
@@ -108,6 +126,42 @@ export async function runDispatchForJob(
     requiresManualReview: dispatch.requiresManualReview,
     strategy: dispatch.strategy,
   };
+}
+
+async function enrichCandidatesWithGoogleEta(
+  ctx: ApiContext,
+  candidates: DispatchCandidate[],
+  pickup: Coordinate,
+): Promise<DispatchCandidate[]> {
+  const withLocation = candidates.filter((c) => c.location);
+  if (withLocation.length === 0 || !ctx.config.maps.routesEnabled || !ctx.config.maps.serverKey) return candidates;
+
+  const maps = new MapsClient({
+    serverKey: ctx.config.maps.serverKey,
+    routesEnabled: ctx.config.maps.routesEnabled,
+    routeMatrixEnabled: ctx.config.maps.routeMatrixEnabled,
+    tenantId: ctx.tenantId,
+    onUsage: (usage) => {
+      void ctx.repo.recordUsageEvent(ctx.tenantId, usage.kind, usage.count).catch(() => undefined);
+    },
+  });
+  const matrix = await maps.calculateRouteMatrix(
+    withLocation.map((c) => c.location!),
+    [pickup],
+  );
+  const byDriver = new Map<string, DispatchCandidate>();
+  withLocation.forEach((candidate, index) => {
+    const eta = matrix[index]?.[0];
+    if (!eta) return;
+    byDriver.set(candidate.driverId, {
+      ...candidate,
+      distanceMeters: eta.distanceMeters,
+      etaSeconds: eta.etaSeconds,
+      etaSource: eta.source,
+      etaDegraded: eta.degraded,
+    });
+  });
+  return candidates.map((candidate) => byDriver.get(candidate.driverId) ?? candidate);
 }
 
 /**
@@ -146,6 +200,11 @@ async function sendOfferPushes(
         url: ctx.config.push?.url,
       });
       await ctx.repo.markOfferPush(job.id, o.driverId, res.ok ? "sent" : "failed", res.error ?? null);
+      await enqueueWebhookEvent(ctx, "tow.offer_sent", {
+        tow_job_id: job.id,
+        driver_id: o.driverId,
+        push_status: res.ok ? "sent" : "failed",
+      });
     } catch (e) {
       await ctx.repo.markOfferPush(
         job.id,

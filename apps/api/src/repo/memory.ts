@@ -5,6 +5,7 @@ import type {
   AcceptOfferResult,
   ApiClientRecord,
   ApiRepo,
+  BankidSessionRecord,
   CustomerContact,
   DriverDeviceRecord,
   DriverProfileRecord,
@@ -58,6 +59,10 @@ export class MemoryRepo implements ApiRepo {
   invoices: Array<Record<string, unknown>> = [];
   auditLogs: Array<Record<string, unknown>> = [];
   apiRequestLogs: Array<Record<string, unknown>> = [];
+  bankidSessions = new Map<string, BankidSessionRecord>();
+  notificationDeliveries: Array<Record<string, unknown>> = [];
+  webhookDeliveries: Array<Record<string, unknown>> = [];
+  usageEvents: Array<Record<string, unknown>> = [];
   candidates: DispatchCandidate[] = [];
   driverUsers = new Map<string, string>(); // userId -> driverId
   driverProfiles = new Map<string, DriverProfileRecord>(); // driverId -> profile
@@ -164,6 +169,25 @@ export class MemoryRepo implements ApiRepo {
   async addEvidence(row: Record<string, unknown>) {
     void row;
     return { id: newId() };
+  }
+  async createBankidSession(row: Record<string, unknown>): Promise<BankidSessionRecord> {
+    const rec = { id: newId(), ...(row as object) } as BankidSessionRecord;
+    this.bankidSessions.set(rec.id, rec);
+    if (rec.tic_session_id) this.bankidSessions.set(rec.tic_session_id, rec);
+    return rec;
+  }
+  async updateBankidSession(sessionId: string, patch: Record<string, unknown>) {
+    const rec = this.bankidSessions.get(sessionId);
+    if (!rec) return;
+    Object.assign(rec, patch);
+    if (rec.tic_session_id) this.bankidSessions.set(rec.tic_session_id, rec);
+  }
+  async getBankidSessionByTicSessionId(sessionId: string): Promise<BankidSessionRecord | null> {
+    const rec = this.bankidSessions.get(sessionId);
+    return rec?.tic_session_id === sessionId ? rec : null;
+  }
+  async getBankidSessionById(sessionId: string): Promise<BankidSessionRecord | null> {
+    return this.bankidSessions.get(sessionId) ?? null;
   }
   async recordBankidSignature(row: Record<string, unknown>) {
     void row;
@@ -321,6 +345,15 @@ export class MemoryRepo implements ApiRepo {
   async markOfferPush(jobId: string, driverId: string, status: string) {
     const o = this.offers.find((x) => x.tow_job_id === jobId && x.driver_id === driverId);
     if (o) o.push_status = status;
+  }
+  async recordNotificationDelivery(row: Record<string, unknown>) {
+    this.notificationDeliveries.push(row);
+  }
+  async enqueueWebhookEvent(tenantId: string, event: string, payload: Record<string, unknown>) {
+    this.webhookDeliveries.push({ tenant_id: tenantId, event, payload, status: "pending" });
+  }
+  async recordUsageEvent(tenantId: string, kind: string, quantity = 1) {
+    this.usageEvents.push({ tenant_id: tenantId, kind, quantity });
   }
   async loadRoleContext(userId: string): Promise<RoleContext | null> {
     return this.roleContexts.get(userId) ?? null;

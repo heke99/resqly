@@ -12,6 +12,7 @@ export interface NotificationResult {
   channel: NotificationChannel;
   delivered: boolean;
   providerMessageId?: string;
+  error?: string;
 }
 
 export interface ChannelAdapter {

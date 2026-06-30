@@ -31,6 +31,8 @@ export function buildSignatureRecord(input: BuildSignatureInput): {
   display_name: string;
   signed_payload_hash: string;
   signature: string;
+  ocsp_response?: string | null;
+  raw_completion?: unknown;
   environment: BankidEnv;
   ip: string | null;
   device: string | null;
@@ -45,6 +47,8 @@ export function buildSignatureRecord(input: BuildSignatureInput): {
     display_name: input.completion.name,
     signed_payload_hash: signedPayloadHash(input.signedPayload),
     signature: input.completion.signature,
+    ocsp_response: input.completion.ocspResponse ?? null,
+    raw_completion: input.completion.raw ?? null,
     environment: input.environment,
     ip: input.ip ?? null,
     device: input.device ?? null,

@@ -142,6 +142,27 @@ export interface DriverDeviceRecord {
   platform: string;
 }
 
+export interface BankidSessionRecord {
+  id: string;
+  tenant_id: string | null;
+  user_id: string | null;
+  incident_id: string | null;
+  order_ref: string;
+  tic_session_id: string | null;
+  status: string;
+  environment: string;
+  purpose: string;
+  raw_status?: unknown;
+}
+
+export interface TenantWebhookTarget {
+  id: string;
+  tenant_id: string;
+  url: string;
+  events: string[];
+  active: boolean;
+}
+
 /**
  * Persistence boundary for the API. The in-memory implementation backs tests;
  * the Supabase implementation backs production. Keeping handlers behind this
@@ -173,6 +194,10 @@ export interface ApiRepo {
   setIncidentStatus(id: string, status: IncidentStatus): Promise<void>;
   setIncidentBankidVerified(id: string): Promise<void>;
   addEvidence(row: Record<string, unknown>): Promise<{ id: string }>;
+  createBankidSession(row: Record<string, unknown>): Promise<BankidSessionRecord>;
+  updateBankidSession(sessionId: string, patch: Record<string, unknown>): Promise<void>;
+  getBankidSessionByTicSessionId(sessionId: string): Promise<BankidSessionRecord | null>;
+  getBankidSessionById(sessionId: string): Promise<BankidSessionRecord | null>;
   recordBankidSignature(row: Record<string, unknown>): Promise<{ id: string }>;
   getCustomerContact(incidentId: string): Promise<CustomerContact | null>;
 
@@ -219,6 +244,10 @@ export interface ApiRepo {
   >;
   listDriverDevices(driverId: string): Promise<DriverDeviceRecord[]>;
   markOfferPush(jobId: string, driverId: string, status: string, error?: string | null): Promise<void>;
+
+  recordNotificationDelivery(row: Record<string, unknown>): Promise<void>;
+  enqueueWebhookEvent(tenantId: string, event: string, payload: Record<string, unknown>): Promise<void>;
+  recordUsageEvent(tenantId: string, kind: string, quantity?: number): Promise<void>;
 
   /** Aggregate role/capability context for a user across all apps. */
   loadRoleContext(userId: string): Promise<RoleContext | null>;

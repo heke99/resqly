@@ -6,8 +6,15 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "ios": { "supportsTablet": true },
-    "android": { "package": "com.resqly.driver" },
-    "plugins": ["expo-location"]
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.resqly.driver"
+    },
+    "plugins": [
+      "expo-location",
+      "expo-notifications"
+    ]
   }
 }

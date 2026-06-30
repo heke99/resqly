@@ -28,7 +28,7 @@ export async function getExpoPushToken(): Promise<string | null> {
     let status = (await mod.getPermissionsAsync()).status;
     if (status !== "granted") status = (await mod.requestPermissionsAsync()).status;
     if (status !== "granted") return null;
-    const token = await mod.getExpoPushTokenAsync();
+    const token = await mod.getExpoPushTokenAsync({ projectId: process.env.EXPO_PUBLIC_PROJECT_ID });
     return token.data ?? null;
   } catch {
     return null;

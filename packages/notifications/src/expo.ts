@@ -87,6 +87,6 @@ export class ExpoPushAdapter implements ChannelAdapter {
       [{ to: message.to, body: message.body, title: message.subject ?? undefined }],
       this.opts,
     );
-    return { channel: "push", delivered: res.ok };
+    return { channel: "push", delivered: res.ok, error: res.error };
   }
 }

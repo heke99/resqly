@@ -123,19 +123,19 @@ prefix) is fully data-driven — **no tenant names are hardcoded in logic**.
 
 ## What requires production keys / agreements before go-live
 
-The MVP runs entirely on mock/sandbox adapters. Before going live you must
-provision and configure:
+This build is wired for production adapters, not the old mock-only setup. Before going live you must provision and configure:
 
 | Area | What is needed |
 | --- | --- |
 | Supabase | Production project URL + anon + service-role keys |
-| Google Maps | Browser key (referrer-restricted) + Server key (Routes/Geocoding enabled) |
-| BankID | Production certificate (`.p12`) + password, set `BANKID_ENV=production`, `BANKID_MOCK_ENABLED=false` |
-| Insurance integrations | Real per-insurer API contracts (replace sandbox adapters) |
-| Notifications | Push (FCM/APNs), SMS provider, transactional email provider |
-| Payments | Card / Swish / invoicing provider (data model exists; integration is a stub) |
-| Webhooks | A strong `WEBHOOK_SIGNING_SECRET`; per-tenant secrets are stored in DB |
-| Encryption | A strong 32-byte `ENCRYPTION_KEY` for at-rest field encryption |
+| Google Maps | Browser key for Maps UI and server key for Routes, Route Matrix and Geocoding |
+| TIC BankID | `BANKID_PROVIDER=tic`, `BANKID_ENV=production`, `BANKID_MOCK_ENABLED=false`, `TIC_API_KEY`, `TIC_WEBHOOK_SECRET` |
+| Resend | Verified sending domain + `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO` |
+| Push | Expo/EAS project ID, APNs/FCM credentials and `expo-notifications` in the driver app |
+| Insurance integrations | Per-insurer API contracts/webhooks configured per tenant |
+| Payments | Out of scope for first pilot; towing companies collect payment themselves |
+| Webhooks | A strong `WEBHOOK_SIGNING_SECRET`; per-tenant webhook secrets are stored in DB |
+| Encryption | A strong 32-byte `ENCRYPTION_KEY` for at-rest field encryption and personal-number hashing |
 
 ## Out of scope (by design)
 

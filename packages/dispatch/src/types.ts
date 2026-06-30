@@ -1,4 +1,4 @@
-import type { DispatchStrategy, DutyStatus, TowVehicleType } from "@resqly/types";
+import type { Coordinate, DispatchStrategy, DutyStatus, TowVehicleType } from "@resqly/types";
 
 export interface CandidateCapabilities {
   canHandleEv?: boolean;
@@ -13,7 +13,11 @@ export interface DispatchCandidate {
   towCompanyId: string;
   dutyStatus: DutyStatus;
   distanceMeters: number;
+  /** Last known driver location used only for server-side ETA enrichment. */
+  location?: Coordinate;
   etaSeconds?: number;
+  etaSource?: "google_matrix" | "google_routes" | "haversine_fallback" | "last_known";
+  etaDegraded?: boolean;
   vehicleType?: TowVehicleType;
   capabilities?: CandidateCapabilities;
   rating?: number;

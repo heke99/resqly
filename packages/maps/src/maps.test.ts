@@ -61,6 +61,31 @@ describe("MapsClient", () => {
     expect(eta.source).toBe("haversine_fallback");
   });
 
+
+  it("uses true Google Route Matrix when enabled", async () => {
+    const fetchImpl: FetchLike = async (url, init) => {
+      expect(String(url)).toContain("distanceMatrix/v2:computeRouteMatrix");
+      expect(((init as { headers: Record<string, string> }).headers)["X-Goog-FieldMask"]).toContain("originIndex");
+      return {
+        ok: true,
+        status: 200,
+        json: async () => [
+          { originIndex: 0, destinationIndex: 0, status: { code: 0 }, duration: "300s", distanceMeters: 1000 },
+          { originIndex: 1, destinationIndex: 0, status: { code: 0 }, duration: "600s", distanceMeters: 2000 },
+        ],
+      };
+    };
+    const client = new MapsClient({
+      serverKey: "key",
+      routesEnabled: true,
+      routeMatrixEnabled: true,
+      fetchImpl,
+    });
+    const m = await client.calculateRouteMatrix([STOCKHOLM, UPPSALA], [STOCKHOLM]);
+    expect(m[0]?.[0]?.source).toBe("google_matrix");
+    expect(m[1]?.[0]?.etaSeconds).toBe(600);
+  });
+
   it("builds a matrix of the right dimensions", async () => {
     const client = new MapsClient({ routesEnabled: false });
     const m = await client.calculateRouteMatrix([STOCKHOLM, UPPSALA], [STOCKHOLM]);

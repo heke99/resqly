@@ -15,6 +15,7 @@ export interface RawRequest {
   path: string;
   headers: Record<string, string | undefined>;
   body?: unknown;
+  rawBody?: string;
   ip?: string | null;
 }
 
@@ -34,9 +35,22 @@ export class App {
     r.post("/api/v1/incidents/:id/evidence", (ctx, a) =>
       incidents.addEvidence(ctx, a.params.id!, a.body),
     );
+    r.post("/api/v1/incidents/:id/bankid/start", (ctx, a) =>
+      incidents.startIncidentBankid(ctx, a.params.id!, a.body),
+    );
     r.post("/api/v1/incidents/:id/bankid/sign", (ctx, a) =>
       incidents.signIncident(ctx, a.params.id!, a.body),
     );
+    r.post("/api/v1/bankid/sessions/:sessionId/poll", (ctx, a) =>
+      incidents.pollBankidSession(ctx, a.params.sessionId!),
+    );
+    r.get("/api/v1/bankid/sessions/:sessionId/collect", (ctx, a) =>
+      incidents.collectBankidSession(ctx, a.params.sessionId!),
+    );
+    r.delete("/api/v1/bankid/sessions/:sessionId", (ctx, a) =>
+      incidents.cancelBankidSession(ctx, a.params.sessionId!),
+    );
+    r.post("/api/v1/tic/webhook", (ctx, a) => incidents.ticWebhook(ctx, a.body));
     r.post("/api/v1/incidents/:id/request-tow", (ctx, a) =>
       incidents.requestTow(ctx, a.params.id!, a.body),
     );
@@ -90,6 +104,33 @@ export class App {
       return { status: 404, body: { error: { code: "not_found", message: "Route not found", request_id: requestId } }, headers: baseHeaders };
     }
 
+    // Provider callbacks/webhooks are authenticated by their own HMAC signature,
+    // not by a tenant API key. Keep this narrow and explicit.
+    if (url.pathname === "/api/v1/tic/webhook") {
+      const ctx: ApiContext = {
+        config: this.config,
+        repo: this.config.repo,
+        tenantId: "public",
+        apiClientId: "public",
+        requestId,
+        ip: req.ip ?? null,
+        rawBody: req.rawBody,
+        headers: req.headers,
+      };
+      try {
+        const result = await matched.handler(ctx, {
+          params: matched.params,
+          body: req.body,
+          query: url.searchParams,
+          rawBody: req.rawBody,
+        });
+        return { ...result, headers: { ...baseHeaders, ...(result.headers ?? {}) } };
+      } catch (error) {
+        const result = toErrorResult(error, requestId);
+        return { ...result, headers: { ...baseHeaders, ...(result.headers ?? {}) } };
+      }
+    }
+
     // --- API key authentication ---
     const apiKey =
       extractBearer(req.headers["authorization"]) ?? req.headers["x-api-key"] ?? null;
@@ -130,6 +171,8 @@ export class App {
       apiClientId: client.id,
       requestId,
       ip: req.ip ?? null,
+      rawBody: req.rawBody,
+      headers: req.headers,
       userId,
       driverUserId: userId,
       driverId,
@@ -142,6 +185,7 @@ export class App {
         params: matched.params,
         body: req.body,
         query: url.searchParams,
+        rawBody: req.rawBody,
       });
     } catch (error) {
       result = toErrorResult(error, requestId);

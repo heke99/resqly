@@ -12,6 +12,8 @@ export interface DeliveryOutcome {
   attempts: number;
   nextAttemptAt: string | null;
   error?: string;
+  responseStatus?: number | null;
+  responseBody?: string | null;
 }
 
 export interface ProcessDeliveryOptions {
@@ -28,13 +30,13 @@ export interface ProcessDeliveryOptions {
  */
 export async function processDelivery(
   delivery: DeliveryState,
-  send: () => Promise<{ ok: boolean; error?: string }>,
+  send: () => Promise<{ ok: boolean; error?: string; responseStatus?: number | null; responseBody?: string | null }>,
   options: ProcessDeliveryOptions = {},
 ): Promise<DeliveryOutcome> {
   const { maxAttempts = 6, now = Date.now(), baseDelayMs = 1000, maxDelayMs = 3_600_000 } = options;
   const attempts = delivery.attempts + 1;
 
-  let result: { ok: boolean; error?: string };
+  let result: { ok: boolean; error?: string; responseStatus?: number | null; responseBody?: string | null };
   try {
     result = await send();
   } catch (e) {
@@ -42,10 +44,10 @@ export async function processDelivery(
   }
 
   if (result.ok) {
-    return { id: delivery.id, status: "succeeded", attempts, nextAttemptAt: null };
+    return { id: delivery.id, status: "succeeded", attempts, nextAttemptAt: null, responseStatus: result.responseStatus ?? null, responseBody: result.responseBody ?? null };
   }
   if (attempts >= maxAttempts) {
-    return { id: delivery.id, status: "exhausted", attempts, nextAttemptAt: null, error: result.error };
+    return { id: delivery.id, status: "exhausted", attempts, nextAttemptAt: null, error: result.error, responseStatus: result.responseStatus ?? null, responseBody: result.responseBody ?? null };
   }
   const delay = Math.max(baseDelayMs, backoffDelay(attempts, baseDelayMs, maxDelayMs));
   return {
@@ -54,5 +56,7 @@ export async function processDelivery(
     attempts,
     nextAttemptAt: new Date(now + delay).toISOString(),
     error: result.error,
+    responseStatus: result.responseStatus ?? null,
+    responseBody: result.responseBody ?? null,
   };
 }

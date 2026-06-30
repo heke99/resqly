@@ -16,6 +16,7 @@ import { buildInvoiceBasis, type PriceList } from "@resqly/billing";
 import { MapsClient, buildEtaSnapshot } from "@resqly/maps";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
+import { enqueueWebhookEvent, escapeHtml, sendEmail } from "../services/notifications";
 
 const acceptSchema = z.object({});
 const rejectSchema = z.object({ reason: z.string().optional() });
@@ -114,6 +115,19 @@ export async function acceptJobForDriver(
       ip: ctx.ip,
     }),
   );
+  await enqueueWebhookEvent(ctx, "tow.driver_accepted", {
+    tow_job_id: jobId,
+    incident_id: job.incident_id,
+    driver_id: driverId,
+    tow_company_id: result.towCompanyId,
+  });
+  await sendEmail(ctx, {
+    to: contact.email,
+    subject: "Bärgare har accepterat ditt ärende",
+    html: `<p>En bärgare har accepterat ditt ärende.</p><p>Fordon: ${escapeHtml(contact.registration_number)}</p>`,
+    incidentId: job.incident_id,
+    towJobId: jobId,
+  });
 
   return {
     status: 200,
@@ -183,6 +197,21 @@ export async function updateTowJobStatus(
     fields: ["status"],
     metadata: { from: job.status, to: input.status },
   });
+  const eventByStatus: Record<string, string> = {
+    driver_en_route: "tow.driver_en_route",
+    driver_arrived: "tow.driver_arrived",
+    cancelled: "tow.cancelled",
+    failed: "tow.failed",
+  };
+  const webhookEvent = eventByStatus[input.status];
+  if (webhookEvent) {
+    await enqueueWebhookEvent(ctx, webhookEvent, {
+      tow_job_id: id,
+      incident_id: job.incident_id,
+      from_status: job.status,
+      to_status: input.status,
+    });
+  }
   return { status: 200, body: { status: input.status } };
 }
 
@@ -202,6 +231,7 @@ export async function updateTowJobLocation(
   const maps = new MapsClient({
     serverKey: ctx.config.maps.serverKey,
     routesEnabled: ctx.config.maps.routesEnabled,
+    routeMatrixEnabled: ctx.config.maps.routeMatrixEnabled,
     tenantId: ctx.tenantId,
   });
   const eta = await maps.calculateRouteEta(input.location, contact.pickup);
@@ -284,6 +314,20 @@ export async function completeTowJob(
     entity_type: "tow_job",
     entity_id: id,
     fields: ["completion_report", "invoice_basis"],
+  });
+  await enqueueWebhookEvent(ctx, "tow.completed", {
+    tow_job_id: id,
+    incident_id: job.incident_id,
+    status: "invoiced",
+    invoice_total_minor: invoice.total_minor,
+  });
+  const contact = await ctx.repo.getCustomerContact(job.incident_id);
+  await sendEmail(ctx, {
+    to: contact?.email,
+    subject: "Bärgningsärendet är avslutat",
+    html: `<p>Ditt bärgningsärende är avslutat.</p><p>Status: invoiced</p>`,
+    incidentId: job.incident_id,
+    towJobId: id,
   });
 
   return {

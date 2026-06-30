@@ -3,6 +3,7 @@ import { optionalEnv } from "@resqly/utils";
 import { buildOfferPushMessage, sendExpoPush } from "@resqly/notifications";
 import { evaluateOfferExpiry, type OfferRow } from "./jobs/offer-expiry";
 import { selectOfferPushRetries, type OfferPushRow } from "./jobs/offer-push";
+import { pollWebhookDeliveries } from "./jobs/webhook-db-delivery";
 
 /**
  * Worker runner. Polls the database for due offer expiries and failed offer
@@ -112,6 +113,7 @@ async function tick(db: AppSupabaseClient | null): Promise<void> {
   try {
     await pollOfferExpiry(db);
     await pollOfferPushRetries(db);
+    await pollWebhookDeliveries(db);
   } catch (e) {
     console.error("[workers] tick error", e instanceof Error ? e.message : e);
   }

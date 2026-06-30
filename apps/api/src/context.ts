@@ -3,14 +3,32 @@ import type { ApiRepo } from "./repo/types";
 
 export interface AppConfig {
   repo: ApiRepo;
-  maps: { serverKey?: string; routesEnabled: boolean };
-  bankid: { env: "mock" | "test" | "production"; mockEnabled: boolean };
+  maps: { serverKey?: string; routesEnabled: boolean; routeMatrixEnabled?: boolean };
+  bankid: {
+    env: "mock" | "test" | "production";
+    mockEnabled: boolean;
+    provider?: "mock" | "tic";
+    tic?: {
+      apiBaseUrl: string;
+      apiKey: string;
+      defaultProvider?: "bankid";
+      webhookSecret?: string;
+      callbackBaseUrl?: string;
+    };
+  };
   /** Pepper for hashing personal numbers (ENCRYPTION_KEY). */
   encryptionKey: string;
   rateLimiter?: RateLimiter;
   driverAuth?: { getUserIdFromAccessToken(token: string): Promise<string | null> };
   /** Expo push delivery configuration (disabled in tests by default). */
   push?: { enabled?: boolean; url?: string; fetchImpl?: typeof fetch };
+  email?: {
+    enabled?: boolean;
+    resendApiKey?: string;
+    from?: string;
+    replyTo?: string;
+    fetchImpl?: typeof fetch;
+  };
 }
 
 export interface ApiContext {
@@ -20,6 +38,9 @@ export interface ApiContext {
   apiClientId: string;
   requestId: string;
   ip: string | null;
+  /** Raw request body, needed for provider webhook signature verification. */
+  rawBody?: string;
+  headers?: Record<string, string | undefined>;
   /** The authenticated end-user id (from the user/driver access token), if any. */
   userId?: string | null;
   driverUserId?: string | null;

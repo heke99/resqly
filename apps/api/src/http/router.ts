@@ -7,7 +7,7 @@ export interface MatchedRoute<Ctx> {
 
 export type RouteHandler<Ctx> = (
   ctx: Ctx,
-  args: { params: Record<string, string>; body: unknown; query: URLSearchParams },
+  args: { params: Record<string, string>; body: unknown; query: URLSearchParams; rawBody?: string },
 ) => Promise<RouteResult> | RouteResult;
 
 export interface RouteResult {
@@ -39,6 +39,9 @@ export class Router<Ctx> {
   }
   patch(path: string, handler: RouteHandler<Ctx>) {
     return this.add("PATCH", path, handler);
+  }
+  delete(path: string, handler: RouteHandler<Ctx>) {
+    return this.add("DELETE", path, handler);
   }
 
   match(method: string, path: string): MatchedRoute<Ctx> | null {

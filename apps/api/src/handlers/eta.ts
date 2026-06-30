@@ -7,6 +7,7 @@ function mapsFor(ctx: ApiContext): MapsClient {
   return new MapsClient({
     serverKey: ctx.config.maps.serverKey,
     routesEnabled: ctx.config.maps.routesEnabled,
+    routeMatrixEnabled: ctx.config.maps.routeMatrixEnabled,
     tenantId: ctx.tenantId,
   });
 }

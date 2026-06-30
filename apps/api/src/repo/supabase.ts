@@ -5,6 +5,7 @@ import type {
   AcceptOfferResult,
   ApiClientRecord,
   ApiRepo,
+  BankidSessionRecord,
   CustomerContact,
   DispatchCandidateOptions,
   DriverDeviceRecord,
@@ -110,6 +111,31 @@ export class SupabaseRepo implements ApiRepo {
     const { data, error } = await this.table("incident_evidence").insert(row as never).select("id").single();
     if (error) throw new Error(error.message);
     return data as { id: string };
+  }
+  async createBankidSession(row: Record<string, unknown>): Promise<BankidSessionRecord> {
+    const { data, error } = await this.table("bankid_sessions").insert(row as never).select("*").single();
+    if (error) throw new Error(error.message);
+    return data as BankidSessionRecord;
+  }
+  async updateBankidSession(sessionId: string, patch: Record<string, unknown>): Promise<void> {
+    const { error } = await this.table("bankid_sessions")
+      .update(patch as never)
+      .or(`id.eq.${sessionId},tic_session_id.eq.${sessionId}`);
+    if (error) throw new Error(error.message);
+  }
+  async getBankidSessionByTicSessionId(sessionId: string): Promise<BankidSessionRecord | null> {
+    const { data } = await this.table("bankid_sessions")
+      .select("*")
+      .eq("tic_session_id", sessionId)
+      .maybeSingle();
+    return (data as BankidSessionRecord | null) ?? null;
+  }
+  async getBankidSessionById(sessionId: string): Promise<BankidSessionRecord | null> {
+    const { data } = await this.table("bankid_sessions")
+      .select("*")
+      .or(`id.eq.${sessionId},tic_session_id.eq.${sessionId}`)
+      .maybeSingle();
+    return (data as BankidSessionRecord | null) ?? null;
   }
   async recordBankidSignature(row: Record<string, unknown>) {
     const { data, error } = await this.table("bankid_signatures").insert(row as never).select("id").single();
@@ -236,6 +262,8 @@ export class SupabaseRepo implements ApiRepo {
         is_online: boolean;
         is_busy: boolean;
         distance_m: number;
+        driver_lat?: number | null;
+        driver_lng?: number | null;
         can_handle_ev: boolean;
         has_flatbed: boolean;
         can_tow_heavy_truck: boolean;
@@ -246,6 +274,7 @@ export class SupabaseRepo implements ApiRepo {
       towCompanyId: d.tow_company_id,
       dutyStatus: (d.duty_status as DispatchCandidate["dutyStatus"]) ?? "on_duty",
       distanceMeters: d.distance_m,
+      location: d.driver_lat != null && d.driver_lng != null ? { lat: d.driver_lat, lng: d.driver_lng } : undefined,
       isOnline: d.is_online,
       isBusy: d.is_busy,
       capabilities: {
@@ -386,6 +415,35 @@ export class SupabaseRepo implements ApiRepo {
     if (status === "sent") patch.push_sent_at = new Date().toISOString();
     if (error) patch.push_error = error;
     await this.table("tow_job_offers").update(patch as never).eq("tow_job_id", jobId).eq("driver_id", driverId);
+  }
+
+  async recordNotificationDelivery(row: Record<string, unknown>): Promise<void> {
+    await this.table("notification_deliveries").insert(row as never);
+  }
+
+  async enqueueWebhookEvent(tenantId: string, event: string, payload: Record<string, unknown>): Promise<void> {
+    const { data } = await this.table("tenant_webhooks")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("active", true)
+      .contains("events", [event] as never);
+    const hooks = (data as Array<{ id: string }> | null) ?? [];
+    if (hooks.length === 0) return;
+    await this.table("webhook_deliveries").insert(
+      hooks.map((hook) => ({
+        tenant_id: tenantId,
+        webhook_id: hook.id,
+        event,
+        payload,
+        status: "pending",
+        attempts: 0,
+        next_attempt_at: new Date().toISOString(),
+      })) as never,
+    );
+  }
+
+  async recordUsageEvent(tenantId: string, kind: string, quantity = 1): Promise<void> {
+    await this.table("billing_usage_events").insert({ tenant_id: tenantId, kind, quantity } as never);
   }
 
   async loadRoleContext(userId: string): Promise<RoleContext | null> {
