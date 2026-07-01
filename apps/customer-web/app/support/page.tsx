@@ -7,19 +7,18 @@ export default async function SupportPage() {
   return (
     <div>
       <h1 style={{ fontSize: 22 }}>Support</h1>
-      <p>Need help with {theme.productName}?</p>
+      <p>Behöver du hjälp med {theme.productName}?</p>
       {theme.supportPhone ? (
         <a className="bigbtn" href={`tel:${theme.supportPhone}`}>
-          Call support: {theme.supportPhone}
+          Ring support: {theme.supportPhone}
         </a>
       ) : (
-        <p style={{ opacity: 0.7 }}>Support contact details are configured by your insurance partner.</p>
+        <p style={{ opacity: 0.7 }}>Kontaktuppgifter sätts av ditt försäkringsbolag.</p>
       )}
       <div className="tile" style={{ marginTop: 16 }}>
-        <strong>What happens next?</strong>
+        <strong>Vad händer nu?</strong>
         <p style={{ margin: "6px 0 0" }}>
-          After you start a case and verify with BankID, we find the nearest tow truck, share live
-          ETA, and keep your insurance company updated automatically.
+          Efter att du har skapat ett ärende och verifierat med BankID skickas bärgningen till behöriga bärgningsbilar enligt försäkringsbolagets avtal. Vid privat bärgning skickas uppdraget till närmaste tillgängliga bärgare först.
         </p>
       </div>
     </div>

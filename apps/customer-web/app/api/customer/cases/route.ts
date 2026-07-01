@@ -13,8 +13,8 @@ export async function POST(request: Request) {
   const subtype = String(body.subtype ?? "");
   const description = body.description ? String(body.description) : null;
   const coords = body.coords && typeof body.coords === "object" ? body.coords as { lat?: number; lng?: number } : null;
-  if (!vehicleId) return jsonError(400, "vehicle_id is required.");
-  if (!["towing", "roadside_assistance", "damage_claim"].includes(type)) return jsonError(400, "Invalid case type.");
+  if (!vehicleId) return jsonError(400, "Välj vilket fordon ärendet gäller.");
+  if (!["towing", "roadside_assistance", "damage_claim"].includes(type)) return jsonError(400, "Ogiltig ärendetyp.");
 
   // "private" = direct/marketplace towing without an insurance policy.
   const mode = String(body.mode ?? "") === "private" ? "private" : "insurance";
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     .eq("id", vehicleId)
     .eq("owner_user_id", user.id)
     .maybeSingle();
-  if (!vehicle) return jsonError(404, "Vehicle not found.");
+  if (!vehicle) return jsonError(404, "Fordonet hittades inte.");
 
   let tenantId: string | null = null;
   let insuranceCompanyId: string | null = null;
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
 
   if (mode === "private") {
     if (type === "damage_claim") {
-      return jsonError(400, "Damage claims require an insurance connection.");
+      return jsonError(400, "Skadeärenden kräver koppling till försäkringsbolag.");
     }
     // Direct/private towing is handled by the marketplace operator tenant.
     const { data: marketplaceTenant } = await db
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       .maybeSingle();
     tenantId = (marketplaceTenant as { id?: string } | null)?.id ?? null;
     if (!tenantId) {
-      return jsonError(409, "Direct/private towing is not enabled on this platform yet.");
+      return jsonError(409, "Privat bärgning är inte aktiverad ännu.");
     }
     const { data: settings } = await db
       .from("tenant_settings" as never)
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       .maybeSingle();
     const activePolicy = policy as { id: string; insurance_company_id: string; tenant_id: string | null } | null;
     if (!activePolicy?.insurance_company_id)
-      return jsonError(409, "Connect this vehicle to an insurance company first, or choose direct/private towing.");
+      return jsonError(409, "Koppla fordonet till ett försäkringsbolag först, eller välj privat bärgning.");
     insuranceCompanyId = activePolicy.insurance_company_id;
 
     tenantId = activePolicy.tenant_id;
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
         .maybeSingle();
       tenantId = (insurer as { tenant_id?: string } | null)?.tenant_id ?? null;
     }
-    if (!tenantId) return jsonError(409, "Insurance tenant is missing for this policy.");
+    if (!tenantId) return jsonError(409, "Försäkringsbolaget saknar aktiv organisationskoppling.");
 
     const { data: settings } = await db
       .from("tenant_settings" as never)
@@ -119,7 +119,7 @@ export async function POST(request: Request) {
     from_status: null,
     to_status: initialStatus,
     actor_user_id: user.id,
-    reason: "created from customer app",
+    reason: "Skapat av kund",
   } as never);
 
   if (coords?.lat && coords?.lng) {

@@ -69,11 +69,11 @@ function VehiclesInner() {
     }
   }
 
-  if (!supabase) return <p>Vehicles are unavailable until Supabase is configured.</p>;
+  if (!supabase) return <p>Tjänsten är inte konfigurerad ännu.</p>;
   if (status === "not_authed")
     return (
       <p>
-        Please <a href="/login">log in</a> to manage your vehicles.
+        Du behöver <a href="/login">logga in</a> för att hantera dina fordon.
       </p>
     );
 
@@ -81,29 +81,29 @@ function VehiclesInner() {
     <div>
       <div className="section-title"><h1 style={{ fontSize: 24 }}>Mina fordon</h1></div>
       <p style={{ opacity: 0.72 }}>
-        Varje fordon kan kopplas till ett eget försäkringsbolag. När du startar ett ärende väljer Resqly rätt partner från bilen.
+        Varje fordon kan kopplas till ett eget försäkringsbolag. När du startar ett ärende väljer Resqly rätt försäkringsbolag från bilens verifierade koppling.
       </p>
       {vehicles.length === 0 ? (
-        <p style={{ opacity: 0.7 }}>No vehicles yet. Add your first below.</p>
+        <p style={{ opacity: 0.7 }}>Inga fordon ännu. Lägg till din första bil nedan.</p>
       ) : (
         vehicles.map((v) => (
           <div key={v.id} className="vehicle-card">
             <strong>{v.registration_number}</strong>
-            <div className="vehicle-meta">{[v.make, v.model].filter(Boolean).join(" ") || "Fordon"}{v.is_default ? " • default" : ""}</div>
+            <div className="vehicle-meta">{[v.make, v.model].filter(Boolean).join(" ") || "Fordon"}{v.is_default ? " • standard" : ""}</div>
             <a className="tile" href={`/insurances?vehicle=${v.id}${partner ? `&partner=${partner}` : ""}`}>Koppla/ändra försäkring</a>
           </div>
         ))
       )}
       <h2 style={{ fontSize: 18, marginTop: 24 }}>Lägg till fordon</h2>
       <form onSubmit={add}>
-        <label htmlFor="reg">Registration number</label>
+        <label htmlFor="reg">Registreringsnummer</label>
         <input id="reg" value={reg} onChange={(e) => setReg(e.target.value)} placeholder="ABC123" required />
-        <label htmlFor="make">Make</label>
+        <label htmlFor="make">Märke</label>
         <input id="make" value={make} onChange={(e) => setMake(e.target.value)} placeholder="Volvo" />
-        <label htmlFor="model">Model</label>
+        <label htmlFor="model">Modell</label>
         <input id="model" value={model} onChange={(e) => setModel(e.target.value)} placeholder="XC60" />
         <div style={{ marginTop: 16 }}>
-          <button className="bigbtn" type="submit">Add vehicle</button>
+          <button className="bigbtn" type="submit">Lägg till fordon</button>
         </div>
       </form>
       {status && status !== "not_authed" ? <p>{status}</p> : null}

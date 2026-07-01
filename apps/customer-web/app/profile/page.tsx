@@ -27,35 +27,35 @@ export default function ProfilePage() {
     window.location.href = "/login";
   }
 
-  if (!supabase) return <p>Unavailable until Supabase is configured.</p>;
+  if (!supabase) return <p>Tjänsten är inte tillgänglig förrän Supabase är konfigurerat.</p>;
   if (authed === false)
     return (
       <p>
-        Please <a href="/login">log in</a>.
+        Logga in via <a href="/login">inloggningen</a>.
       </p>
     );
 
   return (
     <div>
-      <h1 style={{ fontSize: 22 }}>Profile & BankID</h1>
-      <p>Signed in as {email}</p>
+      <h1 style={{ fontSize: 22 }}>Profil och verifiering</h1>
+      <p>Inloggad som {email}</p>
       <div className="tile" style={{ marginTop: 12 }}>
-        <strong>BankID verification</strong>
+        <strong>BankID-verifiering</strong>
         <p style={{ margin: "6px 0 0" }}>
-          BankID runs in test/mock mode. When you create an insurance-related case you will be asked
-          to verify with BankID before it is sent to your insurance company.
+          BankID används när ett fordon kopplas till försäkringsbolag och när ett försäkringsärende
+          skickas vidare. Det är en verifiering/signering av uppgifterna, inte huvudmetoden för inloggning.
         </p>
       </div>
       <div className="tile" style={{ marginTop: 12 }}>
-        <strong>Consents</strong>
+        <strong>Samtycken</strong>
         <p style={{ margin: "6px 0 0" }}>
-          You control data-sharing and insurance-connection consents. Your personal identity number
-          is never shared with tow drivers.
+          Du styr samtycken för datadelning och försäkringskoppling. Personnummer och BankID-detaljer
+          delas aldrig med bärgare/förare.
         </p>
       </div>
       <div style={{ marginTop: 16 }}>
         <button className="bigbtn" onClick={signOut}>
-          Sign out
+          Logga ut
         </button>
       </div>
     </div>

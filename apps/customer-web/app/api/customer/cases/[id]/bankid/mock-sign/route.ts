@@ -4,6 +4,9 @@ import { buildSignatureRecord } from "@resqly/bankid";
 import { requireCustomer, jsonError } from "../../../../_lib";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  if (process.env.NODE_ENV === "production" || process.env.BANKID_MOCK_ENABLED !== "true") {
+    return jsonError(404, "BankID mock is disabled. Use /bankid/sign.");
+  }
   const session = await requireCustomer(request);
   if (session instanceof NextResponse) return session;
   const { db, user } = session;
@@ -16,7 +19,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .eq("customer_user_id", user.id)
     .maybeSingle();
   const inc = incident as { id: string; tenant_id: string; case_number: string | null; customer_user_id: string; status: string } | null;
-  if (!inc) return jsonError(404, "Case not found.");
+  if (!inc) return jsonError(404, "Ärendet hittades inte.");
 
   const orderRef = `mock_${randomUUID()}`;
   const pepper = process.env.ENCRYPTION_KEY || "local-development-pepper-change-me";
@@ -68,7 +71,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     from_status: inc.status,
     to_status: "bankid_verified",
     actor_user_id: user.id,
-    reason: "BankID mock verification completed",
+    reason: "BankID dev-verifiering slutförd",
   } as never);
   await db.from("audit_logs" as never).insert({
     tenant_id: inc.tenant_id,

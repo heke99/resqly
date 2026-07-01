@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import { useSupabase } from "../../lib/supabase-client";
-import { towStatusLabel, whatHappensNext, formatEta } from "@resqly/web-kit";
+import { towStatusLabel, whatHappensNext, formatEta, incidentStatusLabel } from "@resqly/web-kit";
 import type { TowJobStatus } from "@resqly/types";
 
 interface Incident {
@@ -59,13 +59,42 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
     return data.session?.access_token ?? null;
   }
 
-  async function mockSign() {
+  async function verifyWithBankid() {
     const token = await accessToken();
     if (!token) return;
-    const res = await fetch(`/api/customer/cases/${id}/bankid/mock-sign`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+    const res = await fetch(`/api/customer/cases/${id}/bankid/sign`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) setMessage(json.error ?? "BankID failed.");
-    else { setMessage("BankID verifierad."); await load(); }
+    if (!res.ok) { setMessage(json.error ?? "BankID-verifieringen kunde inte startas."); return; }
+    if (json.bankid_verified || json.status === "complete") {
+      setMessage("BankID verifierad.");
+      await load();
+      return;
+    }
+    if (json.session_id) {
+      setMessage("BankID är startat. Slutför i BankID-appen.");
+      await pollBankid(json.session_id);
+    }
+  }
+
+  async function pollBankid(sessionId: string) {
+    const token = await accessToken();
+    if (!token) return;
+    for (let i = 0; i < 45; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const res = await fetch(`/api/customer/bankid/sessions/${sessionId}/poll`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { setMessage(json.error ?? "BankID-verifieringen kunde inte kontrolleras."); return; }
+      if (json.bankid_verified || json.status === "complete") {
+        setMessage("BankID verifierad.");
+        await load();
+        return;
+      }
+      if (["failed", "cancelled", "expired"].includes(String(json.status))) {
+        setMessage("BankID-verifieringen avbröts eller gick ut. Försök igen.");
+        return;
+      }
+    }
+    setMessage("BankID tar längre tid än väntat. Kontrollera status igen om en stund.");
   }
 
   async function requestTow() {
@@ -73,24 +102,24 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
     if (!token) return;
     const res = await fetch(`/api/customer/cases/${id}/request-tow`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify({ priority: "normal" }) });
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) setMessage(json.error ?? "Could not request tow.");
-    else { setMessage(`Bärgning begärd: ${json.status}`); await load(); }
+    if (!res.ok) setMessage(json.error ?? "Kunde inte begära bärgning.");
+    else { setMessage(`Bärgning begärd: ${towStatusLabel(json.status)}`); await load(); }
   }
 
-  if (!supabase) return <p>Unavailable until Supabase is configured.</p>;
-  if (authed === false) return <p>Please <a href="/login">log in</a>.</p>;
-  if (!incident) return <p>Loading case…</p>;
+  if (!supabase) return <p>Tjänsten är inte konfigurerad ännu.</p>;
+  if (authed === false) return <p>Du behöver <a href="/login">logga in</a>.</p>;
+  if (!incident) return <p>Laddar ärende…</p>;
 
   return (
     <div>
-      <h1 style={{ fontSize: 24 }}>{incident.case_number ?? "Case"}</h1>
-      <p style={{ opacity: 0.7 }}>{incident.type} • {incident.status}</p>
+      <h1 style={{ fontSize: 24 }}>{incident.case_number ?? "Ärende"}</h1>
+      <p style={{ opacity: 0.7 }}>{incident.type === "damage_claim" ? "Försäkringsärende" : "Bärgningsärende"} • {incidentStatusLabel(incident.status)}</p>
 
       {incident.requires_bankid && !incident.bankid_verified ? (
         <div className="status-card">
           <strong>BankID krävs</strong>
           <p className="vehicle-meta">Verifiera ärendet innan det skickas vidare till försäkringsbolag/bärgning.</p>
-          <button className="bigbtn" onClick={mockSign}>Verifiera med BankID mock/test</button>
+          <button className="bigbtn" onClick={verifyWithBankid}>Verifiera med BankID</button>
         </div>
       ) : null}
 

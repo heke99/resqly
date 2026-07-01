@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cn, formatDistance, formatEta, towStatusLabel, whatHappensNext } from "./index";
+import { cn, formatDistance, formatEta, towStatusLabel, whatHappensNext, incidentStatusLabel, problemTypeLabel } from "./index";
 
 describe("ui helpers", () => {
   it("joins class names dropping falsy", () => {
@@ -14,8 +14,10 @@ describe("ui helpers", () => {
     expect(formatEta(120)).toBe("2 min");
     expect(formatEta(3660)).toBe("1 h 1 min");
   });
-  it("labels statuses and gives next-step hints", () => {
-    expect(towStatusLabel("driver_en_route")).toBe("Driver on the way");
-    expect(whatHappensNext("matching")).toMatch(/finding/i);
+  it("labels statuses and gives next-step hints in Swedish", () => {
+    expect(towStatusLabel("driver_en_route")).toBe("Bärgare på väg");
+    expect(whatHappensNext("matching")).toMatch(/behöriga bärgare/i);
+    expect(incidentStatusLabel("awaiting_bankid")).toBe("Väntar på BankID");
+    expect(problemTypeLabel("dead_battery")).toBe("Urladdat batteri");
   });
 });

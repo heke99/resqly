@@ -206,6 +206,9 @@ importers:
       '@resqly/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@resqly/notifications':
+        specifier: workspace:*
+        version: link:../../packages/notifications
       '@resqly/types':
         specifier: workspace:*
         version: link:../../packages/types

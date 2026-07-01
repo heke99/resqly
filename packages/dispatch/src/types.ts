@@ -11,9 +11,11 @@ export interface CandidateCapabilities {
 export interface DispatchCandidate {
   driverId: string;
   towCompanyId: string;
+  /** Active tow vehicle/truck tied to this driver. Required for production dispatch offers. */
+  towVehicleId?: string | null;
   dutyStatus: DutyStatus;
   distanceMeters: number;
-  /** Last known driver location used only for server-side ETA enrichment. */
+  /** Last known driver/vehicle location used only for server-side ETA enrichment. */
   location?: Coordinate;
   etaSeconds?: number;
   etaSource?: "google_matrix" | "google_routes" | "haversine_fallback" | "last_known";
@@ -23,8 +25,14 @@ export interface DispatchCandidate {
   rating?: number;
   acceptRate?: number;
   priceMinor?: number;
-  /** Whether this company is in the insurer's contracted network. */
+  /** Whether this company/vehicle is in the insurer's contracted network. */
   inPreferredNetwork?: boolean;
+  /** Active agreement that permits this tow vehicle/company to receive this insurer's job. */
+  insuranceAgreementId?: string | null;
+  /** Lower agreement priority wins before ETA when the insurer has explicit partner priority. */
+  agreementPriority?: number | null;
+  /** For direct/private orders: this company is explicitly enabled for the open marketplace. */
+  marketplaceEnabled?: boolean;
   /** For round-robin: lower means "longer since last dispatched". */
   roundRobinKey?: number;
   isBusy?: boolean;
@@ -58,12 +66,22 @@ export interface DispatchRequest {
   maxDistanceMeters?: number;
   allowMarketplaceFallback?: boolean;
   maxCandidates?: number;
+  /**
+   * Insurance jobs should normally notify every active contracted/approved tow
+   * vehicle in range. Direct/private jobs can still be limited/ranked by nearest
+   * available marketplace vehicles.
+   */
+  offerAllEligible?: boolean;
 }
 
 export interface DispatchOffer {
   driverId: string;
   towCompanyId: string;
+  towVehicleId?: string | null;
   rank: number;
+  distanceMeters: number;
+  etaSeconds?: number;
+  agreementPriority?: number | null;
 }
 
 export interface DispatchResult {

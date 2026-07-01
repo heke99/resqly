@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSupabase } from "../lib/supabase-client";
+import { incidentStatusLabel } from "@resqly/web-kit";
 
 interface Incident {
   id: string;
@@ -41,11 +42,11 @@ function CasesInner() {
     void load();
   }, [load]);
 
-  if (!supabase) return <p>Cases are unavailable until Supabase is configured.</p>;
+  if (!supabase) return <p>Tjänsten är inte konfigurerad ännu.</p>;
   if (authed === false)
     return (
       <p>
-        Please <a href="/login">log in</a> to view your cases.
+        Du behöver <a href="/login">logga in</a> för att se dina ärenden.
       </p>
     );
 
@@ -55,15 +56,15 @@ function CasesInner() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 22 }}>My Cases</h1>
+      <h1 style={{ fontSize: 22 }}>Mina ärenden</h1>
       {shown.length === 0 ? (
-        <p style={{ opacity: 0.7 }}>No cases to show.</p>
+        <p style={{ opacity: 0.7 }}>Inga ärenden att visa.</p>
       ) : (
         <ul style={{ listStyle: "none", padding: 0 }}>
           {shown.map((i) => (
             <li key={i.id} className="tile" style={{ marginBottom: 10 }}>
               <a href={`/cases/${i.id}`}>
-                {i.case_number ?? i.id.slice(0, 8)} — {i.type} — {i.status}
+                {i.case_number ?? i.id.slice(0, 8)} — {i.type === "damage_claim" ? "Försäkringsärende" : "Bärgningsärende"} — {incidentStatusLabel(i.status)}
               </a>
             </li>
           ))}
@@ -75,7 +76,7 @@ function CasesInner() {
 
 export default function CasesPage() {
   return (
-    <Suspense fallback={<p>Loading…</p>}>
+    <Suspense fallback={<p>Laddar…</p>}>
       <CasesInner />
     </Suspense>
   );

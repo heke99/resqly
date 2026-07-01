@@ -26,6 +26,8 @@ const DEFAULT_SETTINGS: TenantSettingsRecord = {
   bankid_required_for_tow: true,
   max_dispatch_radius_km: 50,
   max_dispatch_candidates: 8,
+  max_insurance_broadcast_candidates: 250,
+  private_dispatch_wave_radius_km: 15,
   offer_expiry_seconds: 120,
   allow_marketplace_fallback: true,
 };
@@ -65,7 +67,7 @@ export class SupabaseRepo implements ApiRepo {
 
   async getTenantSettings(id: string): Promise<TenantSettingsRecord> {
     const { data } = await this.table("tenant_settings").select("*").eq("tenant_id", id).maybeSingle();
-    return (data as TenantSettingsRecord | null) ?? { ...DEFAULT_SETTINGS };
+    return { ...DEFAULT_SETTINGS, ...((data as Partial<TenantSettingsRecord> | null) ?? {}) };
   }
   async getTenantBranding(id: string) {
     const { data } = await this.table("tenant_branding").select("*").eq("tenant_id", id).maybeSingle();
@@ -264,6 +266,10 @@ export class SupabaseRepo implements ApiRepo {
         distance_m: number;
         driver_lat?: number | null;
         driver_lng?: number | null;
+        tow_vehicle_id?: string | null;
+        insurance_agreement_id?: string | null;
+        agreement_priority?: number | null;
+        marketplace_enabled?: boolean | null;
         can_handle_ev: boolean;
         has_flatbed: boolean;
         can_tow_heavy_truck: boolean;
@@ -272,6 +278,11 @@ export class SupabaseRepo implements ApiRepo {
     return rows.map((d) => ({
       driverId: d.driver_id,
       towCompanyId: d.tow_company_id,
+      towVehicleId: d.tow_vehicle_id ?? null,
+      insuranceAgreementId: d.insurance_agreement_id ?? null,
+      agreementPriority: d.agreement_priority ?? null,
+      inPreferredNetwork: Boolean(d.insurance_agreement_id),
+      marketplaceEnabled: Boolean(d.marketplace_enabled),
       dutyStatus: (d.duty_status as DispatchCandidate["dutyStatus"]) ?? "on_duty",
       distanceMeters: d.distance_m,
       location: d.driver_lat != null && d.driver_lng != null ? { lat: d.driver_lat, lng: d.driver_lng } : undefined,
@@ -302,7 +313,7 @@ export class SupabaseRepo implements ApiRepo {
 
   async getOfferById(id: string): Promise<OfferRecord | null> {
     const { data } = await this.table("tow_job_offers")
-      .select("id, tow_job_id, driver_id, tow_company_id, tenant_id, status, rank, expires_at")
+      .select("id, tow_job_id, driver_id, tow_company_id, tow_vehicle_id, tenant_id, status, rank, expires_at")
       .eq("id", id)
       .maybeSingle();
     return (data as OfferRecord | null) ?? null;

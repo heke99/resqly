@@ -50,13 +50,18 @@ export async function runDispatchForJob(
     pickup,
   });
 
+  const candidateLimit =
+    input.payerType === "insurance_company"
+      ? settings.max_insurance_broadcast_candidates
+      : settings.max_dispatch_candidates;
   const rawCandidates = await ctx.repo.getDispatchCandidates(
     pickup,
     settings.max_dispatch_radius_km,
-    settings.max_dispatch_candidates,
+    candidateLimit,
     {
       payerType: input.payerType,
       insuranceTenantId: input.payerType === "insurance_company" ? job.tenant_id : null,
+      broadcastAllContractVehicles: input.payerType === "insurance_company",
     },
   );
   const candidates = await enrichCandidatesWithGoogleEta(ctx, rawCandidates, pickup);
@@ -67,8 +72,12 @@ export async function runDispatchForJob(
     payerType: input.payerType,
     priority: input.priority,
     requirements: input.problemType === "ev_out_of_battery" ? { needsEv: true } : undefined,
-    allowMarketplaceFallback: settings.allow_marketplace_fallback,
-    maxCandidates: settings.max_dispatch_candidates,
+    // Insurance-funded jobs are contract-only and broadcast to all eligible
+    // approved tow vehicles in range. Direct/private jobs are marketplace jobs
+    // and are offered nearest/fastest outward, capped by max_dispatch_candidates.
+    allowMarketplaceFallback: input.payerType === "customer_private" && settings.allow_marketplace_fallback,
+    offerAllEligible: input.payerType === "insurance_company",
+    maxCandidates: input.payerType === "insurance_company" ? candidateLimit : settings.max_dispatch_candidates,
     maxDistanceMeters: settings.max_dispatch_radius_km * 1000,
   };
   const dispatch = selectDispatch(candidates, request);
@@ -81,7 +90,10 @@ export async function runDispatchForJob(
         tow_job_id: job.id,
         driver_id: o.driverId,
         tow_company_id: o.towCompanyId,
+        tow_vehicle_id: o.towVehicleId ?? null,
         rank: o.rank,
+        distance_meters: o.distanceMeters,
+        eta_seconds: o.etaSeconds ?? null,
         expires_at: expiresAt,
       })),
     );
@@ -95,6 +107,7 @@ export async function runDispatchForJob(
       tow_job_id: job.id,
       incident_id: job.incident_id,
       offered_drivers: dispatch.offers.map((o) => o.driverId),
+      offered_tow_vehicles: dispatch.offers.map((o) => o.towVehicleId).filter(Boolean),
     });
     await sendOfferPushes(ctx, job, dispatch.offers, pickup, input.problemType ?? null, expiresAt);
   } else {
@@ -117,7 +130,12 @@ export async function runDispatchForJob(
     entity_type: "tow_job",
     entity_id: job.id,
     fields: ["strategy"],
-    metadata: { strategy: dispatch.strategy, offers: dispatch.offers.length },
+    metadata: {
+      strategy: dispatch.strategy,
+      offers: dispatch.offers.length,
+      contract_only: input.payerType === "insurance_company",
+      offer_all_eligible: input.payerType === "insurance_company",
+    },
   });
 
   return {
@@ -171,7 +189,7 @@ async function enrichCandidatesWithGoogleEta(
 async function sendOfferPushes(
   ctx: ApiContext,
   job: TowJobRecord,
-  offers: Array<{ driverId: string; towCompanyId: string }>,
+  offers: Array<{ driverId: string; towCompanyId: string; towVehicleId?: string | null }>,
   pickup: Coordinate,
   problemType: string | null,
   expiresAt: string,
@@ -203,6 +221,7 @@ async function sendOfferPushes(
       await enqueueWebhookEvent(ctx, "tow.offer_sent", {
         tow_job_id: job.id,
         driver_id: o.driverId,
+        tow_vehicle_id: o.towVehicleId ?? null,
         push_status: res.ok ? "sent" : "failed",
       });
     } catch (e) {

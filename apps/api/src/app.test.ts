@@ -12,8 +12,8 @@ function setup() {
   repo.seedTenant({ id: "t-if", slug: "if", name: "If", case_number_prefix: "IF" });
   repo.seedApiClient("t-if", sha256Hex(API_KEY));
   repo.candidates = [
-    { driverId: "drv1", towCompanyId: "tc1", dutyStatus: "on_duty", distanceMeters: 1000, etaSeconds: 300 },
-    { driverId: "drv2", towCompanyId: "tc1", dutyStatus: "on_duty", distanceMeters: 4000, etaSeconds: 700 },
+    { driverId: "drv1", towCompanyId: "tc1", towVehicleId: "truck1", dutyStatus: "on_duty", distanceMeters: 1000, etaSeconds: 300, insuranceAgreementId: "agr-if-tc1", inPreferredNetwork: true },
+    { driverId: "drv2", towCompanyId: "tc1", towVehicleId: "truck2", dutyStatus: "on_duty", distanceMeters: 4000, etaSeconds: 700, insuranceAgreementId: "agr-if-tc1", inPreferredNetwork: true },
   ];
   repo.driverUsers.set("user-drv1", "drv1");
   const app = new App({

@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSupabase } from "../../lib/supabase-client";
+import { damageTypeLabel, problemTypeLabel, towStatusLabel } from "@resqly/web-kit";
 
 interface Vehicle {
   id: string;
@@ -72,7 +73,7 @@ function NewCaseInner() {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => setStatus("Could not get location; you can still submit and add it later."),
+      () => setStatus("Kunde inte hämta din position. Du kan ändå skapa ärendet och lägga till plats senare."),
     );
   }
 
@@ -99,18 +100,47 @@ function NewCaseInner() {
       body: JSON.stringify({ vehicle_id: vehicleId, type, subtype, description, coords, mode: effectiveMode }),
     });
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) { setStatus(json.error ?? "Could not create case."); return; }
+    if (!res.ok) { setStatus(json.error ?? "Kunde inte skapa ärendet."); return; }
     setCreated({ id: json.incident_id, caseNumber: json.case_number, requiresBankid: Boolean(json.requires_bankid) });
   }
 
-  async function mockSign() {
+  async function verifyWithBankid() {
     if (!created) return;
     const accessToken = await token();
     if (!accessToken) return;
-    const res = await fetch(`/api/customer/cases/${created.id}/bankid/mock-sign`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
+    const res = await fetch(`/api/customer/cases/${created.id}/bankid/sign`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) setStatus(json.error ?? "BankID failed.");
-    else setCreated({ ...created, requiresBankid: false });
+    if (!res.ok) { setStatus(json.error ?? "BankID-verifieringen kunde inte startas."); return; }
+    if (json.bankid_verified || json.status === "complete") {
+      setStatus("BankID verifierad.");
+      setCreated({ ...created, requiresBankid: false });
+      return;
+    }
+    if (json.session_id) {
+      setStatus("BankID är startat. Slutför i BankID-appen.");
+      await pollBankid(json.session_id);
+    }
+  }
+
+  async function pollBankid(sessionId: string) {
+    const accessToken = await token();
+    if (!accessToken) return;
+    for (let i = 0; i < 45; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const res = await fetch(`/api/customer/bankid/sessions/${sessionId}/poll`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { setStatus(json.error ?? "BankID-verifieringen kunde inte kontrolleras."); return; }
+      if (json.bankid_verified || json.status === "complete") {
+        setStatus("BankID verifierad.");
+        setCreated((current) => current ? { ...current, requiresBankid: false } : current);
+        return;
+      }
+      if (["failed", "cancelled", "expired"].includes(String(json.status))) {
+        setStatus("BankID-verifieringen avbröts eller gick ut. Försök igen.");
+        return;
+      }
+    }
+    setStatus("BankID tar längre tid än väntat. Öppna ärendet och kontrollera status igen.");
   }
 
   async function requestTow() {
@@ -123,12 +153,12 @@ function NewCaseInner() {
       body: JSON.stringify({ priority: "normal" }),
     });
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) setStatus(json.error ?? "Could not request tow.");
-    else setCreated({ ...created, towStatus: json.status ?? "manual_review" });
+    if (!res.ok) setStatus(json.error ?? "Kunde inte begära bärgning.");
+    else setCreated({ ...created, towStatus: towStatusLabel(json.status ?? "manual_review") });
   }
 
-  if (!supabase) return <p>Case creation is unavailable until Supabase is configured.</p>;
-  if (status === "not_authed") return <p>Please <a href="/login">log in</a> to create a case.</p>;
+  if (!supabase) return <p>Tjänsten är inte konfigurerad ännu.</p>;
+  if (status === "not_authed") return <p>Du behöver <a href="/login">logga in</a> för att skapa ett ärende.</p>;
 
   if (created) {
     return (
@@ -140,7 +170,7 @@ function NewCaseInner() {
           {created.requiresBankid ? (
             <>
               <p>Detta ärende behöver BankID-verifieras innan det skickas vidare.</p>
-              <button className="bigbtn" onClick={mockSign}>Verifiera med BankID mock/test</button>
+              <button className="bigbtn" onClick={verifyWithBankid}>Verifiera med BankID</button>
             </>
           ) : isDamage ? (
             <>
@@ -162,7 +192,7 @@ function NewCaseInner() {
   return (
     <div>
       <h1 style={{ fontSize: 24 }}>{isDamage ? "Anmäl skada" : "Starta ärende"}</h1>
-      <p style={{ opacity: 0.72 }}>Välj vilket fordon ärendet gäller. Rätt försäkringspartner, case-prefix och regler hämtas från bilens aktiva försäkring.</p>
+      <p style={{ opacity: 0.72 }}>Välj vilket fordon ärendet gäller. Rätt försäkringsbolag, ärendenummer och regler hämtas från bilens verifierade försäkringskoppling.</p>
       <form onSubmit={submit}>
         <label htmlFor="vehicle">Fordon</label>
         <select id="vehicle" value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} required>
@@ -172,7 +202,7 @@ function NewCaseInner() {
             return <option key={v.id} value={v.id}>{v.registration_number} {p?.insurance_companies?.name ? `— ${p.insurance_companies.name}` : "— saknar försäkring"}</option>;
           })}
         </select>
-        {selectedVehicle ? <p className="vehicle-meta">Detta ärende hanteras av {selectedPolicy?.insurance_companies?.name ?? "vald försäkringspartner saknas"}. <a href={`/insurances?vehicle=${selectedVehicle.id}`}>Byt/koppla försäkring</a></p> : null}
+        {selectedVehicle ? <p className="vehicle-meta">Detta ärende hanteras av {selectedPolicy?.insurance_companies?.name ?? "vald försäkring saknas"}. <a href={`/insurances?vehicle=${selectedVehicle.id}`}>Byt/koppla försäkring</a></p> : null}
 
         {!isDamage ? (
           <div style={{ marginTop: 12 }}>
@@ -193,7 +223,7 @@ function NewCaseInner() {
 
         <label htmlFor="subtype">{isDamage ? "Skadetyp" : "Problem"}</label>
         <select id="subtype" value={subtype} onChange={(e) => setSubtype(e.target.value)}>
-          {(isDamage ? DAMAGE_TYPES : TOW_PROBLEMS).map((t) => <option key={t} value={t}>{t.replaceAll("_", " ")}</option>)}
+          {(isDamage ? DAMAGE_TYPES : TOW_PROBLEMS).map((t) => <option key={t} value={t}>{isDamage ? damageTypeLabel(t) : problemTypeLabel(t)}</option>)}
         </select>
 
         <label htmlFor="desc">Vad hände?</label>
@@ -201,7 +231,7 @@ function NewCaseInner() {
 
         <div style={{ marginTop: 12 }}>
           <button type="button" className="bigbtn" onClick={shareLocation}>
-            {coords ? `Location shared (${coords.lat.toFixed(3)}, ${coords.lng.toFixed(3)})` : "Dela min position"}
+            {coords ? `Position delad (${coords.lat.toFixed(3)}, ${coords.lng.toFixed(3)})` : "Dela min position"}
           </button>
         </div>
         <div style={{ marginTop: 16 }}><button className="bigbtn" type="submit">Skapa ärende</button></div>
@@ -213,5 +243,5 @@ function NewCaseInner() {
 }
 
 export default function NewCasePage() {
-  return <Suspense fallback={<p>Loading…</p>}><NewCaseInner /></Suspense>;
+  return <Suspense fallback={<p>Laddar…</p>}><NewCaseInner /></Suspense>;
 }

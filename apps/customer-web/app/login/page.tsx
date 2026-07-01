@@ -11,7 +11,7 @@ export default function LoginPage() {
   const [message, setMessage] = useState<string | null>(null);
 
   if (!supabase) {
-    return <p>Sign-in is unavailable until Supabase is configured.</p>;
+    return <p>Inloggning är inte konfigurerad ännu.</p>;
   }
 
   async function submit(e: React.FormEvent) {
@@ -31,18 +31,18 @@ export default function LoginPage() {
           email: userData.user.email ?? null,
         } as never);
       }
-      setMessage(mode === "sign_up" ? "Account created. You can now use the app." : "Signed in.");
+      setMessage(mode === "sign_up" ? "Kontot är skapat. Du kan nu använda tjänsten." : "Du är inloggad.");
       window.location.href = "/";
     }
   }
 
   return (
     <div>
-      <h1 style={{ fontSize: 22 }}>{mode === "sign_in" ? "Log in" : "Create account"}</h1>
+      <h1 style={{ fontSize: 22 }}>{mode === "sign_in" ? "Logga in" : "Skapa konto"}</h1>
       <form onSubmit={submit}>
-        <label htmlFor="email">Email</label>
+        <label htmlFor="email">E-post</label>
         <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <label htmlFor="password">Password</label>
+        <label htmlFor="password">Lösenord</label>
         <input
           id="password"
           type="password"
@@ -52,14 +52,14 @@ export default function LoginPage() {
         />
         <div style={{ marginTop: 16 }}>
           <button className="bigbtn" type="submit">
-            {mode === "sign_in" ? "Log in" : "Create account"}
+            {mode === "sign_in" ? "Logga in" : "Skapa konto"}
           </button>
         </div>
       </form>
       {message ? <p style={{ marginTop: 12 }}>{message}</p> : null}
       <p style={{ marginTop: 16 }}>
         <a onClick={() => setMode(mode === "sign_in" ? "sign_up" : "sign_in")} style={{ cursor: "pointer" }}>
-          {mode === "sign_in" ? "Need an account? Sign up" : "Have an account? Log in"}
+          {mode === "sign_in" ? "Behöver du konto? Skapa konto" : "Har du redan konto? Logga in"}
         </a>
       </p>
     </div>

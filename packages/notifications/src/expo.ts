@@ -61,8 +61,8 @@ export function buildOfferPushMessage(input: {
 }): ExpoPushMessage {
   return {
     to: input.expoPushToken,
-    title: "New tow job offer",
-    body: `${input.problemType} near ${input.approxArea}`,
+    title: "Nytt bärgningsuppdrag",
+    body: `${input.problemType} nära ${input.approxArea}`,
     sound: "default",
     priority: "high",
     data: {

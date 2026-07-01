@@ -40,11 +40,11 @@ interface CustomerShare {
 }
 
 const STATUS_BUTTONS: Array<{ label: string; status: string }> = [
-  { label: "I'm on my way", status: "driver_en_route" },
-  { label: "I've arrived", status: "driver_arrived" },
-  { label: "Vehicle loaded", status: "vehicle_loaded" },
-  { label: "Transporting", status: "transporting" },
-  { label: "Delivered", status: "delivered" },
+  { label: "Jag är på väg", status: "driver_en_route" },
+  { label: "Jag är framme", status: "driver_arrived" },
+  { label: "Fordon lastat", status: "vehicle_loaded" },
+  { label: "Transport pågår", status: "transporting" },
+  { label: "Levererad", status: "delivered" },
 ];
 
 function mapsUrl(lat: number, lng: number): string {
@@ -60,7 +60,7 @@ export default function App() {
   return (
     <View style={styles.root}>
       <StatusBar style="dark" />
-      <Text style={styles.brand}>Resqly Driver</Text>
+      <Text style={styles.brand}>Resqly Förare</Text>
       <View style={styles.body}>
         {screen === "login" ? (
           <Login onDriver={() => setScreen("offers")} onDenied={() => setScreen("denied")} />
@@ -81,10 +81,10 @@ export default function App() {
       </View>
       <View style={styles.nav}>
         <Pressable onPress={() => setScreen("offers")}>
-          <Text style={styles.navItem}>Offers</Text>
+          <Text style={styles.navItem}>Uppdrag</Text>
         </Pressable>
         <Pressable onPress={() => setScreen("login")}>
-          <Text style={styles.navItem}>Account</Text>
+          <Text style={styles.navItem}>Konto</Text>
         </Pressable>
       </View>
     </View>
@@ -106,7 +106,7 @@ function Login({ onDriver, onDenied }: { onDriver: () => void; onDenied: () => v
 
   async function signIn() {
     if (!supabase) {
-      setMessage("Supabase is not configured.");
+      setMessage("Appen är inte konfigurerad ännu.");
       return;
     }
     setBusy(true);
@@ -121,13 +121,13 @@ function Login({ onDriver, onDenied }: { onDriver: () => void; onDenied: () => v
 
   return (
     <ScrollView>
-      <Text style={styles.h1}>Driver sign in</Text>
-      <Text style={styles.label}>Email</Text>
+      <Text style={styles.h1}>Förarinloggning</Text>
+      <Text style={styles.label}>E-post</Text>
       <TextInput style={styles.input} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
-      <Text style={styles.label}>Password</Text>
+      <Text style={styles.label}>Lösenord</Text>
       <TextInput style={styles.input} value={password} onChangeText={setPassword} secureTextEntry />
       <Pressable style={styles.bigbtn} onPress={signIn} disabled={busy}>
-        <Text style={styles.bigbtnText}>{busy ? "Signing in…" : "Log in"}</Text>
+        <Text style={styles.bigbtnText}>{busy ? "Loggar in…" : "Logga in"}</Text>
       </Pressable>
       {message ? <Text style={styles.muted}>{message}</Text> : null}
     </ScrollView>
@@ -137,16 +137,15 @@ function Login({ onDriver, onDenied }: { onDriver: () => void; onDenied: () => v
 function AccessDenied({ onBack }: { onBack: () => void }) {
   return (
     <ScrollView>
-      <Text style={styles.h1}>Driver access required</Text>
+      <Text style={styles.h1}>Förarbehörighet krävs</Text>
       <View style={styles.card}>
-        <Text style={{ fontWeight: "700" }}>This account is not set up as a tow driver.</Text>
+        <Text style={{ fontWeight: "700" }}>Det här kontot är inte kopplat till en förare.</Text>
         <Text style={styles.muted}>
-          Ask your tow company administrator to invite you as a driver in the Resqly portal. Once you have a driver
-          profile, sign in again to go online and receive jobs.
+          Be administratören på bärgningsföretaget att bjuda in dig som förare i Resqly-portalen. När din förarprofil är aktiv kan du logga in, gå online och ta emot uppdrag.
         </Text>
       </View>
       <Pressable style={styles.bigbtn} onPress={onBack}>
-        <Text style={styles.bigbtnText}>Back to sign in</Text>
+        <Text style={styles.bigbtnText}>Tillbaka till inloggning</Text>
       </Pressable>
     </ScrollView>
   );
@@ -189,7 +188,7 @@ function Offers({ onOpen }: { onOpen: (offer: Offer, jobId: string) => void }) {
       const perm = await Location.requestForegroundPermissionsAsync();
       const res = await apiPost("/api/v1/drivers/me/online", {});
       if (!res || !res.ok) {
-        setMessage("Could not go online. Check your driver profile.");
+        setMessage("Kunde inte gå online. Kontrollera förarprofilen.");
         return;
       }
       setOnline(true);
@@ -229,18 +228,18 @@ function Offers({ onOpen }: { onOpen: (offer: Offer, jobId: string) => void }) {
       <FlatList
         data={offers}
         keyExtractor={(o) => o.offer_id}
-        ListHeaderComponent={<Text style={styles.h1}>New offers</Text>}
+        ListHeaderComponent={<Text style={styles.h1}>Nya uppdrag</Text>}
         ListEmptyComponent={
-          <Text style={styles.muted}>{online ? "No offers right now. Stay online to receive jobs." : "Go online to receive job offers."}</Text>
+          <Text style={styles.muted}>{online ? "Inga uppdrag just nu. Var online för att ta emot uppdrag." : "Gå online för att ta emot uppdrag."}</Text>
         }
         renderItem={({ item }) => (
           <Pressable style={styles.card} onPress={() => onOpen(item, item.tow_job_id)}>
-            <Text style={{ fontWeight: "700" }}>{(item.problem_type ?? "Assistance").replaceAll("_", " ")}</Text>
+            <Text style={{ fontWeight: "700" }}>{(item.problem_type ?? "Assistans").replaceAll("_", " ")}</Text>
             <Text style={styles.muted}>
-              {item.approx_area ? `Area ${item.approx_area} • ` : ""}
-              {item.payer_type === "customer_private" ? "Direct" : "Insurance"} • Priority {item.priority}
+              {item.approx_area ? `Område ${item.approx_area} • ` : ""}
+              {item.payer_type === "customer_private" ? "Privat" : "Försäkring"} • Prioritet {item.priority}
             </Text>
-            <Text style={styles.muted}>Tap to review and accept →</Text>
+            <Text style={styles.muted}>Tryck för att granska och acceptera →</Text>
           </Pressable>
         )}
       />
@@ -254,9 +253,9 @@ function JobDetail({ offer, jobId, onBack }: { offer: Offer | null; jobId: strin
   const [status, setStatus] = useState<string>("offered");
   const [message, setMessage] = useState<string | null>(null);
   const [showReport, setShowReport] = useState(false);
-  const [work, setWork] = useState("Vehicle towed to destination");
+  const [work, setWork] = useState("Fordon bärgat till destination");
   const [waiting, setWaiting] = useState("0");
-  const [notes, setNotes] = useState("");
+  const [notes, setAnteckningar] = useState("");
 
   const loadShare = useCallback(async () => {
     if (!supabase) return;
@@ -279,10 +278,10 @@ function JobDetail({ offer, jobId, onBack }: { offer: Offer | null; jobId: strin
     const res = await apiPost(`/api/v1/drivers/offers/${offer.offer_id}/accept`, {});
     if (res && res.ok) {
       setStatus("accepted");
-      setMessage("Accepted. Customer details unlocked.");
+      setMessage("Accepterat. Kunduppgifter visas nu.");
       await loadShare();
     } else {
-      setMessage("Could not accept — the job may have been taken.");
+      setMessage("Kunde inte acceptera — uppdraget kan redan ha tagits.");
     }
   }
 
@@ -299,14 +298,14 @@ function JobDetail({ offer, jobId, onBack }: { offer: Offer | null; jobId: strin
 
   async function submitReport() {
     await apiPost(`/api/v1/tow/jobs/${jobId}/complete`, {
-      work_performed: work || "Completed",
+      work_performed: work || "Slutfört",
       vehicle_picked_up: true,
       waiting_minutes: Number(waiting) || 0,
       comments: notes || undefined,
     });
     setStatus("invoiced");
     setShowReport(false);
-    setMessage("Completion report submitted.");
+    setMessage("Slutrapport skickad.");
   }
 
   const accepted = Boolean(share);
@@ -314,27 +313,26 @@ function JobDetail({ offer, jobId, onBack }: { offer: Offer | null; jobId: strin
   return (
     <ScrollView>
       <Pressable onPress={onBack}>
-        <Text style={{ color: palette.primary, fontWeight: "700" }}>‹ Back to offers</Text>
+        <Text style={{ color: palette.primary, fontWeight: "700" }}>‹ Tillbaka till uppdrag</Text>
       </Pressable>
       <Text style={styles.h1}>{towStatusLabel(status as never)}</Text>
 
       {!accepted ? (
         <View>
           <Text style={styles.muted}>
-            Before accepting you only see approximate area, problem type and priority — never the customer&apos;s
-            personal details or identity number.
+            Innan du accepterar ser du bara ungefärligt område, problemtyp och prioritet — aldrig kundens personuppgifter eller personnummer.
           </Text>
           <View style={styles.card}>
-            <Text style={{ fontWeight: "700" }}>{(offer?.problem_type ?? "Assistance").replaceAll("_", " ")}</Text>
-            {offer?.approx_area ? <Text>Approx area: {offer.approx_area}</Text> : null}
-            <Text>Type: {offer?.payer_type === "customer_private" ? "Direct / private" : "Insurance"}</Text>
-            <Text>Priority: {offer?.priority ?? "normal"}</Text>
+            <Text style={{ fontWeight: "700" }}>{(offer?.problem_type ?? "Assistans").replaceAll("_", " ")}</Text>
+            {offer?.approx_area ? <Text>Ungefärligt område: {offer.approx_area}</Text> : null}
+            <Text>Typ: {offer?.payer_type === "customer_private" ? "Privat" : "Försäkring"}</Text>
+            <Text>Prioritet: {offer?.priority ?? "normal"}</Text>
           </View>
           <Pressable style={styles.bigbtn} onPress={accept}>
-            <Text style={styles.bigbtnText}>Accept</Text>
+            <Text style={styles.bigbtnText}>Acceptera</Text>
           </Pressable>
           <Pressable style={[styles.bigbtn, styles.secondary]} onPress={reject}>
-            <Text style={[styles.bigbtnText, { color: palette.primary }]}>Reject</Text>
+            <Text style={[styles.bigbtnText, { color: palette.primary }]}>Neka</Text>
           </Pressable>
         </View>
       ) : (
@@ -343,20 +341,20 @@ function JobDetail({ offer, jobId, onBack }: { offer: Offer | null; jobId: strin
             <Text style={{ fontWeight: "700" }}>{share!.customer_name}</Text>
             <Text>{share!.registration_number}</Text>
             <Text>{share!.problem_summary}</Text>
-            {share!.pickup_address ? <Text>Pickup: {share!.pickup_address}</Text> : null}
+            {share!.pickup_address ? <Text>Upphämtning: {share!.pickup_address}</Text> : null}
             {share!.destination_address ? <Text>Destination: {share!.destination_address}</Text> : null}
-            {share!.customer_notes ? <Text>Notes: {share!.customer_notes}</Text> : null}
-            <Text style={styles.muted}>No personal identity number or BankID details are ever shown.</Text>
+            {share!.customer_notes ? <Text>Anteckningar: {share!.customer_notes}</Text> : null}
+            <Text style={styles.muted}>Personnummer och BankID-detaljer visas aldrig.</Text>
           </View>
           <Pressable style={styles.bigbtn} onPress={() => Linking.openURL(`tel:${share!.customer_phone}`)}>
-            <Text style={styles.bigbtnText}>Call customer</Text>
+            <Text style={styles.bigbtnText}>Ring kund</Text>
           </Pressable>
           {share!.pickup_lat != null && share!.pickup_lng != null ? (
             <Pressable
               style={[styles.bigbtn, styles.secondary]}
               onPress={() => Linking.openURL(mapsUrl(share!.pickup_lat as number, share!.pickup_lng as number))}
             >
-              <Text style={[styles.bigbtnText, { color: palette.primary }]}>Navigate to pickup</Text>
+              <Text style={[styles.bigbtnText, { color: palette.primary }]}>Navigera till upphämtning</Text>
             </Pressable>
           ) : null}
           {STATUS_BUTTONS.map((b) => (
@@ -366,19 +364,19 @@ function JobDetail({ offer, jobId, onBack }: { offer: Offer | null; jobId: strin
           ))}
           {!showReport ? (
             <Pressable style={styles.bigbtn} onPress={() => setShowReport(true)}>
-              <Text style={styles.bigbtnText}>Complete & submit report</Text>
+              <Text style={styles.bigbtnText}>Slutför och skicka rapport</Text>
             </Pressable>
           ) : (
             <View style={styles.card}>
-              <Text style={{ fontWeight: "700" }}>Completion report</Text>
-              <Text style={styles.label}>Work performed</Text>
+              <Text style={{ fontWeight: "700" }}>Slutrapport</Text>
+              <Text style={styles.label}>Utfört arbete</Text>
               <TextInput style={styles.input} value={work} onChangeText={setWork} />
-              <Text style={styles.label}>Waiting time (minutes)</Text>
+              <Text style={styles.label}>Väntetid (minuter)</Text>
               <TextInput style={styles.input} value={waiting} onChangeText={setWaiting} keyboardType="number-pad" />
-              <Text style={styles.label}>Notes</Text>
-              <TextInput style={styles.input} value={notes} onChangeText={setNotes} multiline />
+              <Text style={styles.label}>Anteckningar</Text>
+              <TextInput style={styles.input} value={notes} onChangeText={setAnteckningar} multiline />
               <Pressable style={styles.bigbtn} onPress={submitReport}>
-                <Text style={styles.bigbtnText}>Submit report</Text>
+                <Text style={styles.bigbtnText}>Skicka rapport</Text>
               </Pressable>
             </View>
           )}

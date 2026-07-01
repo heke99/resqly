@@ -128,6 +128,8 @@ export const tenantSettingsPatchSchema = z.object({
   bankid_required_for_tow: z.boolean().optional(),
   max_dispatch_radius_km: z.number().positive().optional(),
   max_dispatch_candidates: z.number().int().positive().optional(),
+  max_insurance_broadcast_candidates: z.number().int().positive().optional(),
+  private_dispatch_wave_radius_km: z.number().positive().optional(),
   offer_expiry_seconds: z.number().int().positive().optional(),
 });
 export type TenantSettingsPatch = z.infer<typeof tenantSettingsPatchSchema>;

@@ -12,15 +12,13 @@ export function getSupabase(): SupabaseClient | null {
 }
 
 async function authHeaders(): Promise<Record<string, string> | null> {
-  const apiToken = process.env.EXPO_PUBLIC_DRIVER_TOKEN;
-  if (!apiToken) return null;
   const supabase = getSupabase();
   const { data } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
   const driverAccessToken = data.session?.access_token;
+  if (!driverAccessToken) return null;
   return {
     "content-type": "application/json",
-    authorization: `Bearer ${apiToken}`,
-    ...(driverAccessToken ? { "x-driver-authorization": `Bearer ${driverAccessToken}` } : {}),
+    authorization: `Bearer ${driverAccessToken}`,
   };
 }
 

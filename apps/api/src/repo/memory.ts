@@ -24,6 +24,7 @@ interface MemoryOffer {
   tow_job_id: string;
   driver_id: string;
   tow_company_id: string | null;
+  tow_vehicle_id?: string | null;
   tenant_id: string | null;
   status: string;
   rank: number;
@@ -38,6 +39,8 @@ const DEFAULT_SETTINGS: TenantSettingsRecord = {
   bankid_required_for_tow: true,
   max_dispatch_radius_km: 50,
   max_dispatch_candidates: 8,
+  max_insurance_broadcast_candidates: 250,
+  private_dispatch_wave_radius_km: 15,
   offer_expiry_seconds: 120,
   allow_marketplace_fallback: true,
 };
@@ -231,6 +234,7 @@ export class MemoryRepo implements ApiRepo {
         tow_job_id: r.tow_job_id as string,
         driver_id: r.driver_id as string,
         tow_company_id: (r.tow_company_id as string | undefined) ?? null,
+        tow_vehicle_id: (r.tow_vehicle_id as string | undefined) ?? null,
         tenant_id: (r.tenant_id as string | undefined) ?? null,
         status: "pending",
         rank: (r.rank as number | undefined) ?? 0,
@@ -274,6 +278,7 @@ export class MemoryRepo implements ApiRepo {
       tow_job_id: o.tow_job_id,
       driver_id: o.driver_id,
       tow_company_id: o.tow_company_id ?? "",
+      tow_vehicle_id: o.tow_vehicle_id ?? null,
       tenant_id: o.tenant_id ?? "",
       status: o.status,
       rank: o.rank,

@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   const vehicleId = String(body.vehicle_id ?? "");
   const insuranceCompanyId = String(body.insurance_company_id ?? "");
   const policyNumber = body.policy_number ? String(body.policy_number) : null;
-  if (!vehicleId || !insuranceCompanyId) return jsonError(400, "vehicle_id and insurance_company_id are required.");
+  if (!vehicleId || !insuranceCompanyId) return jsonError(400, "Fordon och försäkringsbolag krävs.");
 
   const { data: vehicle } = await db
     .from("vehicles" as never)
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     .eq("id", vehicleId)
     .eq("owner_user_id", user.id)
     .maybeSingle();
-  if (!vehicle) return jsonError(404, "Vehicle not found.");
+  if (!vehicle) return jsonError(404, "Fordonet hittades inte.");
 
   const { data: insurer } = await db
     .from("insurance_companies" as never)
@@ -26,14 +26,7 @@ export async function POST(request: Request) {
     .eq("active", true)
     .maybeSingle();
   const tenantId = (insurer as { tenant_id?: string } | null)?.tenant_id;
-  if (!tenantId) return jsonError(404, "Insurance company not found.");
-
-  await db
-    .from("vehicle_insurance_policies" as never)
-    .update({ is_active: false } as never)
-    .eq("vehicle_id", vehicleId)
-    .eq("customer_user_id", user.id)
-    .eq("is_active", true);
+  if (!tenantId) return jsonError(404, "Försäkringsbolaget hittades inte.");
 
   const { data: policy, error } = await db
     .from("vehicle_insurance_policies" as never)
@@ -43,23 +36,18 @@ export async function POST(request: Request) {
       insurance_company_id: insuranceCompanyId,
       tenant_id: tenantId,
       policy_number: policyNumber,
-      is_active: true,
+      is_active: false,
+      status: "pending_bankid",
     } as never)
     .select("id")
     .single();
   if (error) return jsonError(400, error.message);
 
-  await db.from("vehicles" as never).update({
-    insurance_company_id: insuranceCompanyId,
-    policy_number: policyNumber,
-    tenant_id: tenantId,
-  } as never).eq("id", vehicleId).eq("owner_user_id", user.id);
-
   await db.from("customer_insurance_connections" as never).upsert({
     customer_user_id: user.id,
     tenant_id: tenantId,
     insurance_company_id: insuranceCompanyId,
-    status: "active",
+    status: "pending_bankid",
   } as never, { onConflict: "customer_user_id,tenant_id,insurance_company_id" } as never);
 
   await db.from("audit_logs" as never).insert({
@@ -71,5 +59,5 @@ export async function POST(request: Request) {
     fields: ["vehicle_id", "insurance_company_id", "policy_number"],
   } as never);
 
-  return NextResponse.json({ policy_id: (policy as { id: string }).id, tenant_id: tenantId });
+  return NextResponse.json({ policy_id: (policy as { id: string }).id, tenant_id: tenantId, status: "pending_bankid", requires_bankid: true });
 }

@@ -26,6 +26,8 @@ export interface TenantSettingsRecord {
   bankid_required_for_tow: boolean;
   max_dispatch_radius_km: number;
   max_dispatch_candidates: number;
+  max_insurance_broadcast_candidates: number;
+  private_dispatch_wave_radius_km: number;
   offer_expiry_seconds: number;
   allow_marketplace_fallback: boolean;
 }
@@ -95,6 +97,7 @@ export interface OfferRecord {
   tow_job_id: string;
   driver_id: string;
   tow_company_id: string;
+  tow_vehicle_id?: string | null;
   tenant_id: string;
   status: string;
   rank: number;
@@ -104,6 +107,8 @@ export interface OfferRecord {
 export interface DispatchCandidateOptions {
   payerType: string;
   insuranceTenantId?: string | null;
+  /** For insurance jobs, fetch enough rows to notify every contracted tow vehicle in range. */
+  broadcastAllContractVehicles?: boolean;
 }
 
 export interface AcceptOfferResult {

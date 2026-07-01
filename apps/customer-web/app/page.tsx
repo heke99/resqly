@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSupabase } from "./lib/supabase-client";
+import { incidentStatusLabel } from "@resqly/web-kit";
 
 interface VehicleRow {
   id: string;
@@ -79,7 +80,7 @@ function HomeInner() {
   const policyByVehicle = useMemo(() => new Map(policies.map((p) => [p.vehicle_id, p])), [policies]);
   const activeCases = incidents.filter((i) => !["closed", "cancelled", "rejected", "completed"].includes(i.status));
 
-  if (!supabase) return <p>Unavailable until Supabase is configured.</p>;
+  if (!supabase) return <p>Tjänsten är inte konfigurerad ännu.</p>;
 
   return (
     <div>
@@ -87,7 +88,7 @@ function HomeInner() {
         <p className="eyebrow">Resqly Assistans</p>
         <h1>Vad behöver du hjälp med?</h1>
         <p>
-          Starta bärgning eller skadeärende från rätt fordon. Resqly väljer automatiskt rätt försäkringspartner från bilens aktiva försäkring.
+          Starta bärgning eller skadeärende från rätt fordon. Resqly väljer automatiskt rätt försäkringsbolag från bilens verifierade försäkringskoppling.
         </p>
         <a className="bigbtn" href={vehicles.length === 1 ? `/cases/new?vehicle=${vehicles[0]!.id}&type=towing` : "/cases/new?type=towing"}>
           Starta bärgning
@@ -99,9 +100,9 @@ function HomeInner() {
 
       {partner ? (
         <div className="status-card" style={{ marginTop: 16 }}>
-          <strong>Partnerlänk aktiv</strong>
+          <strong>Försäkringslänk aktiv</strong>
           <p className="vehicle-meta">
-            Partnern <code>{partner}</code> förväljs när du kopplar ny försäkring. Befintliga ärenden styrs alltid av valt fordons försäkring.
+            Försäkringsbolaget <code>{partner}</code> förväljs när du kopplar ny försäkring. Befintliga ärenden styrs alltid av valt fordons verifierade försäkring.
           </p>
         </div>
       ) : null}
@@ -152,7 +153,7 @@ function HomeInner() {
         activeCases.map((incident) => (
           <a key={incident.id} className="status-card" href={`/cases/${incident.id}`}>
             <strong>{incident.case_number ?? incident.id.slice(0, 8)}</strong>
-            <div className="vehicle-meta">{incident.type.replaceAll("_", " ")} • {incident.status.replaceAll("_", " ")}</div>
+            <div className="vehicle-meta">{incident.type === "damage_claim" ? "Försäkringsärende" : "Bärgningsärende"} • {incidentStatusLabel(incident.status)}</div>
           </a>
         ))
       )}

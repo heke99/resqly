@@ -15,17 +15,17 @@ import { towStatusLabel, whatHappensNext } from "@resqly/ui";
 import { getSupabase } from "./src/supabase";
 import { palette } from "./src/theme";
 
-type Screen = "home" | "login" | "vehicles" | "newCase" | "cases" | "caseDetail";
+type Screen = "hem" | "konto" | "fordon" | "newCase" | "ärenden" | "caseDetail";
 
 const TILES: Array<{ key: Screen; label: string }> = [
-  { key: "newCase", label: "Start Case" },
-  { key: "vehicles", label: "My Vehicles" },
-  { key: "cases", label: "My Cases" },
-  { key: "login", label: "Profile & BankID" },
+  { key: "newCase", label: "Starta ärende" },
+  { key: "fordon", label: "Mina fordon" },
+  { key: "ärenden", label: "Mina ärenden" },
+  { key: "konto", label: "Profil & BankID" },
 ];
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("home");
+  const [screen, setScreen] = useState<Screen>("hem");
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const supabase = getSupabase();
 
@@ -34,14 +34,14 @@ export default function App() {
       <StatusBar style="dark" />
       <Text style={styles.brand}>Resqly</Text>
       {!supabase ? (
-        <Text style={styles.muted}>Set EXPO_PUBLIC_SUPABASE_URL / ANON_KEY to connect.</Text>
+        <Text style={styles.muted}>Appen är inte konfigurerad ännu.</Text>
       ) : null}
       <View style={styles.body}>
-        {screen === "home" ? <Home onNavigate={setScreen} /> : null}
-        {screen === "login" ? <Login /> : null}
-        {screen === "vehicles" ? <Vehicles /> : null}
+        {screen === "hem" ? <Home onNavigate={setScreen} /> : null}
+        {screen === "konto" ? <Login /> : null}
+        {screen === "fordon" ? <Vehicles /> : null}
         {screen === "newCase" ? <NewCase /> : null}
-        {screen === "cases" ? (
+        {screen === "ärenden" ? (
           <Cases
             onOpen={(id) => {
               setActiveCaseId(id);
@@ -50,11 +50,11 @@ export default function App() {
           />
         ) : null}
         {screen === "caseDetail" && activeCaseId ? (
-          <CaseDetail caseId={activeCaseId} onBack={() => setScreen("cases")} />
+          <CaseDetail caseId={activeCaseId} onBack={() => setScreen("ärenden")} />
         ) : null}
       </View>
       <View style={styles.nav}>
-        {(["home", "cases", "vehicles", "login"] as Screen[]).map((s) => (
+        {(["hem", "ärenden", "fordon", "konto"] as Screen[]).map((s) => (
           <Pressable key={s} onPress={() => setScreen(s)}>
             <Text style={styles.navItem}>{s}</Text>
           </Pressable>
@@ -67,7 +67,7 @@ export default function App() {
 function Home({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   return (
     <ScrollView>
-      <Text style={styles.h1}>How can we help?</Text>
+      <Text style={styles.h1}>Vad behöver du hjälp med?</Text>
       <View style={styles.tiles}>
         {TILES.map((t) => (
           <Pressable key={t.key} style={styles.tile} onPress={() => onNavigate(t.key)}>
@@ -88,30 +88,29 @@ function Login() {
   async function signIn() {
     if (!supabase) return;
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setMessage(error ? error.message : "Signed in.");
+    setMessage(error ? error.message : "Du är inloggad.");
   }
   async function signUp() {
     if (!supabase) return;
     const { error } = await supabase.auth.signUp({ email, password });
-    setMessage(error ? error.message : "Account created.");
+    setMessage(error ? error.message : "Kontot är skapat.");
   }
 
   return (
     <ScrollView>
-      <Text style={styles.h1}>Profile & BankID</Text>
-      <Text style={styles.label}>Email</Text>
+      <Text style={styles.h1}>Profil & BankID</Text>
+      <Text style={styles.label}>E-post</Text>
       <TextInput style={styles.input} value={email} onChangeText={setEmail} autoCapitalize="none" />
-      <Text style={styles.label}>Password</Text>
+      <Text style={styles.label}>Lösenord</Text>
       <TextInput style={styles.input} value={password} onChangeText={setPassword} secureTextEntry />
       <Pressable style={styles.bigbtn} onPress={signIn}>
-        <Text style={styles.bigbtnText}>Log in</Text>
+        <Text style={styles.bigbtnText}>Logga in</Text>
       </Pressable>
       <Pressable style={[styles.bigbtn, styles.secondary]} onPress={signUp}>
-        <Text style={[styles.bigbtnText, { color: palette.primary }]}>Create account</Text>
+        <Text style={[styles.bigbtnText, { color: palette.primary }]}>Skapa konto</Text>
       </Pressable>
       <Text style={styles.muted}>
-        BankID runs in test/mock mode and is required before insurance cases are submitted. Your
-        personal number is never shared with tow drivers.
+        BankID används för att verifiera fordonskopplingar och försäkringsärenden. Personnummer delas aldrig med bärgningsförare.
       </Text>
       {message ? <Text style={styles.muted}>{message}</Text> : null}
     </ScrollView>
@@ -157,11 +156,11 @@ function Vehicles() {
 
   return (
     <View style={{ flex: 1 }}>
-      <Text style={styles.h1}>My Vehicles</Text>
+      <Text style={styles.h1}>Mina fordon</Text>
       <FlatList
         data={rows}
         keyExtractor={(v) => v.id}
-        ListEmptyComponent={<Text style={styles.muted}>No vehicles yet.</Text>}
+        ListEmptyComponent={<Text style={styles.muted}>Inga fordon ännu.</Text>}
         renderItem={({ item }) => (
           <View style={styles.card}>
             <Text>
@@ -170,10 +169,10 @@ function Vehicles() {
           </View>
         )}
       />
-      <Text style={styles.label}>Registration number</Text>
+      <Text style={styles.label}>Registreringsnummer</Text>
       <TextInput style={styles.input} value={reg} onChangeText={setReg} autoCapitalize="characters" />
       <Pressable style={styles.bigbtn} onPress={add}>
-        <Text style={styles.bigbtnText}>Add vehicle</Text>
+        <Text style={styles.bigbtnText}>Lägg till fordon</Text>
       </Pressable>
     </View>
   );
@@ -189,7 +188,7 @@ function NewCase() {
   async function shareLocation() {
     const { status: perm } = await Location.requestForegroundPermissionsAsync();
     if (perm !== "granted") {
-      setStatus("Location permission denied; you can still call support.");
+      setStatus("Platsbehörighet nekades. Du kan fortfarande kontakta support.");
       return;
     }
     const pos = await Location.getCurrentPositionAsync({});
@@ -200,18 +199,18 @@ function NewCase() {
     if (!supabase) return;
     const { data: auth } = await supabase.auth.getUser();
     if (!auth.user) {
-      setStatus("Please log in first.");
+      setStatus("Logga in först.");
       return;
     }
-    const { data: vehicles } = await supabase
+    const { data: fordon } = await supabase
       .from("vehicles")
       .select("id, insurance_company_id")
       .eq("owner_user_id", auth.user.id)
       .limit(1);
-    const vehicle = ((vehicles as Array<{ id: string; insurance_company_id: string | null }> | null) ??
+    const vehicle = ((fordon as Array<{ id: string; insurance_company_id: string | null }> | null) ??
       [])[0];
     if (!vehicle) {
-      setStatus("Add a vehicle first.");
+      setStatus("Lägg till ett fordon först.");
       return;
     }
 
@@ -229,12 +228,12 @@ function NewCase() {
         .maybeSingle();
       tenantId = (mkt as { id?: string } | null)?.id ?? null;
       if (!tenantId) {
-        setStatus("Direct/private towing is not enabled on this platform yet.");
+        setStatus("Privat bärgning är inte aktiverad ännu.");
         return;
       }
     } else {
       if (!vehicle.insurance_company_id) {
-        setStatus("Connect a vehicle to an insurance company first, or choose private towing.");
+        setStatus("Koppla fordonet till ett försäkringsbolag först, eller välj privat bärgning.");
         return;
       }
       insuranceCompanyId = vehicle.insurance_company_id;
@@ -245,7 +244,7 @@ function NewCase() {
         .maybeSingle();
       tenantId = (ins as { tenant_id?: string } | null)?.tenant_id ?? null;
       if (!tenantId) {
-        setStatus("Insurance not available.");
+        setStatus("Försäkringen är inte tillgänglig.");
         return;
       }
       requiresBankid = true;
@@ -279,36 +278,36 @@ function NewCase() {
         lng: coords.lng,
       } as never);
     }
-    setStatus(`Case created: ${String(caseNo)}`);
+    setStatus(`Ärende skapat: ${String(caseNo)}`);
   }
 
   return (
     <ScrollView>
-      <Text style={styles.h1}>Start a case</Text>
+      <Text style={styles.h1}>Starta ärende</Text>
       <Text style={styles.label}>Problem</Text>
       <TextInput style={styles.input} value={problem} onChangeText={setProblem} />
-      <Text style={styles.label}>How should we tow?</Text>
+      <Text style={styles.label}>Hur vill du bärga?</Text>
       <View style={{ flexDirection: "row", gap: 10, marginTop: 4 }}>
         <Pressable
           style={[styles.pill, mode === "insurance" ? styles.pillActive : null]}
           onPress={() => setMode("insurance")}
         >
-          <Text style={mode === "insurance" ? styles.pillTextActive : styles.pillText}>Via insurance</Text>
+          <Text style={mode === "insurance" ? styles.pillTextActive : styles.pillText}>Via försäkring</Text>
         </Pressable>
         <Pressable
           style={[styles.pill, mode === "private" ? styles.pillActive : null]}
           onPress={() => setMode("private")}
         >
-          <Text style={mode === "private" ? styles.pillTextActive : styles.pillText}>Private / direct</Text>
+          <Text style={mode === "private" ? styles.pillTextActive : styles.pillText}>Privat / direkt</Text>
         </Pressable>
       </View>
       <Pressable style={styles.bigbtn} onPress={shareLocation}>
         <Text style={styles.bigbtnText}>
-          {coords ? `Location shared (${coords.lat.toFixed(3)}, ${coords.lng.toFixed(3)})` : "Share my location"}
+          {coords ? `Position delad (${coords.lat.toFixed(3)}, ${coords.lng.toFixed(3)})` : "Dela min position"}
         </Text>
       </Pressable>
       <Pressable style={[styles.bigbtn, { marginTop: 12 }]} onPress={submit}>
-        <Text style={styles.bigbtnText}>Create case</Text>
+        <Text style={styles.bigbtnText}>Skapa ärende</Text>
       </Pressable>
       {status ? <Text style={styles.muted}>{status}</Text> : null}
     </ScrollView>
@@ -346,13 +345,13 @@ function Cases({ onOpen }: { onOpen: (id: string) => void }) {
     <FlatList
       data={rows}
       keyExtractor={(i) => i.id}
-      ListHeaderComponent={<Text style={styles.h1}>My Cases</Text>}
-      ListEmptyComponent={<Text style={styles.muted}>No cases yet.</Text>}
+      ListHeaderComponent={<Text style={styles.h1}>Mina ärenden</Text>}
+      ListEmptyComponent={<Text style={styles.muted}>Inga ärenden ännu.</Text>}
       renderItem={({ item }) => (
         <Pressable style={styles.card} onPress={() => onOpen(item.id)}>
           <Text style={{ fontWeight: "700" }}>{item.case_number ?? item.id.slice(0, 8)}</Text>
           <Text>{towStatusLabel(item.status as never)}</Text>
-          <Text style={styles.muted}>Tap to follow live status →</Text>
+          <Text style={styles.muted}>Tryck för att följa status →</Text>
         </Pressable>
       )}
     />
@@ -412,7 +411,7 @@ function CaseDetail({ caseId, onBack }: { caseId: string; onBack: () => void }) 
   return (
     <ScrollView>
       <Pressable onPress={onBack}>
-        <Text style={{ color: palette.primary, fontWeight: "700" }}>‹ Back</Text>
+        <Text style={{ color: palette.primary, fontWeight: "700" }}>‹ Tillbaka</Text>
       </Pressable>
       <Text style={styles.h1}>{data.incident?.case_number ?? caseId.slice(0, 8)}</Text>
       <View style={styles.card}>
@@ -420,13 +419,13 @@ function CaseDetail({ caseId, onBack }: { caseId: string; onBack: () => void }) 
         <Text style={styles.muted}>{whatHappensNext(jobStatus as never)}</Text>
       </View>
       <View style={styles.card}>
-        <Text style={{ fontWeight: "600" }}>Tow status</Text>
+        <Text style={{ fontWeight: "600" }}>Bärgningsstatus</Text>
         {!job ? (
-          <Text style={styles.muted}>Searching for a tow truck…</Text>
+          <Text style={styles.muted}>Söker bärgare…</Text>
         ) : (
           <>
-            <Text>{job.tow_company_id ? "A tow company has accepted your job." : "Finding an available tow company…"}</Text>
-            <Text>{job.driver_id ? "A driver is assigned and on the way." : "Waiting for a driver to accept."}</Text>
+            <Text>{job.tow_company_id ? "Ett bärgningsföretag har accepterat uppdraget." : "Söker tillgängligt bärgningsföretag…"}</Text>
+            <Text>{job.driver_id ? "En förare är tilldelad och på väg." : "Väntar på att förare accepterar."}</Text>
             {data.eta ? (
               <Text style={{ marginTop: 6 }}>
                 ETA ~{Math.round(data.eta.eta_seconds / 60)} min ({(data.eta.distance_meters / 1000).toFixed(1)} km)
@@ -435,7 +434,7 @@ function CaseDetail({ caseId, onBack }: { caseId: string; onBack: () => void }) 
           </>
         )}
       </View>
-      <Text style={styles.muted}>This view refreshes automatically every 15 seconds.</Text>
+      <Text style={styles.muted}>Den här vyn uppdateras automatiskt var 15:e sekund.</Text>
     </ScrollView>
   );
 }

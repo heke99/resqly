@@ -131,6 +131,66 @@ export class App {
       }
     }
 
+    // Driver/mobile user-token routes do not require a tenant API key.
+    // The mobile app must never ship a public tenant API secret; it sends the
+    // Supabase user access token and the API resolves the driver/tenant server-side.
+    const userTokenFromAuth =
+      extractBearer(req.headers["authorization"]) ??
+      extractBearer(req.headers["x-driver-authorization"]) ??
+      req.headers["x-driver-access-token"] ??
+      extractBearer(req.headers["x-user-authorization"]) ??
+      req.headers["x-user-access-token"] ??
+      null;
+    const allowsUserToken =
+      url.pathname === "/api/v1/me/role-context" || url.pathname.startsWith("/api/v1/drivers/");
+    if (allowsUserToken && userTokenFromAuth && this.config.driverAuth) {
+      const userId = await this.config.driverAuth.getUserIdFromAccessToken(userTokenFromAuth);
+      if (userId) {
+        const driverId = await this.config.repo.getDriverIdForUser(userId);
+        const driverProfile = driverId ? await this.config.repo.getDriverProfile(driverId) : null;
+        const resolvedTenantId = driverProfile?.tenant_id ?? "public";
+        const ctx: ApiContext = {
+          config: this.config,
+          repo: this.config.repo,
+          tenantId: resolvedTenantId,
+          apiClientId: "user-token",
+          requestId,
+          ip: req.ip ?? null,
+          rawBody: req.rawBody,
+          headers: req.headers,
+          userId,
+          driverUserId: userId,
+          driverId,
+          idempotencyKey: req.headers["idempotency-key"] ?? req.headers["x-idempotency-key"] ?? null,
+        };
+
+        let result: RouteResult;
+        try {
+          result = await matched.handler(ctx, {
+            params: matched.params,
+            body: req.body,
+            query: url.searchParams,
+            rawBody: req.rawBody,
+          });
+        } catch (error) {
+          result = toErrorResult(error, requestId);
+        }
+
+        await this.config.repo
+          .logApiRequest({
+            tenant_id: resolvedTenantId === "public" ? null : resolvedTenantId,
+            api_client_id: null,
+            request_id: requestId,
+            method: req.method,
+            path: url.pathname,
+            status_code: result.status,
+          })
+          .catch(() => undefined);
+
+        return { ...result, headers: { ...baseHeaders, ...(result.headers ?? {}) } };
+      }
+    }
+
     // --- API key authentication ---
     const apiKey =
       extractBearer(req.headers["authorization"]) ?? req.headers["x-api-key"] ?? null;
