@@ -30,6 +30,8 @@ export class App {
 
   private registerRoutes() {
     const r = this.router;
+    r.get("/health", (ctx) => this.health(ctx));
+    r.get("/api/v1/health", (ctx) => this.health(ctx));
     r.post("/api/v1/incidents", (ctx, a) => incidents.createIncident(ctx, a.body));
     r.get("/api/v1/incidents/:id", (ctx, a) => incidents.getIncident(ctx, a.params.id!));
     r.post("/api/v1/incidents/:id/evidence", (ctx, a) =>
@@ -94,6 +96,39 @@ export class App {
     r.post("/api/v1/dispatch/run", (ctx, a) => dispatch.runDispatch(ctx, a.body));
   }
 
+
+  private health(ctx: ApiContext): RouteResult {
+    const requiredEnv = {
+      supabase_url: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
+      service_role_key: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+      encryption_key: Boolean(process.env.ENCRYPTION_KEY),
+      bankid_key: ctx.config.bankid.provider !== "tic" || Boolean(ctx.config.bankid.tic?.apiKey),
+      webhook_secret: Boolean(process.env.WEBHOOK_SIGNING_SECRET),
+    };
+    const ok = Object.values(requiredEnv).every(Boolean);
+    return {
+      status: ok ? 200 : 503,
+      body: {
+        ok,
+        service: "resqly-api",
+        environment: process.env.APP_ENV ?? process.env.NODE_ENV ?? "unknown",
+        bankid: {
+          provider: ctx.config.bankid.provider ?? "mock",
+          environment: ctx.config.bankid.env,
+          mock_enabled: ctx.config.bankid.mockEnabled,
+        },
+        integrations: {
+          google_routes_enabled: ctx.config.maps.routesEnabled,
+          google_route_matrix_enabled: ctx.config.maps.routeMatrixEnabled ?? false,
+          expo_push_enabled: ctx.config.push?.enabled ?? false,
+          email_enabled: ctx.config.email?.enabled ?? false,
+        },
+        required_env: requiredEnv,
+        request_id: ctx.requestId,
+      },
+    };
+  }
+
   async handle(req: RawRequest): Promise<RouteResult> {
     const requestId = newRequestId();
     const url = new URL(req.path, "http://internal");
@@ -104,9 +139,9 @@ export class App {
       return { status: 404, body: { error: { code: "not_found", message: "Route not found", request_id: requestId } }, headers: baseHeaders };
     }
 
-    // Provider callbacks/webhooks are authenticated by their own HMAC signature,
-    // not by a tenant API key. Keep this narrow and explicit.
-    if (url.pathname === "/api/v1/tic/webhook") {
+    // Public health checks and provider callbacks are authenticated by their own
+    // rules, not tenant API keys. Keep this narrow and explicit.
+    if (url.pathname === "/health" || url.pathname === "/api/v1/health" || url.pathname === "/api/v1/tic/webhook") {
       const ctx: ApiContext = {
         config: this.config,
         repo: this.config.repo,

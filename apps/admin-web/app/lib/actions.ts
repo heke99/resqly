@@ -409,3 +409,25 @@ export async function createTenantAdmin(formData: FormData): Promise<void> {
   await createTenantAdminForTenant({ tenantId, tenantType, email, fullName, roleKey, actorUserId: user.id });
   revalidatePath(`/tenants/${tenantId}`);
 }
+
+/** Superadmin: create the deterministic staging demo constellation. Do not run this in production. */
+export async function createStagingDemo(_formData?: FormData): Promise<void> {
+  const { db, user } = await requirePlatformAdmin();
+  const appEnv = (process.env.APP_ENV ?? process.env.NODE_ENV ?? "development").toLowerCase();
+  if (appEnv === "production") {
+    throw new Error("Staging demo seed is blocked in production.");
+  }
+  const { error } = await db.rpc("create_resqly_staging_demo" as never, {} as never);
+  if (error) throw new Error(error.message);
+  await db.from("audit_logs" as never).insert({
+    actor_user_id: user.id,
+    action: "create",
+    entity_type: "staging_demo",
+    entity_id: "create_resqly_staging_demo",
+    fields: ["tenants", "agreements", "vehicles", "fallback", "legal"],
+    metadata: { app_env: appEnv },
+  } as never);
+  revalidatePath("/");
+  revalidatePath("/readiness");
+  revalidatePath("/agreements");
+}

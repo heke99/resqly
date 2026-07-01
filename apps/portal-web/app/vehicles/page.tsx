@@ -39,9 +39,9 @@ export default async function VehiclesPage({
   const vehicles = await listTowVehicles(tenant.id);
   return (
     <div>
-      <PageHeader title="Tow vehicles" subtitle="Fleet & capabilities" />
+      <PageHeader title="Bärgningsbilar" subtitle="Fordonsflotta och kapacitet" />
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 24, alignItems: "start" }}>
-        <DataTable columns={columns} rows={vehicles} empty="No tow vehicles yet" />
+        <DataTable columns={columns} rows={vehicles} empty="Inga bärgningsbilar ännu" />
         <Card>
           <h3 style={{ marginTop: 0 }}>Add tow vehicle</h3>
           <form action={createTowVehicle}>

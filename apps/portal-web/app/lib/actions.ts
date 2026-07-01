@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { newApiKey, sha256Hex } from "@resqly/utils";
 import { requirePortalTenant } from "./auth";
 
@@ -242,4 +242,150 @@ export async function createApiKey(formData: FormData): Promise<void> {
     metadata: { key_last4: last4, raw_key_shown_once: true },
   } as never);
   redirect(`/integrations?new_key=${encodeURIComponent(key)}`);
+}
+
+
+function nullableText(formData: FormData, key: string): string | null {
+  const value = String(formData.get(key) ?? "").trim();
+  return value.length > 0 ? value : null;
+}
+
+function boolInput(formData: FormData, key: string): boolean {
+  return formData.get(key) === "on" || formData.get(key) === "true";
+}
+
+function numberInput(formData: FormData, key: string, fallback: number): number {
+  const value = Number(formData.get(key) ?? "");
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+export async function saveLegalVersion(formData: FormData): Promise<void> {
+  const tenantId = String(formData.get("tenant_id") ?? "");
+  const { db: client, tenant, userId } = await portalDb(tenantId);
+  assertTenant(tenant.id, tenantId);
+  const kind = String(formData.get("kind") ?? "");
+  const title = String(formData.get("title") ?? "").trim();
+  const body = String(formData.get("body") ?? "").trim();
+  const version = numberInput(formData, "version", 1);
+  const status = String(formData.get("status") ?? "draft");
+  if (!kind || !title || !body) throw new Error("Kind, title and body are required.");
+
+  if (status === "active") {
+    await client
+      .from("tenant_legal_text_versions" as never)
+      .update({ status: "archived", active_to: new Date().toISOString() } as never)
+      .eq("tenant_id", tenantId)
+      .eq("locale", "sv-SE")
+      .eq("kind", kind)
+      .eq("status", "active");
+  }
+
+  await client.from("tenant_legal_text_versions" as never).upsert(
+    {
+      tenant_id: tenantId,
+      locale: "sv-SE",
+      kind,
+      title,
+      body,
+      version,
+      status,
+      active_from: status === "active" ? new Date().toISOString() : null,
+      created_by: userId,
+    } as never,
+    { onConflict: "tenant_id,locale,kind,version" } as never,
+  );
+  await client.from("audit_logs" as never).insert({
+    tenant_id: tenantId,
+    actor_user_id: userId,
+    action: "upsert",
+    entity_type: "tenant_legal_text_version",
+    entity_id: `${kind}:${version}`,
+    fields: ["kind", "version", "status", "body_hash"],
+    metadata: { kind, version, status, body_hash: sha256(body) },
+  } as never);
+  revalidatePath("/legal");
+  revalidatePath("/readiness");
+}
+
+export async function saveFallbackRule(formData: FormData): Promise<void> {
+  const tenantId = String(formData.get("tenant_id") ?? "");
+  const { db: client, tenant, userId } = await portalDb(tenantId);
+  assertTenant(tenant.id, tenantId);
+  const contactsRaw = nullableText(formData, "operational_contacts_json") ?? "[]";
+  let contacts: unknown = [];
+  try {
+    contacts = JSON.parse(contactsRaw);
+  } catch {
+    throw new Error("Operational contacts must be valid JSON.");
+  }
+  await client.from("tenant_notification_fallback_rules" as never).upsert(
+    {
+      tenant_id: tenantId,
+      job_scope: String(formData.get("job_scope") ?? "insurance"),
+      enabled: boolInput(formData, "enabled"),
+      push_timeout_seconds: numberInput(formData, "push_timeout_seconds", 120),
+      push_max_attempts: numberInput(formData, "push_max_attempts", 2),
+      insurance_next_wave_radius_km: numberInput(formData, "insurance_next_wave_radius_km", 30),
+      private_wave_radius_km: numberInput(formData, "private_wave_radius_km", 15),
+      sms_fallback_enabled: boolInput(formData, "sms_fallback_enabled"),
+      operational_contacts: contacts,
+      expose_sensitive_data_in_sms: boolInput(formData, "expose_sensitive_data_in_sms"),
+      manual_review_after_minutes: numberInput(formData, "manual_review_after_minutes", 15),
+    } as never,
+    { onConflict: "tenant_id,job_scope" } as never,
+  );
+  await client.from("audit_logs" as never).insert({
+    tenant_id: tenantId,
+    actor_user_id: userId,
+    action: "upsert",
+    entity_type: "tenant_notification_fallback_rule",
+    entity_id: String(formData.get("job_scope") ?? "insurance"),
+    fields: ["push_timeout_seconds", "sms_fallback_enabled", "operational_contacts"],
+  } as never);
+  revalidatePath("/notifications");
+  revalidatePath("/readiness");
+}
+
+export async function saveVehiclePermission(formData: FormData): Promise<void> {
+  const tenantId = String(formData.get("tenant_id") ?? "");
+  const { db: client, tenant, userId } = await portalDb(tenantId);
+  assertTenant(tenant.id, tenantId);
+  const agreementId = String(formData.get("agreement_id") ?? "");
+  const towVehicleId = String(formData.get("tow_vehicle_id") ?? "");
+  const status = String(formData.get("status") ?? "active");
+  if (!agreementId || !towVehicleId) throw new Error("Agreement and tow vehicle are required.");
+
+  const { data: agreement } = await client
+    .from("tow_company_insurance_agreements" as never)
+    .select("id, insurance_tenant_id")
+    .eq("id", agreementId)
+    .maybeSingle();
+  if ((agreement as { insurance_tenant_id?: string } | null)?.insurance_tenant_id !== tenant.id) {
+    throw new Error("Agreement does not belong to this insurer tenant.");
+  }
+
+  await client.from("tow_vehicle_insurance_permissions" as never).upsert(
+    {
+      insurance_agreement_id: agreementId,
+      tow_vehicle_id: towVehicleId,
+      status,
+      notes: nullableText(formData, "notes"),
+    } as never,
+    { onConflict: "insurance_agreement_id,tow_vehicle_id" } as never,
+  );
+  await client.from("audit_logs" as never).insert({
+    tenant_id: tenantId,
+    actor_user_id: userId,
+    action: "upsert",
+    entity_type: "tow_vehicle_insurance_permission",
+    entity_id: towVehicleId,
+    fields: ["status", "notes"],
+    metadata: { agreement_id: agreementId, status },
+  } as never);
+  revalidatePath("/partners");
+  revalidatePath("/readiness");
 }

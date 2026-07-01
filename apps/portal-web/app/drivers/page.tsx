@@ -1,6 +1,6 @@
 import { Button, Card, DataTable, PageHeader, StatusChip, type Column } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
-import { listDrivers, listTowVehicles } from "../lib/data";
+import { listFörare, listTowVehicles } from "../lib/data";
 import { createDriver, setDriverVehicle } from "../lib/actions";
 import { NoTenant, WrongTenantType } from "../lib/ui";
 
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 type Row = Record<string, unknown>;
 
-export default async function DriversPage({
+export default async function FörarePage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -17,7 +17,7 @@ export default async function DriversPage({
   const tenant = await getActiveTenant(sp);
   if (!tenant) return <NoTenant />;
   if (tenant.type !== "tow_company") return <WrongTenantType need="tow_company" />;
-  const [drivers, vehicles] = await Promise.all([listDrivers(tenant.id), listTowVehicles(tenant.id)]);
+  const [drivers, vehicles] = await Promise.all([listFörare(tenant.id), listTowVehicles(tenant.id)]);
   const vehicleReg = (id: unknown) =>
     vehicles.find((v) => v.id === id)?.registration_number != null
       ? String(vehicles.find((v) => v.id === id)?.registration_number)
@@ -55,9 +55,9 @@ export default async function DriversPage({
 
   return (
     <div>
-      <PageHeader title="Drivers" subtitle="Manage and assign your towing drivers" />
+      <PageHeader title="Förare" subtitle="Hantera och tilldela förare" />
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 24, alignItems: "start" }}>
-        <DataTable columns={columns} rows={drivers} empty="No drivers yet" />
+        <DataTable columns={columns} rows={drivers} empty="Inga förare ännu" />
         <Card>
           <h3 style={{ marginTop: 0 }}>Invite / add driver</h3>
           <form action={createDriver}>

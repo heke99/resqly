@@ -40,15 +40,15 @@ export default async function SlaPage({
 
   return (
     <div>
-      <PageHeader title="SLA performance" subtitle="Service-level risk and response across your towing network" />
+      <PageHeader title="SLA-prestanda" subtitle="SLA-risk och responstid i bärgningsnätverket" />
       <KpiGrid>
         <StatCard label="SLA risk (open)" value={num(stats?.sla_risk)} />
         <StatCard label="Active towing" value={num(stats?.active_towing)} />
         <StatCard label="Avg ETA" value={num(stats?.avg_eta_seconds) ? `${Math.round(num(stats?.avg_eta_seconds) / 60)} min` : "—"} />
         <StatCard label="Completed cases" value={num(stats?.completed_cases)} />
       </KpiGrid>
-      <h3 style={{ marginTop: 24 }}>Jobs at SLA risk</h3>
-      <DataTable columns={columns} rows={atRisk} empty="No jobs are currently breaching SLA" />
+      <h3 style={{ marginTop: 24 }}>Uppdrag med SLA-risk</h3>
+      <DataTable columns={columns} rows={atRisk} empty="Inga uppdrag bryter mot SLA just nu" />
     </div>
   );
 }

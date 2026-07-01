@@ -3,23 +3,23 @@ import { EmptyState, PageHeader } from "@resqly/web-kit";
 export function NoTenant() {
   return (
     <div>
-      <PageHeader title="Partner portal" />
+      <PageHeader title="Partnerportal" />
       <EmptyState
-        title="No tenant available"
-        hint="A superadmin must create your organization and add your user first."
+        title="Ingen organisation vald"
+        hint="En administratör behöver skapa organisationen och koppla din användare först."
       />
     </div>
   );
 }
 
 export function WrongTenantType({ need }: { need: "insurance_company" | "tow_company" }) {
-  const label = need === "tow_company" ? "tow company" : "insurance company";
+  const label = need === "tow_company" ? "bärgningsbolag" : "försäkringsbolag";
   return (
     <div>
-      <PageHeader title="Not available for your organization" />
+      <PageHeader title="Inte tillgängligt för din organisation" />
       <EmptyState
-        title={`This view is for ${label} accounts`}
-        hint="Your organization type does not use this screen. Use the navigation on the left for your available tools."
+        title={`Den här vyn är för ${label}`}
+        hint="Din organisationstyp använder inte den här sidan. Använd menyn för de verktyg som gäller för dig."
       />
     </div>
   );

@@ -1,6 +1,6 @@
 import { Card, DataTable, PageHeader, StatusChip, type Column } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
-import { listAvailabilityWindows, listDrivers } from "../lib/data";
+import { listTillgänglighetWindows, listFörare } from "../lib/data";
 import { NoTenant, WrongTenantType } from "../lib/ui";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,7 @@ function minutesToTime(m: unknown): string {
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 }
 
-export default async function AvailabilityPage({
+export default async function TillgänglighetPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -27,7 +27,7 @@ export default async function AvailabilityPage({
   if (!tenant) return <NoTenant />;
   if (tenant.type !== "tow_company") return <WrongTenantType need="tow_company" />;
 
-  const [windows, drivers] = await Promise.all([listAvailabilityWindows(tenant.id), listDrivers(tenant.id)]);
+  const [windows, drivers] = await Promise.all([listTillgänglighetWindows(tenant.id), listFörare(tenant.id)]);
   const online = drivers.filter((d) => d.is_online);
 
   const windowColumns: Column<Row>[] = [
@@ -45,14 +45,14 @@ export default async function AvailabilityPage({
 
   return (
     <div>
-      <PageHeader title="Availability" subtitle="Operating windows and live driver availability" />
+      <PageHeader title="Tillgänglighet" subtitle="Öppettider och aktuell förartillgänglighet" />
       <Card style={{ marginBottom: 24 }}>
         <strong>{online.length}</strong> of {drivers.length} drivers are online right now.
       </Card>
       <h3>Operating windows</h3>
-      <DataTable columns={windowColumns} rows={windows} empty="No availability windows configured" />
+      <DataTable columns={windowColumns} rows={windows} empty="Inga tillgänglighetstider konfigurerade" />
       <h3 style={{ marginTop: 24 }}>Driver availability</h3>
-      <DataTable columns={driverColumns} rows={drivers} empty="No drivers yet" />
+      <DataTable columns={driverColumns} rows={drivers} empty="Inga förare ännu" />
     </div>
   );
 }

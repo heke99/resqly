@@ -1,7 +1,7 @@
 import { Button, Card, Field, PageHeader } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
-import { getMarketplaceSettings } from "../lib/data";
-import { saveMarketplaceSettings } from "../lib/actions";
+import { getMarketplaceInställningar } from "../lib/data";
+import { saveMarketplaceInställningar } from "../lib/actions";
 import { NoTenant, WrongTenantType, num } from "../lib/ui";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ export default async function MarketplacePage({
   if (!tenant) return <NoTenant />;
   if (tenant.type !== "tow_company") return <WrongTenantType need="tow_company" />;
 
-  const settings = await getMarketplaceSettings(tenant.id);
+  const settings = await getMarketplaceInställningar(tenant.id);
   const acceptsDirect = Boolean(settings?.accepts_direct_orders);
   const privateEnabled = Boolean(settings?.private_customer_enabled);
   const active = settings ? Boolean(settings.active) : true;
@@ -26,10 +26,10 @@ export default async function MarketplacePage({
     <div>
       <PageHeader
         title="Direct marketplace"
-        subtitle="Control whether you receive direct / private towing orders (no insurance agreement required)"
+        subtitle="Styr om ni tar emot fri/privat bärgning utan försäkringsavtal"
       />
       <Card style={{ maxWidth: 560 }}>
-        <form action={saveMarketplaceSettings} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <form action={saveMarketplaceInställningar} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <input type="hidden" name="tenant_id" value={tenant.id} />
           <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <input type="checkbox" name="accepts_direct_orders" defaultChecked={acceptsDirect} />

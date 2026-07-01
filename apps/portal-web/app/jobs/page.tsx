@@ -8,12 +8,12 @@ export const dynamic = "force-dynamic";
 type Row = Record<string, unknown>;
 
 const columns: Column<Row>[] = [
-  { key: "id", header: "Job", render: (r) => String(r.id).slice(0, 8) },
+  { key: "id", header: "Uppdrag", render: (r) => String(r.id).slice(0, 8) },
   { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "")} /> },
-  { key: "priority", header: "Priority", render: (r) => String(r.priority ?? "") },
-  { key: "payer", header: "Payer", render: (r) => String(r.payer_type ?? "").replaceAll("_", " ") },
-  { key: "driver", header: "Driver", render: (r) => String(r.driver_id ?? "—").slice(0, 8) },
-  { key: "created", header: "Created", render: (r) => String(r.created_at ?? "").slice(0, 16).replace("T", " ") },
+  { key: "priority", header: "Prioritet", render: (r) => String(r.priority ?? "") },
+  { key: "payer", header: "Betalare", render: (r) => String(r.payer_type ?? "").replaceAll("_", " ") },
+  { key: "driver", header: "Förare", render: (r) => String(r.driver_id ?? "—").slice(0, 8) },
+  { key: "created", header: "Skapad", render: (r) => String(r.created_at ?? "").slice(0, 16).replace("T", " ") },
 ];
 
 export default async function JobsPage({
@@ -35,13 +35,13 @@ export default async function JobsPage({
   return (
     <div>
       <PageHeader
-        title={isTow ? "Active jobs" : "Tow jobs"}
-        subtitle="Dispatch, live status and ETA"
+        title={isTow ? "Aktiva uppdrag" : "Bärgningsuppdrag"}
+        subtitle="Tilldelning, livestatus och ETA"
       />
       <Filters>
         <Field label="Status">
           <select name="status" defaultValue={status}>
-            <option value="">All</option>
+            <option value="">Alla</option>
             {["offered", "accepted", "driver_en_route", "driver_arrived", "transporting", "completed", "invoiced", "manual_review", "cancelled"].map(
               (s) => (
                 <option key={s} value={s}>
@@ -51,22 +51,21 @@ export default async function JobsPage({
             )}
           </select>
         </Field>
-        <Field label="Payer">
+        <Field label="Betalare">
           <select name="payer" defaultValue={payer}>
-            <option value="">All</option>
-            <option value="insurance_company">Insurance</option>
-            <option value="customer_private">Direct / private</option>
+            <option value="">Alla</option>
+            <option value="insurance_company">Försäkringsbolag</option>
+            <option value="customer_private">Fri/privat</option>
           </select>
         </Field>
       </Filters>
       <Card style={{ marginBottom: 16 }}>
-        <strong>Live map</strong>
+        <strong>Livekarta</strong>
         <p style={{ opacity: 0.7, margin: "8px 0 0" }}>
-          A Google Maps live view of active jobs and driver locations renders here when a browser
-          Maps key is configured. Server-side ETA snapshots back the customer and portal views.
+          Här visas en Google Maps-karta med aktiva uppdrag och förarpositioner när webbkartan är konfigurerad. ETA-snapshots från servern används i kund- och portalvyerna.
         </p>
       </Card>
-      <DataTable columns={columns} rows={jobs} empty="No tow jobs match these filters" />
+      <DataTable columns={columns} rows={jobs} empty="Inga bärgningsuppdrag matchar filtren" />
     </div>
   );
 }

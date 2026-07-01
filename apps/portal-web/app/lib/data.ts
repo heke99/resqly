@@ -239,3 +239,78 @@ export function countBy(rows: Row[], key: string): Array<{ label: string; value:
   }
   return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
 }
+
+export async function listInsuranceCaseConsole(tenantId: string): Promise<Row[]> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("insurance_case_console" as never)
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: false })
+    .limit(300);
+  return (data as Row[] | null) ?? [];
+}
+
+export async function getInsuranceCaseConsole(tenantId: string, incidentId: string): Promise<Row | null> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("insurance_case_console" as never)
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("incident_id", incidentId)
+    .maybeSingle();
+  return (data as Row | null) ?? null;
+}
+
+export async function listAgreementVehicleMatrix(tenantId: string): Promise<Row[]> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("insurer_agreement_vehicle_matrix" as never)
+    .select("*")
+    .eq("insurance_tenant_id", tenantId)
+    .order("tow_company_name", { ascending: true })
+    .order("registration_number", { ascending: true });
+  return (data as Row[] | null) ?? [];
+}
+
+export async function listLegalVersions(tenantId: string): Promise<Row[]> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("tenant_legal_text_versions" as never)
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .order("kind", { ascending: true })
+    .order("version", { ascending: false });
+  return (data as Row[] | null) ?? [];
+}
+
+export async function listNotificationFallbackRules(tenantId: string): Promise<Row[]> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("tenant_notification_fallback_rules" as never)
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .order("job_scope", { ascending: true });
+  return (data as Row[] | null) ?? [];
+}
+
+export async function getInsurerProductionReadiness(tenantId: string): Promise<Row | null> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("insurer_production_readiness" as never)
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  return (data as Row | null) ?? null;
+}
+
+export async function listOperationalNotifications(tenantId: string): Promise<Row[]> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("operational_notification_queue" as never)
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  return (data as Row[] | null) ?? [];
+}

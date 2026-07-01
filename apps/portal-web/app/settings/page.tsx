@@ -1,7 +1,7 @@
 import { Button, Card, EmptyState, PageHeader } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
-import { getTenantSettings } from "../lib/data";
-import { updateSettings } from "../lib/actions";
+import { getTenantInställningar } from "../lib/data";
+import { updateInställningar } from "../lib/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ const STRATEGIES = [
   "fallback_marketplace",
 ];
 
-export default async function SettingsPage({
+export default async function InställningarPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -26,18 +26,18 @@ export default async function SettingsPage({
   if (!tenant) {
     return (
       <div>
-        <PageHeader title="Settings" />
-        <EmptyState title="No tenant" />
+        <PageHeader title="Inställningar" />
+        <EmptyState title="Ingen organisation" />
       </div>
     );
   }
-  const settings = await getTenantSettings(tenant.id);
+  const settings = await getTenantInställningar(tenant.id);
 
   return (
     <div>
-      <PageHeader title="Settings & branding" subtitle={tenant.name} />
+      <PageHeader title="Inställningar och varumärke" subtitle={tenant.name} />
       <Card style={{ maxWidth: 520 }}>
-        <form action={updateSettings}>
+        <form action={updateInställningar}>
           <input type="hidden" name="tenant_id" value={tenant.id} />
           <h3 style={{ marginTop: 0 }}>White-label</h3>
           <label htmlFor="product_name">Product name</label>

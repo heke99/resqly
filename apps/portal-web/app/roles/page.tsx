@@ -14,7 +14,7 @@ export default async function RolesPage({
 
   return (
     <div>
-      <PageHeader title="Roles & permissions" subtitle="RBAC permission matrix (enforced in backend + RLS)" />
+      <PageHeader title="Roller och behörigheter" subtitle="Behörighetsmatris som kontrolleras i backend och RLS" />
       <Card style={{ marginBottom: 16 }}>
         <a href="/roles?type=insurance_company">Insurance roles</a> {" · "}
         <a href="/roles?type=tow_company">Tow company roles</a>

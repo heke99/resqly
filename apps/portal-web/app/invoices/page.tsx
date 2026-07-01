@@ -32,14 +32,14 @@ export default async function InvoicesPage({
 
   return (
     <div>
-      <PageHeader title="Invoice basis" subtitle="Fakturaunderlag generated from completed jobs" />
+      <PageHeader title="Fakturaunderlag" subtitle="Fakturaunderlag från slutförda uppdrag" />
       <KpiGrid>
         <StatCard label="Invoices" value={invoices.length} />
         <StatCard label="Ready to bill" value={ready.length} />
         <StatCard label="Total basis" value={formatMoneyMinor(total)} />
       </KpiGrid>
       <div style={{ marginTop: 24 }}>
-        <DataTable columns={columns} rows={invoices} empty="No invoice basis generated yet" />
+        <DataTable columns={columns} rows={invoices} empty="Inget fakturaunderlag skapat ännu" />
       </div>
     </div>
   );

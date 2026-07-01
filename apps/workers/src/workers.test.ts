@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { processDelivery } from "./jobs/webhook-delivery";
 import { evaluateOfferExpiry, type OfferRow } from "./jobs/offer-expiry";
-import { selectOfferPushRetries, type OfferPushRow } from "./jobs/offer-push";
+import { selectOfferFallbackActions, selectOfferPushRetries, type OfferPushRow } from "./jobs/offer-push";
 import { jobsNeedingEtaRefresh } from "./jobs/eta-refresh";
 
 describe("webhook delivery", () => {
@@ -97,6 +97,15 @@ describe("offer push retries", () => {
 
   it("stops retrying after the attempt cap", () => {
     expect(selectOfferPushRetries([row({ push_attempts: 3 })], 3)).toHaveLength(0);
+  });
+
+  it("selects SMS fallback without exposing sensitive payload by default", () => {
+    const actions = selectOfferFallbackActions(
+      [{ ...row({ push_status: "sent", push_attempts: 2 }), offered_at: new Date(0).toISOString() }],
+      { pushTimeoutSeconds: 120, pushMaxAttempts: 2, smsFallbackEnabled: true, manualReviewAfterMinutes: 15 },
+      180_000,
+    );
+    expect(actions[0]).toMatchObject({ channel: "sms", reason: "push_timeout_sms_fallback", sensitivePayloadAllowed: false });
   });
 });
 

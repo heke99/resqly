@@ -1,13 +1,15 @@
-import { Badge, Button, Card, EmptyState, PageHeader } from "@resqly/web-kit";
+import { Badge, Button, Card, EmptyState, PageHeader, StatusChip } from "@resqly/web-kit";
 import { getActiveTenant } from "../../lib/tenant";
 import {
   getBankidStatus,
   getIncident,
   getIncidentEvidence,
   getIncidentTowJob,
+  getInsuranceCaseConsole,
   getLatestEta,
 } from "../../lib/data";
 import { approveClaim, rejectClaim, requestMoreInfo } from "../../lib/actions";
+import { formatSeconds, num } from "../../lib/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -23,83 +25,99 @@ export default async function CaseDetail({
   const tenant = await getActiveTenant(sp);
   const incident = tenant ? await getIncident(tenant.id, id) : null;
 
-  if (!incident) {
+  if (!incident || !tenant) {
     return (
       <div>
-        <PageHeader title="Case" />
-        <EmptyState title="Case not found" hint="It may belong to another tenant." />
+        <PageHeader title="Ärende" />
+        <EmptyState title="Ärendet hittades inte" hint="Det kan tillhöra en annan organisation." />
       </div>
     );
   }
 
-  const bankid = await getBankidStatus(tenant!.id, id);
-  const evidence = await getIncidentEvidence(tenant!.id, id);
-  const job = await getIncidentTowJob(tenant!.id, id);
-  const eta = job ? await getLatestEta(tenant!.id, String(job.id)) : null;
+  const [consoleRow, bankid, evidence, job] = await Promise.all([
+    getInsuranceCaseConsole(tenant.id, id),
+    getBankidStatus(tenant.id, id),
+    getIncidentEvidence(tenant.id, id),
+    getIncidentTowJob(tenant.id, id),
+  ]);
+  const eta = job ? await getLatestEta(tenant.id, String(job.id)) : null;
 
   return (
     <div>
       <PageHeader
         title={String(incident.case_number ?? id)}
-        subtitle={`${incident.type} • ${incident.status}`}
-        actions={<Badge>{bankid.verified ? "BankID verified" : "BankID pending"}</Badge>}
+        subtitle={`${String(consoleRow?.incident_type ?? incident.type).replaceAll("_", " ")} • ${String(consoleRow?.next_action_label ?? incident.status)}`}
+        actions={<Badge>{bankid.verified ? "BankID verifierat" : "Väntar på BankID"}</Badge>}
       />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, alignItems: "start" }}>
         <Card>
-          <h3 style={{ marginTop: 0 }}>Case details</h3>
-          <p>Type: {String(incident.type)}</p>
-          <p>Problem: {String(incident.problem_type ?? incident.damage_type ?? "-")}</p>
-          <p>Drivable: {incident.is_drivable ? "Yes" : "No"}</p>
-          <p>Description: {String(incident.description ?? "-")}</p>
-          <p>Photos/documents: {evidence.length}</p>
+          <h3 style={{ marginTop: 0 }}>Kund och fordon</h3>
+          <p>Kund: {String(consoleRow?.customer_name ?? consoleRow?.customer_email ?? "—")}</p>
+          <p>Telefon: {String(consoleRow?.customer_phone ?? "—")}</p>
+          <p>Fordon: {String(consoleRow?.registration_number ?? "—")}</p>
+          <p>Bil: {[consoleRow?.make, consoleRow?.model].filter(Boolean).join(" ") || "—"}</p>
+          <p>Försäkringsbolag: {String(consoleRow?.insurance_company_name ?? tenant.name)}</p>
         </Card>
 
         <Card>
-          <h3 style={{ marginTop: 0 }}>Towing status & ETA</h3>
+          <h3 style={{ marginTop: 0 }}>Ärendeunderlag</h3>
+          <p>Status: <StatusChip status={String(consoleRow?.incident_status ?? incident.status)} /></p>
+          <p>Skada/problem: {String(consoleRow?.damage_type ?? consoleRow?.problem_type ?? "—").replaceAll("_", " ")}</p>
+          <p>Körbar: {incident.is_drivable ? "Ja" : "Nej/okänt"}</p>
+          <p>Beskrivning: {String(consoleRow?.description ?? incident.description ?? "—")}</p>
+          <p>Bilagor: {num(consoleRow?.evidence_count ?? evidence.length)}</p>
+          <p>BankID-signaturer: {num(consoleRow?.bankid_signature_count)}</p>
+        </Card>
+
+        <Card>
+          <h3 style={{ marginTop: 0 }}>Bärgningsstatus</h3>
           {job ? (
             <>
-              <p>Tow status: {String(job.status)}</p>
-              <p>
-                ETA:{" "}
-                {eta ? `${Math.round(Number(eta.eta_seconds) / 60)} min (${eta.source})` : "Not yet available"}
-              </p>
+              <p>Status: <StatusChip status={String(job.status)} /></p>
+              <p>Bärgare: {String(consoleRow?.assigned_tow_company_name ?? "Ej tilldelad")}</p>
+              <p>Förare: {String(consoleRow?.assigned_driver_name ?? "Ej tilldelad")}</p>
+              <p>Bärgningsbil: {String(consoleRow?.assigned_tow_vehicle_registration ?? "Ej tilldelad")}</p>
+              <p>ETA: {eta ? `${formatSeconds(eta.eta_seconds)} (${eta.source})` : "Inte tillgänglig ännu"}</p>
             </>
           ) : (
-            <p>No tow job for this case.</p>
+            <p>Ingen bärgning kopplad till ärendet ännu.</p>
           )}
+        </Card>
+
+        <Card>
+          <h3 style={{ marginTop: 0 }}>Integration och risk</h3>
+          <p>Externt skadenummer: {String(consoleRow?.claim_number ?? "Ej skapat")}</p>
+          <p>Webhook-fel för tenant: {num(consoleRow?.tenant_failed_webhooks)}</p>
+          <p>Nästa steg: {String(consoleRow?.next_action_label ?? "I handläggning")}</p>
         </Card>
       </div>
 
       <Card style={{ marginTop: 24 }}>
-        <h3 style={{ marginTop: 0 }}>Claims handling</h3>
+        <h3 style={{ marginTop: 0 }}>Handläggning</h3>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
           <form action={approveClaim}>
             <input type="hidden" name="incident_id" value={id} />
-            <input type="hidden" name="tenant_id" value={tenant!.id} />
-            <Button type="submit">Approve</Button>
+            <input type="hidden" name="tenant_id" value={tenant.id} />
+            <Button type="submit">Godkänn för handläggning</Button>
           </form>
           <form action={requestMoreInfo} style={{ display: "flex", gap: 8, alignItems: "end" }}>
             <input type="hidden" name="incident_id" value={id} />
-            <input type="hidden" name="tenant_id" value={tenant!.id} />
+            <input type="hidden" name="tenant_id" value={tenant.id} />
             <div>
-              <label htmlFor="reason1">Request more info</label>
-              <input id="reason1" name="reason" placeholder="What is needed" />
+              <label htmlFor="reason1">Begär komplettering</label>
+              <input id="reason1" name="reason" placeholder="Vad saknas?" />
             </div>
-            <Button type="submit" variant="secondary">
-              Request info
-            </Button>
+            <Button type="submit" variant="secondary">Begär uppgifter</Button>
           </form>
           <form action={rejectClaim} style={{ display: "flex", gap: 8, alignItems: "end" }}>
             <input type="hidden" name="incident_id" value={id} />
-            <input type="hidden" name="tenant_id" value={tenant!.id} />
+            <input type="hidden" name="tenant_id" value={tenant.id} />
             <div>
-              <label htmlFor="reason2">Reject reason</label>
-              <input id="reason2" name="reason" placeholder="Reason" />
+              <label htmlFor="reason2">Avslagsorsak</label>
+              <input id="reason2" name="reason" placeholder="Orsak" />
             </div>
-            <Button type="submit" variant="secondary">
-              Reject
-            </Button>
+            <Button type="submit" variant="secondary">Avslå</Button>
           </form>
         </div>
       </Card>

@@ -4,23 +4,24 @@ import { AppShell, Sidebar, ThemeRoot } from "@resqly/web-kit";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Resqly Admin",
-  description: "Resqly platform superadmin portal",
+  title: "Resqly Superadmin",
+  description: "Resqly superadminportal",
 };
 
 const NAV = [
-  { href: "/", label: "Dashboard" },
-  { href: "/tenants", label: "Tenants" },
-  { href: "/agreements", label: "Agreements & marketplace" },
-  { href: "/audit", label: "Audit log" },
+  { href: "/", label: "Översikt" },
+  { href: "/tenants", label: "Organisationer" },
+  { href: "/agreements", label: "Avtal & fri bärgning" },
+  { href: "/readiness", label: "Produktionsklarhet" },
+  { href: "/audit", label: "Auditlogg" },
 ];
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="sv">
       <body>
         <ThemeRoot>
-          <AppShell sidebar={<Sidebar brand="Resqly Admin" items={NAV} />}>{children}</AppShell>
+          <AppShell sidebar={<Sidebar brand="Resqly Superadmin" items={NAV} />}>{children}</AppShell>
         </ThemeRoot>
       </body>
     </html>

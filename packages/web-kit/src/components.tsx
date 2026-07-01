@@ -130,11 +130,11 @@ const CHIP_TONES: Record<ChipTone, { bg: string; fg: string }> = {
 /** Maps a status-ish string to a semantic tone for consistent status chips. */
 export function statusTone(status: string): ChipTone {
   const s = status.toLowerCase();
-  if (["completed", "invoiced", "closed", "accepted", "active", "delivered", "sent", "verified", "approved"].includes(s))
+  if (["completed", "invoiced", "closed", "accepted", "active", "delivered", "sent", "verified", "approved", "klar", "redo", "verifierat", "godkänd", "aktiv"].includes(s))
     return "success";
-  if (["manual_review", "more_info_required", "awaiting_bankid", "awaiting_handler", "pending", "offered", "matching"].includes(s))
+  if (["manual_review", "more_info_required", "awaiting_bankid", "awaiting_handler", "pending", "offered", "matching", "saknas", "väntar", "blockerad", "utkast"].includes(s))
     return "warning";
-  if (["cancelled", "rejected", "failed", "expired", "suspended", "terminated"].includes(s)) return "danger";
+  if (["cancelled", "rejected", "failed", "expired", "suspended", "terminated", "avbruten", "nekad", "misslyckad", "spärrad", "avslutad"].includes(s)) return "danger";
   if (["driver_en_route", "driver_arrived", "transporting", "vehicle_loaded", "in_progress", "submitted", "received"].includes(s))
     return "info";
   return "neutral";

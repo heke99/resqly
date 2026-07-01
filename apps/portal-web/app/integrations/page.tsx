@@ -28,7 +28,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
 
   return (
     <div>
-      <PageHeader title="API & webhooks" subtitle="Partner integration settings" />
+      <PageHeader title="API & webhooks" subtitle="Partnerintegrationer" />
       {newKey ? (
         <Card style={{ border: "2px solid var(--rs-color-success)", marginBottom: 24 }}>
           <h3 style={{ marginTop: 0 }}>Copy this API key now</h3>
@@ -39,7 +39,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
 
       <h3>API keys</h3>
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 24, alignItems: "start", marginBottom: 32 }}>
-        <DataTable columns={apiColumns} rows={clients} empty="No API keys yet" />
+        <DataTable columns={apiColumns} rows={clients} empty="Inga API-nycklar ännu" />
         <Card>
           <h4 style={{ marginTop: 0 }}>Create API key</h4>
           <form action={createApiKey}>
@@ -53,7 +53,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
 
       <h3>Webhooks</h3>
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 24, alignItems: "start" }}>
-        <DataTable columns={hookColumns} rows={webhooks} empty="No webhooks yet" />
+        <DataTable columns={hookColumns} rows={webhooks} empty="Inga webhooks ännu" />
         <Card>
           <h4 style={{ marginTop: 0 }}>Add webhook</h4>
           <form action={createWebhook}>

@@ -38,11 +38,11 @@ export default async function ClaimsPage({
 
   return (
     <div>
-      <PageHeader title="Damage claims" subtitle="Claims and damage-claim cases for your insurance tenant" />
+      <PageHeader title="Skadeärenden" subtitle="Skadeärenden och försäkringsärenden för ert försäkringsbolag" />
       <h3>Claims</h3>
-      <DataTable columns={claimColumns} rows={claims} empty="No claims registered yet" />
+      <DataTable columns={claimColumns} rows={claims} empty="Inga skadeärenden registrerade ännu" />
       <h3 style={{ marginTop: 24 }}>Damage-claim cases</h3>
-      <DataTable columns={caseColumns} rows={damageCases} empty="No damage-claim cases yet" />
+      <DataTable columns={caseColumns} rows={damageCases} empty="Inga skadeärenden ännu" />
     </div>
   );
 }

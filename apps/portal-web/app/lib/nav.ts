@@ -4,40 +4,43 @@ export interface NavItem {
 }
 
 const SHARED: NavItem[] = [
-  { href: "/settings", label: "Settings" },
+  { href: "/settings", label: "Inställningar" },
   { href: "/integrations", label: "API & webhooks" },
-  { href: "/roles", label: "Users & roles" },
+  { href: "/roles", label: "Användare & roller" },
 ];
 
 const INSURANCE_NAV: NavItem[] = [
-  { href: "/", label: "Dashboard" },
-  { href: "/cases", label: "Cases" },
-  { href: "/claims", label: "Damage claims" },
-  { href: "/jobs", label: "Tow jobs" },
+  { href: "/", label: "Översikt" },
+  { href: "/cases", label: "Ärenden" },
+  { href: "/claims", label: "Skadeärenden" },
+  { href: "/jobs", label: "Bärgningsuppdrag" },
   { href: "/sla", label: "SLA" },
-  { href: "/partners", label: "Tow partners" },
-  { href: "/statistics", label: "Statistics" },
+  { href: "/partners", label: "Bärgarpartners" },
+  { href: "/legal", label: "Juridik" },
+  { href: "/notifications", label: "Notiser & fallback" },
+  { href: "/readiness", label: "Produktionsklar" },
+  { href: "/statistics", label: "Statistik" },
   ...SHARED,
 ];
 
 const TOW_NAV: NavItem[] = [
-  { href: "/", label: "Dashboard" },
-  { href: "/offers", label: "New offers" },
-  { href: "/jobs", label: "Active jobs" },
-  { href: "/dispatch", label: "Dispatch board" },
-  { href: "/drivers", label: "Drivers" },
-  { href: "/vehicles", label: "Tow vehicles" },
-  { href: "/availability", label: "Availability" },
-  { href: "/agreements", label: "Insurance agreements" },
-  { href: "/marketplace", label: "Direct marketplace" },
-  { href: "/statistics", label: "Statistics" },
-  { href: "/completion-reports", label: "Completion reports" },
-  { href: "/invoices", label: "Invoice basis" },
+  { href: "/", label: "Översikt" },
+  { href: "/offers", label: "Nya uppdrag" },
+  { href: "/jobs", label: "Aktiva uppdrag" },
+  { href: "/dispatch", label: "Tilldelningstavla" },
+  { href: "/drivers", label: "Förare" },
+  { href: "/vehicles", label: "Bärgningsbilar" },
+  { href: "/availability", label: "Tillgänglighet" },
+  { href: "/agreements", label: "Försäkringsavtal" },
+  { href: "/marketplace", label: "Fri bärgning" },
+  { href: "/statistics", label: "Statistik" },
+  { href: "/completion-reports", label: "Utföranderapporter" },
+  { href: "/invoices", label: "Fakturaunderlag" },
   ...SHARED,
 ];
 
 const DEFAULT_NAV: NavItem[] = [
-  { href: "/", label: "Dashboard" },
+  { href: "/", label: "Översikt" },
   ...SHARED,
 ];
 
@@ -61,4 +64,4 @@ export const TOW_ONLY_PATHS = new Set([
   "/invoices",
 ]);
 
-export const INSURANCE_ONLY_PATHS = new Set(["/cases", "/claims", "/sla", "/partners"]);
+export const INSURANCE_ONLY_PATHS = new Set(["/cases", "/claims", "/sla", "/partners", "/legal", "/notifications", "/readiness"]);

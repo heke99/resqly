@@ -1,6 +1,6 @@
 import { Card, DataTable, KpiGrid, PageHeader, StatCard, StatusChip, type Column } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
-import { listCompanyJobs, listDrivers } from "../lib/data";
+import { listCompanyJobs, listFörare } from "../lib/data";
 import { NoTenant, WrongTenantType } from "../lib/ui";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export default async function DispatchPage({
   if (!tenant) return <NoTenant />;
   if (tenant.type !== "tow_company") return <WrongTenantType need="tow_company" />;
 
-  const [jobs, drivers] = await Promise.all([listCompanyJobs(tenant.id), listDrivers(tenant.id)]);
+  const [jobs, drivers] = await Promise.all([listCompanyJobs(tenant.id), listFörare(tenant.id)]);
   const active = jobs.filter((j) => ACTIVE.includes(String(j.status)));
   const offered = jobs.filter((j) => String(j.status) === "offered");
   const online = drivers.filter((d) => d.is_online);
@@ -39,11 +39,11 @@ export default async function DispatchPage({
 
   return (
     <div>
-      <PageHeader title="Dispatch board" subtitle="Live control of offers, active jobs and driver positions" />
+      <PageHeader title="Tilldelningstavla" subtitle="Livekontroll av uppdrag, aktiva körningar och förare" />
       <KpiGrid>
         <StatCard label="Offered" value={offered.length} />
-        <StatCard label="Active jobs" value={active.length} />
-        <StatCard label="Drivers online" value={online.length} />
+        <StatCard label="Aktiva uppdrag" value={active.length} />
+        <StatCard label="Förare online" value={online.length} />
       </KpiGrid>
       <Card style={{ marginTop: 24, marginBottom: 24 }}>
         <strong>Live map</strong>
@@ -54,12 +54,12 @@ export default async function DispatchPage({
       </Card>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, alignItems: "start" }}>
         <div>
-          <h3>Active jobs</h3>
-          <DataTable columns={jobColumns} rows={active} empty="No active jobs" />
+          <h3>Aktiva uppdrag</h3>
+          <DataTable columns={jobColumns} rows={active} empty="Inga aktiva uppdrag" />
         </div>
         <div>
-          <h3>Drivers</h3>
-          <DataTable columns={driverColumns} rows={drivers} empty="No drivers yet" />
+          <h3>Förare</h3>
+          <DataTable columns={driverColumns} rows={drivers} empty="Inga förare ännu" />
         </div>
       </div>
     </div>

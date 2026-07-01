@@ -163,3 +163,12 @@ export async function getDashboardData(): Promise<AdminDashboardData> {
     latestAudit: (latestAudit.data as Array<Record<string, unknown>> | null) ?? [],
   };
 }
+
+export async function listInsurerReadiness(): Promise<Array<Record<string, unknown>>> {
+  const { db } = await requirePlatformAdmin();
+  const { data } = await db
+    .from("insurer_production_readiness" as never)
+    .select("*")
+    .order("insurer_name", { ascending: true });
+  return (data as Array<Record<string, unknown>> | null) ?? [];
+}

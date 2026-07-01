@@ -23,7 +23,7 @@ function dateFilter<T extends Record<string, unknown>>(rows: T[], from?: string,
   });
 }
 
-export default async function StatisticsPage({
+export default async function StatistikPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -57,7 +57,7 @@ export default async function StatisticsPage({
     const byPayer = countBy(jobs, "payer_type");
     return (
       <div>
-        <PageHeader title="Statistics" subtitle="Dispatch and fleet performance" />
+        <PageHeader title="Statistik" subtitle="Tilldelning och fordons-/förarprestanda" />
         {filters}
         <KpiGrid>
           <StatCard label="Completed jobs" value={num(stats?.completed_jobs)} />
@@ -66,12 +66,12 @@ export default async function StatisticsPage({
           <StatCard label="Avg accept time" value={formatSeconds(stats?.avg_accept_seconds)} />
           <StatCard label="Avg arrival time" value={formatSeconds(stats?.avg_arrival_seconds)} />
           <StatCard label="SLA hit / miss" value={`${num(stats?.sla_hit)} / ${num(stats?.sla_miss)}`} />
-          <StatCard label="Invoice basis" value={formatMoneyMinor(stats?.revenue_minor)} />
-          <StatCard label="Drivers online" value={num(stats?.drivers_online)} />
+          <StatCard label="Fakturaunderlag" value={formatMoneyMinor(stats?.revenue_minor)} />
+          <StatCard label="Förare online" value={num(stats?.drivers_online)} />
         </KpiGrid>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 24 }}>
           <Card>
-            <h3 style={{ marginTop: 0 }}>Jobs by status</h3>
+            <h3 style={{ marginTop: 0 }}>Uppdrag per status</h3>
             <Bars data={byStatus} />
           </Card>
           <Card>
@@ -80,7 +80,7 @@ export default async function StatisticsPage({
           </Card>
         </div>
         <Card style={{ marginTop: 24 }}>
-          <h3 style={{ marginTop: 0 }}>Jobs per driver</h3>
+          <h3 style={{ marginTop: 0 }}>Uppdrag per förare</h3>
           <Bars
             data={drivers.map((d) => ({ label: String(d.full_name ?? d.driver_id), value: num(d.jobs_completed) }))}
           />
@@ -98,13 +98,13 @@ export default async function StatisticsPage({
   const jobs = dateFilter(jobsAll, from, to);
   return (
     <div>
-      <PageHeader title="Statistics" subtitle="Cases, towing and cost analysis" />
+      <PageHeader title="Statistik" subtitle="Ärenden, bärgning och kostnadsanalys" />
       {filters}
       <KpiGrid>
         <StatCard label="Total cases" value={num(stats?.total_cases)} />
         <StatCard label="Completed" value={num(stats?.completed_cases)} />
         <StatCard label="Cancelled" value={num(stats?.cancelled_cases)} />
-        <StatCard label="Damage claims" value={num(stats?.damage_claims)} />
+        <StatCard label="Skadeärenden" value={num(stats?.damage_claims)} />
         <StatCard label="SLA risk" value={num(stats?.sla_risk)} />
         <StatCard label="Avg ETA" value={formatSeconds(stats?.avg_eta_seconds)} />
         <StatCard label="Avg resolution" value={formatSeconds(stats?.avg_resolution_seconds)} />
@@ -112,15 +112,15 @@ export default async function StatisticsPage({
       </KpiGrid>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 24 }}>
         <Card>
-          <h3 style={{ marginTop: 0 }}>Cases by status</h3>
+          <h3 style={{ marginTop: 0 }}>Ärenden per status</h3>
           <Bars data={countBy(incidents, "status")} />
         </Card>
         <Card>
-          <h3 style={{ marginTop: 0 }}>Cases by type</h3>
+          <h3 style={{ marginTop: 0 }}>Ärenden per typ</h3>
           <Bars data={countBy(incidents, "type")} />
         </Card>
         <Card>
-          <h3 style={{ marginTop: 0 }}>Cases by problem</h3>
+          <h3 style={{ marginTop: 0 }}>Ärenden per problem</h3>
           <Bars data={countBy(incidents.filter((i) => i.problem_type), "problem_type")} />
         </Card>
         <Card>

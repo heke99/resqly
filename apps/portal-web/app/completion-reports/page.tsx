@@ -29,8 +29,8 @@ export default async function CompletionReportsPage({
 
   return (
     <div>
-      <PageHeader title="Completion reports" subtitle="Driver-submitted job completion details" />
-      <DataTable columns={columns} rows={reports} empty="No completion reports yet" />
+      <PageHeader title="Utföranderapporter" subtitle="Utförandedetaljer inskickade av förare" />
+      <DataTable columns={columns} rows={reports} empty="Inga utföranderapporter ännu" />
     </div>
   );
 }

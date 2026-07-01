@@ -36,10 +36,10 @@ export default async function AgreementsPage({
     <div>
       <PageHeader
         title="Insurance agreements"
-        subtitle="Only insurers you have an active agreement with can dispatch insurance jobs to you"
+        subtitle="Endast försäkringsbolag med aktivt avtal kan skicka försäkringsuppdrag till er"
       />
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 24, alignItems: "start" }}>
-        <DataTable columns={columns} rows={agreements} empty="No agreements yet" />
+        <DataTable columns={columns} rows={agreements} empty="Inga avtal ännu" />
         <Card>
           <h3 style={{ marginTop: 0 }}>Add / update agreement</h3>
           <form action={saveAgreement} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
