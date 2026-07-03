@@ -3,6 +3,7 @@ import { processDelivery } from "./jobs/webhook-delivery";
 import { evaluateOfferExpiry, type OfferRow } from "./jobs/offer-expiry";
 import { selectOfferFallbackActions, selectOfferPushRetries, type OfferPushRow } from "./jobs/offer-push";
 import { jobsNeedingEtaRefresh } from "./jobs/eta-refresh";
+import { renderOperationalMessage, type OperationalNotificationRow } from "./jobs/notification-queue-db";
 
 describe("webhook delivery", () => {
   it("marks succeeded on a successful send", async () => {
@@ -106,6 +107,35 @@ describe("offer push retries", () => {
       180_000,
     );
     expect(actions[0]).toMatchObject({ channel: "sms", reason: "push_timeout_sms_fallback", sensitivePayloadAllowed: false });
+  });
+});
+
+describe("operational notification messages", () => {
+  const row = (over: Partial<OperationalNotificationRow>): OperationalNotificationRow => ({
+    id: "n1",
+    tenant_id: "t1",
+    tow_job_id: "aabbccdd-1111-2222-3333-444455556666",
+    offer_id: "o1",
+    channel: "sms",
+    recipient: "+46700000000",
+    template_key: "offer_push_fallback",
+    payload: {},
+    status: "pending",
+    attempts: 0,
+    ...over,
+  });
+
+  it("renders Swedish operational copy without customer details", () => {
+    const msg = renderOperationalMessage(row({}));
+    expect(msg).toContain("bärgningsuppdrag");
+    expect(msg).toContain("AABBCCDD");
+    // Never any name/phone/personal number in operational SMS.
+    expect(msg).not.toMatch(/\d{6}[-+]?\d{4}/);
+  });
+
+  it("renders the manual review alert", () => {
+    const msg = renderOperationalMessage(row({ template_key: "manual_review_alert" }));
+    expect(msg).toContain("behöver hjälp");
   });
 });
 
