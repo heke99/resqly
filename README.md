@@ -105,6 +105,17 @@ The RLS assumption tests (pgTAP-style) live in
 provisioned Supabase/Postgres instance — see that folder's README. They are kept
 separate from the Vitest unit suite because they require a live database.
 
+To validate the **entire migration chain plus the dispatch/race business rules**
+against a local PostgreSQL (with PostGIS + pgTAP installed):
+
+```bash
+bash packages/database/tests/validate-migrations.sh
+```
+
+This creates a scratch database, applies a small Supabase shim, runs all
+migrations in order, and executes the pgTAP suites
+(`rls_assumptions.sql`, `dispatch_rules.sql`).
+
 ## Multi-tenant & white-label
 
 Tenants are resolved (in priority order) by custom domain → subdomain → tenant
@@ -121,6 +132,21 @@ prefix) is fully data-driven — **no tenant names are hardcoded in logic**.
 - Every customer-data-sharing event and every status change is **audit-logged**.
 - BankID uses a `personal_number_hash` rather than storing raw personal numbers.
 
+## Documentation
+
+| Doc | Contents |
+| --- | --- |
+| [docs/go-live-checklist.md](docs/go-live-checklist.md) | Step-by-step go-live: infrastructure, integrations, first operator, onboarding insurers/tow companies, agreements, rollback plan |
+| [docs/e2e-acceptance.md](docs/e2e-acceptance.md) | Manual acceptance script (insurance towing, private towing, missing agreement, no driver online, race-safe accept, unauthorized access) |
+| [docs/dispatch-agreements.md](docs/dispatch-agreements.md) | The contract-only dispatch model, agreement lifecycle, race-safe accept, private marketplace separation |
+| [docs/bankid.md](docs/bankid.md) | BankID architecture, personal data rules, production guards |
+| [docs/security-privacy.md](docs/security-privacy.md) | Access model, RLS, secrets, audit log, abuse protection, retention |
+| [docs/production-integrations.md](docs/production-integrations.md) | TIC, Google Maps, Resend, Expo push, SMS (46elks), workers, webhooks |
+| [docs/deployment-domains.md](docs/deployment-domains.md) | Domains and white-label routing |
+
+Each app has its own `.env.example` documenting exactly which variables it needs
+(`apps/*/.env.example`).
+
 ## What requires production keys / agreements before go-live
 
 This build is wired for production adapters, not the old mock-only setup. Before going live you must provision and configure:
@@ -131,11 +157,16 @@ This build is wired for production adapters, not the old mock-only setup. Before
 | Google Maps | Browser key for Maps UI and server key for Routes, Route Matrix and Geocoding |
 | TIC BankID | `BANKID_PROVIDER=tic`, `BANKID_ENV=production`, `BANKID_MOCK_ENABLED=false`, `TIC_API_KEY`, `TIC_WEBHOOK_SECRET` |
 | Resend | Verified sending domain + `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO` |
-| Push | Expo/EAS project ID, APNs/FCM credentials and `expo-notifications` in the driver app |
-| Insurance integrations | Per-insurer API contracts/webhooks configured per tenant |
+| Push | Expo/EAS project ID, APNs/FCM credentials for both mobile apps |
+| SMS fallback (optional) | 46elks credentials: `SMS_ENABLED=true`, `SMS_PROVIDER=46elks`, `SMS_API_KEY=<user>:<password>` |
+| Insurance integrations | Per-insurer API contracts/webhooks configured per organization, or CSV export |
+| Business agreements | Signed agreements with insurance companies and towing companies, approved legal texts, GDPR review |
 | Payments | Out of scope for first pilot; towing companies collect payment themselves |
-| Webhooks | A strong `WEBHOOK_SIGNING_SECRET`; per-tenant webhook secrets are stored in DB |
-| Encryption | A strong 32-byte `ENCRYPTION_KEY` for at-rest field encryption and personal-number hashing |
+| Encryption | A strong 32-byte `ENCRYPTION_KEY` for personal-number hashing |
+
+Mock BankID, demo seeds and test flows are hard-blocked in production at process
+start, at route level and at database level — see
+[docs/security-privacy.md](docs/security-privacy.md).
 
 ## Out of scope (by design)
 
