@@ -133,7 +133,7 @@ describe("production hardening (0020)", () => {
 
   it("adds the idempotency key table without client policies", () => {
     expect(sql).toContain("create table if not exists public.request_idempotency_keys");
-    expect(sql).toContain("unique (user_id, action, idempotency_key)");
+    expect(sql).toContain("unique (scope, action, idempotency_key)");
     expect(sql).toMatch(/request_idempotency_keys enable row level security/);
   });
 

@@ -14,6 +14,8 @@ export interface RouteResult {
   status: number;
   body?: unknown;
   headers?: Record<string, string>;
+  /** When set, the body is sent as-is (e.g. HTML) instead of JSON. */
+  rawBody?: string;
 }
 
 interface Route<Ctx> {

@@ -30,6 +30,30 @@ function assertAssignedDriver(jobDriverId: string | null, driverId: string): voi
   if (jobDriverId && jobDriverId !== driverId) throw forbidden("This job is assigned to another driver");
 }
 
+/**
+ * Resolve a tow job for the current auth lane.
+ *
+ * Partner API callers are tenant-scoped (tow_jobs.tenant_id is the insurer
+ * tenant). Driver user-token callers belong to the tow company tenant, so the
+ * job is looked up by id and authorization is enforced against the driver
+ * (assignment or a pending offer) instead.
+ */
+async function loadJobForContext(ctx: ApiContext, jobId: string) {
+  if (ctx.apiClientId === "user-token") {
+    const driverId = requireAuthenticatedDriver(ctx);
+    const job = await ctx.repo.getTowJobById(jobId);
+    if (!job) throw notFound("Tow job not found");
+    if (job.driver_id !== driverId) {
+      const offer = await ctx.repo.getOfferForDriver(jobId, driverId);
+      if (!offer) throw notFound("Tow job not found");
+    }
+    return job;
+  }
+  const job = await ctx.repo.getTowJob(ctx.tenantId, jobId);
+  if (!job) throw notFound("Tow job not found");
+  return job;
+}
+
 const DEFAULT_PRICE_LIST: PriceList = {
   start_fee_minor: 0,
   per_km_minor: 0,
@@ -51,17 +75,27 @@ export async function listTowJobs(
 }
 
 export async function getTowJob(ctx: ApiContext, id: string): Promise<RouteResult> {
-  const job = await ctx.repo.getTowJob(ctx.tenantId, id);
-  if (!job) throw notFound("Tow job not found");
+  const job = await loadJobForContext(ctx, id);
   return { status: 200, body: job };
 }
 
 const ACCEPT_FAILURE_MESSAGES: Record<string, string> = {
   no_pending_offer: "No pending offer for this driver on this job",
-  already_assigned: "This job has already been assigned to another driver",
+  already_assigned: "This job has already been accepted by another driver",
   job_not_offerable: "This job is no longer available",
   job_not_found: "Tow job not found",
+  offer_expired: "This offer has expired",
   forbidden: "You are not allowed to accept this job",
+};
+
+/** Friendly Swedish messages the driver app can show directly. */
+const ACCEPT_FAILURE_USER_MESSAGES: Record<string, string> = {
+  no_pending_offer: "Erbjudandet är inte längre tillgängligt.",
+  already_assigned: "Uppdraget har redan tagits av en annan förare.",
+  job_not_offerable: "Uppdraget är inte längre tillgängligt.",
+  job_not_found: "Uppdraget kunde inte hittas.",
+  offer_expired: "Erbjudandet har gått ut.",
+  forbidden: "Du kan inte acceptera det här uppdraget.",
 };
 
 /**
@@ -74,15 +108,29 @@ export async function acceptJobForDriver(
   jobId: string,
   driverId: string,
 ): Promise<RouteResult> {
-  const job = await ctx.repo.getTowJob(ctx.tenantId, jobId);
-  if (!job) throw notFound("Tow job not found");
+  const job = await loadJobForContext(ctx, jobId);
 
   const result = await ctx.repo.acceptOffer(jobId, driverId);
   if (!result.accepted) {
-    throw new AppError(
-      "conflict",
-      ACCEPT_FAILURE_MESSAGES[result.reason ?? ""] ?? "Cannot accept this offer",
-    );
+    const reason = result.reason ?? "";
+    throw new AppError("conflict", ACCEPT_FAILURE_MESSAGES[reason] ?? "Cannot accept this offer", {
+      reason,
+      user_message: ACCEPT_FAILURE_USER_MESSAGES[reason] ?? "Uppdraget kunde inte accepteras. Försök igen.",
+    });
+  }
+
+  // Idempotent re-accept by the winning driver (e.g. a mobile retry after a
+  // network hiccup). The customer share already exists — do not duplicate it.
+  if (result.reason === "already_accepted_by_driver") {
+    return {
+      status: 200,
+      body: {
+        status: "accepted",
+        customer_shared: true,
+        shared_fields: SHAREABLE_CUSTOMER_FIELDS,
+        tow_company_id: result.towCompanyId,
+      },
+    };
   }
 
   // ---- The critical step: share customer data ONLY now, after accept. ----
@@ -157,11 +205,10 @@ export async function rejectTowJob(
 ): Promise<RouteResult> {
   const { reason } = rejectSchema.parse(body);
   const driver_id = requireAuthenticatedDriver(ctx);
-  const job = await ctx.repo.getTowJob(ctx.tenantId, id);
-  if (!job) throw notFound("Tow job not found");
+  const job = await loadJobForContext(ctx, id);
   await ctx.repo.setOfferStatus(id, driver_id, "rejected");
   await ctx.repo.recordAudit({
-    tenant_id: ctx.tenantId,
+    tenant_id: job.tenant_id,
     action: "update",
     entity_type: "tow_job_offer",
     entity_id: id,
@@ -178,8 +225,7 @@ export async function updateTowJobStatus(
 ): Promise<RouteResult> {
   const input = towJobStatusInputSchema.parse(body);
   const driver_id = requireAuthenticatedDriver(ctx);
-  const job = await ctx.repo.getTowJob(ctx.tenantId, id);
-  if (!job) throw notFound("Tow job not found");
+  const job = await loadJobForContext(ctx, id);
   assertAssignedDriver(job.driver_id, driver_id);
   const event = transitionTowJob({
     towJobId: id,
@@ -190,7 +236,7 @@ export async function updateTowJobStatus(
   await ctx.repo.setTowJobStatus(id, input.status);
   await ctx.repo.addTowJobStatusEvent(event);
   await ctx.repo.recordAudit({
-    tenant_id: ctx.tenantId,
+    tenant_id: job.tenant_id,
     action: "status_change",
     entity_type: "tow_job",
     entity_id: id,
@@ -222,8 +268,7 @@ export async function updateTowJobLocation(
 ): Promise<RouteResult> {
   const input = towJobLocationInputSchema.parse(body);
   const driver_id = requireAuthenticatedDriver(ctx);
-  const job = await ctx.repo.getTowJob(ctx.tenantId, id);
-  if (!job) throw notFound("Tow job not found");
+  const job = await loadJobForContext(ctx, id);
   assertAssignedDriver(job.driver_id, driver_id);
   const contact = await ctx.repo.getCustomerContact(job.incident_id);
   if (!contact) throw badRequest("Pickup location unknown");
@@ -242,8 +287,7 @@ export async function updateTowJobLocation(
 }
 
 export async function getTowJobEta(ctx: ApiContext, id: string): Promise<RouteResult> {
-  const job = await ctx.repo.getTowJob(ctx.tenantId, id);
-  if (!job) throw notFound("Tow job not found");
+  await loadJobForContext(ctx, id);
   const eta = await ctx.repo.getLatestEta(id);
   if (!eta) return { status: 200, body: { eta: null } };
   return {
@@ -265,8 +309,7 @@ export async function completeTowJob(
 ): Promise<RouteResult> {
   const input = towJobCompleteInputSchema.parse(body);
   const driver_id = requireAuthenticatedDriver(ctx);
-  const job = await ctx.repo.getTowJob(ctx.tenantId, id);
-  if (!job) throw notFound("Tow job not found");
+  const job = await loadJobForContext(ctx, id);
   if (!job.driver_id) throw new AppError("conflict", "Job has no assigned driver");
   assertAssignedDriver(job.driver_id, driver_id);
 

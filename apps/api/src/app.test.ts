@@ -5,6 +5,7 @@ import { MemoryRepo } from "./repo/memory";
 
 const API_KEY = "rk_test_secret";
 const DRIVER_TOKEN = "driver_session_token";
+const DRIVER2_TOKEN = "driver2_session_token";
 const CUSTOMER_USER_ID = "11111111-1111-4111-8111-111111111111";
 
 function setup() {
@@ -16,6 +17,7 @@ function setup() {
     { driverId: "drv2", towCompanyId: "tc1", towVehicleId: "truck2", dutyStatus: "on_duty", distanceMeters: 4000, etaSeconds: 700, insuranceAgreementId: "agr-if-tc1", inPreferredNetwork: true },
   ];
   repo.driverUsers.set("user-drv1", "drv1");
+  repo.driverUsers.set("user-drv2", "drv2");
   const app = new App({
     repo,
     maps: { routesEnabled: false },
@@ -23,7 +25,9 @@ function setup() {
     encryptionKey: "pepper",
     driverAuth: {
       async getUserIdFromAccessToken(token: string) {
-        return token === DRIVER_TOKEN ? "user-drv1" : null;
+        if (token === DRIVER_TOKEN) return "user-drv1";
+        if (token === DRIVER2_TOKEN) return "user-drv2";
+        return null;
       },
     },
   });
@@ -36,6 +40,7 @@ const auth = (extra: Record<string, string> = {}) => ({
 });
 
 const driverAuth = () => auth({ "x-driver-authorization": `Bearer ${DRIVER_TOKEN}` });
+const driver2Auth = () => auth({ "x-driver-authorization": `Bearer ${DRIVER2_TOKEN}` });
 
 describe("API auth", () => {
   it("rejects requests without an API key", async () => {
@@ -259,15 +264,53 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     const stored = await repo.getTowJob("t-if", job.id);
     expect(stored?.driver_id).toBe("drv1");
     expect(repo.offers.find((o) => o.tow_job_id === job.id && o.driver_id === "drv2")?.status).toBe("cancelled");
+    const sharesAfterFirst = repo.customerShares.length;
 
-    // A second accept attempt on the same job no longer has a pending offer -> conflict.
-    const second = await env.app.handle({
+    // The losing driver gets a conflict with a friendly Swedish message.
+    const losing = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/tow/jobs/${job.id}/accept`,
+      headers: driver2Auth(),
+      body: {},
+    });
+    expect(losing.status).toBe(409);
+    const losingError = (losing.body as { error: { user_message?: string } }).error;
+    expect(losingError.user_message).toBe("Uppdraget har redan tagits av en annan förare.");
+
+    // A retry by the WINNING driver is idempotent (mobile network retry) and
+    // must not duplicate the customer data share.
+    const retry = await env.app.handle({
       method: "POST",
       path: `/api/v1/tow/jobs/${job.id}/accept`,
       headers: driverAuth(),
       body: {},
     });
-    expect(second.status).toBe(409);
+    expect(retry.status).toBe(200);
+    expect(repo.customerShares.length).toBe(sharesAfterFirst);
+  });
+
+  it("rejects accepting an expired offer", async () => {
+    const repo = env.repo;
+    const job = await repo.createTowJob({
+      tenant_id: "t-if",
+      incident_id: "inc-exp",
+      status: "offered",
+      payer_type: "insurance_company",
+      priority: "normal",
+    });
+    await repo.createOffers([
+      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv1", tow_company_id: "tc1", rank: 0, expires_at: new Date(Date.now() - 1000).toISOString() },
+    ]);
+    const res = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/tow/jobs/${job.id}/accept`,
+      headers: driverAuth(),
+      body: {},
+    });
+    expect(res.status).toBe(409);
+    const error = (res.body as { error: { user_message?: string } }).error;
+    expect(error.user_message).toBe("Erbjudandet har gått ut.");
+    expect(repo.offers.find((o) => o.tow_job_id === job.id)?.status).toBe("expired");
   });
 
   it("lists driver offers without customer PII (pre-accept minimization)", async () => {

@@ -237,7 +237,7 @@ alter table public.tow_job_invoices
   drop constraint if exists tow_job_invoices_status_check;
 alter table public.tow_job_invoices
   add constraint tow_job_invoices_status_check
-  check (status in ('draft', 'issued', 'paid', 'cancelled'));
+  check (status in ('draft', 'ready', 'issued', 'paid', 'cancelled'));
 
 -- ---------------------------------------------------------------------
 -- 6. agreements.manage permission (RLS in 0018 references it)
@@ -259,13 +259,14 @@ on conflict do nothing;
 -- ---------------------------------------------------------------------
 create table if not exists public.request_idempotency_keys (
   id              uuid primary key default gen_random_uuid(),
-  user_id         uuid not null,
+  -- Caller scope, e.g. 'user:<uuid>' or 'tenant:<uuid>'.
+  scope           text not null,
   action          text not null,
   idempotency_key text not null,
   resource_id     uuid,
   response        jsonb,
   created_at      timestamptz not null default now(),
-  unique (user_id, action, idempotency_key)
+  unique (scope, action, idempotency_key)
 );
 create index if not exists idx_request_idempotency_created
   on public.request_idempotency_keys(created_at);

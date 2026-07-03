@@ -53,6 +53,7 @@ export class App {
       incidents.cancelBankidSession(ctx, a.params.sessionId!),
     );
     r.post("/api/v1/tic/webhook", (ctx, a) => incidents.ticWebhook(ctx, a.body));
+    r.get("/api/v1/bankid/callback", (ctx, a) => incidents.bankidCallback(ctx, a.query));
     r.post("/api/v1/incidents/:id/request-tow", (ctx, a) =>
       incidents.requestTow(ctx, a.params.id!, a.body),
     );
@@ -89,6 +90,7 @@ export class App {
     r.post("/api/v1/drivers/me/location", (ctx, a) => drivers.updateLocation(ctx, a.body));
     r.post("/api/v1/drivers/me/device", (ctx, a) => drivers.registerDevice(ctx, a.body));
     r.get("/api/v1/drivers/me/offers", (ctx) => drivers.listOffers(ctx));
+    r.get("/api/v1/drivers/me/jobs", (ctx) => drivers.listJobs(ctx));
     r.post("/api/v1/drivers/offers/:id/accept", (ctx, a) => drivers.acceptOffer(ctx, a.params.id!));
     r.post("/api/v1/drivers/offers/:id/reject", (ctx, a) => drivers.rejectOffer(ctx, a.params.id!, a.body));
 
@@ -97,33 +99,23 @@ export class App {
   }
 
 
+  /**
+   * Public health check. Deliberately minimal: it reports liveness and
+   * overall configuration readiness but never enumerates which env vars,
+   * providers or integrations are configured. The detailed per-organization
+   * readiness lives in the internal operations portal (readiness views).
+   */
   private health(ctx: ApiContext): RouteResult {
-    const requiredEnv = {
-      supabase_url: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
-      service_role_key: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
-      encryption_key: Boolean(process.env.ENCRYPTION_KEY),
-      bankid_key: ctx.config.bankid.provider !== "tic" || Boolean(ctx.config.bankid.tic?.apiKey),
-      webhook_secret: Boolean(process.env.WEBHOOK_SIGNING_SECRET),
-    };
-    const ok = Object.values(requiredEnv).every(Boolean);
+    const configured =
+      Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
+      Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) &&
+      Boolean(process.env.ENCRYPTION_KEY) &&
+      (ctx.config.bankid.provider !== "tic" || Boolean(ctx.config.bankid.tic?.apiKey));
     return {
-      status: ok ? 200 : 503,
+      status: configured ? 200 : 503,
       body: {
-        ok,
+        ok: configured,
         service: "resqly-api",
-        environment: process.env.APP_ENV ?? process.env.NODE_ENV ?? "unknown",
-        bankid: {
-          provider: ctx.config.bankid.provider ?? "mock",
-          environment: ctx.config.bankid.env,
-          mock_enabled: ctx.config.bankid.mockEnabled,
-        },
-        integrations: {
-          google_routes_enabled: ctx.config.maps.routesEnabled,
-          google_route_matrix_enabled: ctx.config.maps.routeMatrixEnabled ?? false,
-          expo_push_enabled: ctx.config.push?.enabled ?? false,
-          email_enabled: ctx.config.email?.enabled ?? false,
-        },
-        required_env: requiredEnv,
         request_id: ctx.requestId,
       },
     };
@@ -141,7 +133,12 @@ export class App {
 
     // Public health checks and provider callbacks are authenticated by their own
     // rules, not tenant API keys. Keep this narrow and explicit.
-    if (url.pathname === "/health" || url.pathname === "/api/v1/health" || url.pathname === "/api/v1/tic/webhook") {
+    if (
+      url.pathname === "/health" ||
+      url.pathname === "/api/v1/health" ||
+      url.pathname === "/api/v1/tic/webhook" ||
+      url.pathname === "/api/v1/bankid/callback"
+    ) {
       const ctx: ApiContext = {
         config: this.config,
         repo: this.config.repo,
@@ -176,11 +173,33 @@ export class App {
       extractBearer(req.headers["x-user-authorization"]) ??
       req.headers["x-user-access-token"] ??
       null;
+    // Tow job sub-routes (accept/reject/status/location/complete/eta and the
+    // single-job read) are used by the driver mobile app with a Supabase user
+    // token — the app never ships a tenant API key. The handlers enforce
+    // driver-level authorization (assignment or a pending offer).
     const allowsUserToken =
-      url.pathname === "/api/v1/me/role-context" || url.pathname.startsWith("/api/v1/drivers/");
+      url.pathname === "/api/v1/me/role-context" ||
+      url.pathname.startsWith("/api/v1/drivers/") ||
+      /^\/api\/v1\/tow\/jobs\/[^/]+(\/(accept|reject|status|location|complete|eta))?$/.test(url.pathname);
     if (allowsUserToken && userTokenFromAuth && this.config.driverAuth) {
       const userId = await this.config.driverAuth.getUserIdFromAccessToken(userTokenFromAuth);
       if (userId) {
+        // Rate limit the user-token lane per user (BankID, accept, status...).
+        const rl = this.rateLimiter.check(`user:${userId}`);
+        if (!rl.allowed) {
+          return {
+            status: 429,
+            body: {
+              error: {
+                code: "rate_limited",
+                message: "Rate limit exceeded",
+                user_message: "För många försök. Vänta en stund och försök igen.",
+                request_id: requestId,
+              },
+            },
+            headers: baseHeaders,
+          };
+        }
         const driverId = await this.config.repo.getDriverIdForUser(userId);
         const driverProfile = driverId ? await this.config.repo.getDriverProfile(driverId) : null;
         const resolvedTenantId = driverProfile?.tenant_id ?? "public";
@@ -315,6 +334,23 @@ function unauthorized(requestId: string): RouteResult {
   };
 }
 
+/**
+ * Friendly Swedish fallback messages per error code. Client apps show
+ * `error.user_message` directly so end users never see technical wording.
+ */
+const USER_MESSAGES_SV: Record<string, string> = {
+  bad_request: "Uppgifterna kunde inte behandlas. Kontrollera och försök igen.",
+  unauthorized: "Du behöver logga in igen.",
+  forbidden: "Du har inte behörighet att göra detta.",
+  not_found: "Uppgiften kunde inte hittas.",
+  conflict: "Åtgärden kunde inte genomföras. Försök igen.",
+  rate_limited: "För många försök. Vänta en stund och försök igen.",
+  validation_error: "Uppgifterna kunde inte behandlas. Kontrollera och försök igen.",
+  tenant_mismatch: "Du har inte behörighet att göra detta.",
+  dependency_unavailable: "Tjänsten kunde inte nås just nu. Försök igen om en stund.",
+  internal_error: "Något gick fel. Försök igen eller kontakta support.",
+};
+
 function toErrorResult(error: unknown, requestId: string): RouteResult {
   if (error instanceof z.ZodError) {
     return {
@@ -323,6 +359,7 @@ function toErrorResult(error: unknown, requestId: string): RouteResult {
         error: {
           code: "validation_error",
           message: "Request validation failed",
+          user_message: USER_MESSAGES_SV.validation_error,
           request_id: requestId,
           details: error.issues,
         },
@@ -330,11 +367,24 @@ function toErrorResult(error: unknown, requestId: string): RouteResult {
     };
   }
   if (isAppError(error)) {
-    return { status: error.status, body: error.toJSON(requestId) };
+    const json = error.toJSON(requestId) as { error: Record<string, unknown> };
+    const detailUserMessage =
+      error.details && typeof error.details === "object"
+        ? (error.details as { user_message?: string }).user_message
+        : undefined;
+    json.error.user_message = detailUserMessage ?? USER_MESSAGES_SV[error.code] ?? USER_MESSAGES_SV.internal_error;
+    return { status: error.status, body: json };
   }
   return {
     status: 500,
-    body: { error: { code: "internal_error", message: "Internal server error", request_id: requestId } },
+    body: {
+      error: {
+        code: "internal_error",
+        message: "Internal server error",
+        user_message: USER_MESSAGES_SV.internal_error,
+        request_id: requestId,
+      },
+    },
   };
 }
 
