@@ -8,6 +8,11 @@ interface ExpoNotificationsModule {
   getPermissionsAsync: () => Promise<{ status: string }>;
   requestPermissionsAsync: () => Promise<{ status: string }>;
   getExpoPushTokenAsync: (opts?: { projectId?: string }) => Promise<{ data: string }>;
+  setNotificationHandler?: (handler: unknown) => void;
+  addNotificationReceivedListener?: (cb: (event: unknown) => void) => { remove: () => void };
+  addNotificationResponseReceivedListener?: (
+    cb: (event: { notification?: { request?: { content?: { data?: Record<string, unknown> } } } }) => void,
+  ) => { remove: () => void };
 }
 
 async function loadModule(): Promise<ExpoNotificationsModule | null> {
@@ -32,6 +37,50 @@ export async function getExpoPushToken(): Promise<string | null> {
     return token.data ?? null;
   } catch {
     return null;
+  }
+}
+
+export interface OfferPushData {
+  type?: string;
+  offer_id?: string;
+  tow_job_id?: string;
+}
+
+/**
+ * Listen for incoming offer pushes. `onReceived` fires for pushes arriving
+ * while the app is open (refresh the offer list); `onOpened` fires when the
+ * driver taps a push (deep-open the offer). Returns a cleanup function.
+ */
+export async function listenForOfferPushes(handlers: {
+  onReceived?: () => void;
+  onOpened?: (data: OfferPushData) => void;
+}): Promise<() => void> {
+  const mod = await loadModule();
+  if (!mod) return () => undefined;
+  try {
+    mod.setNotificationHandler?.({
+      handleNotification: async () => ({
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+    const subs: Array<{ remove: () => void }> = [];
+    if (mod.addNotificationReceivedListener && handlers.onReceived) {
+      subs.push(mod.addNotificationReceivedListener(() => handlers.onReceived?.()));
+    }
+    if (mod.addNotificationResponseReceivedListener && handlers.onOpened) {
+      subs.push(
+        mod.addNotificationResponseReceivedListener((event) => {
+          const data = (event.notification?.request?.content?.data ?? {}) as OfferPushData;
+          handlers.onOpened?.(data);
+        }),
+      );
+    }
+    return () => subs.forEach((s) => s.remove());
+  } catch {
+    return () => undefined;
   }
 }
 

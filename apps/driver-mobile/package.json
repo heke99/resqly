@@ -12,6 +12,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.2.0",
     "@resqly/types": "workspace:*",
     "@resqly/ui": "workspace:*",
     "@resqly/utils": "workspace:*",
@@ -20,6 +21,7 @@
     "expo": "^56.0.12",
     "expo-location": "^56.0.0",
     "expo-status-bar": "^56.0.0",
+    "expo-task-manager": "^14.0.8",
     "react": "19.0.0",
     "react-native": "0.86.0",
     "expo-notifications": "^0.32.12"
