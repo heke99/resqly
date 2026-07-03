@@ -6,19 +6,19 @@ export const dynamic = "force-dynamic";
 type AuditRow = Record<string, unknown>;
 
 const columns: Column<AuditRow>[] = [
-  { key: "created_at", header: "Time", render: (r) => String(r.created_at ?? "") },
-  { key: "action", header: "Action", render: (r) => String(r.action ?? "") },
-  { key: "entity_type", header: "Entity", render: (r) => String(r.entity_type ?? "") },
-  { key: "entity_id", header: "Entity ID", render: (r) => String(r.entity_id ?? "") },
-  { key: "fields", header: "Fields", render: (r) => (Array.isArray(r.fields) ? r.fields.join(", ") : "") },
+  { key: "created_at", header: "Tid", render: (r) => String(r.created_at ?? "") },
+  { key: "action", header: "Åtgärd", render: (r) => String(r.action ?? "") },
+  { key: "entity_type", header: "Objekt", render: (r) => String(r.entity_type ?? "") },
+  { key: "entity_id", header: "Objekt-id", render: (r) => String(r.entity_id ?? "") },
+  { key: "fields", header: "Fält", render: (r) => (Array.isArray(r.fields) ? r.fields.join(", ") : "") },
 ];
 
 export default async function AuditPage() {
   const logs = await listAuditLogs();
   return (
     <div>
-      <PageHeader title="Audit log" subtitle="Platform-wide audit trail" />
-      <DataTable columns={columns} rows={logs} empty="No audit entries yet" />
+      <PageHeader title="Händelselogg" subtitle="Spårbara händelser i hela plattformen" />
+      <DataTable columns={columns} rows={logs} empty="Inga händelser ännu" />
     </div>
   );
 }
