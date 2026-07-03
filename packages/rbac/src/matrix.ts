@@ -2,8 +2,8 @@ import type { PermissionKey, RoleKey, TenantType } from "@resqly/types";
 
 /**
  * Role -> permission matrix. This MUST stay in sync with the database seed in
- * migration 0002_role_permissions.sql (the DB copy backs RLS `has_permission`,
- * this copy backs application-layer checks).
+ * migrations 0002_role_permissions.sql + 0020_production_hardening.sql (the DB
+ * copy backs RLS `has_permission`, this copy backs application-layer checks).
  */
 export const ROLE_PERMISSIONS: Record<RoleKey, PermissionKey[]> = {
   platform_superadmin: [
@@ -26,6 +26,7 @@ export const ROLE_PERMISSIONS: Record<RoleKey, PermissionKey[]> = {
     "api_keys.manage",
     "webhooks.manage",
     "audit_logs.read",
+    "agreements.manage",
   ],
   insurance_owner_admin: [
     "incidents.read",
@@ -43,6 +44,7 @@ export const ROLE_PERMISSIONS: Record<RoleKey, PermissionKey[]> = {
     "api_keys.manage",
     "webhooks.manage",
     "audit_logs.read",
+    "agreements.manage",
   ],
   insurance_claims_handler: [
     "incidents.read",
@@ -75,6 +77,7 @@ export const ROLE_PERMISSIONS: Record<RoleKey, PermissionKey[]> = {
     "billing.manage",
     "white_label.manage",
     "audit_logs.read",
+    "agreements.manage",
   ],
   tow_dispatcher: ["tow_jobs.read", "tow_jobs.dispatch", "tow_jobs.accept", "drivers.manage"],
   tow_driver: ["tow_jobs.read", "tow_jobs.accept", "tow_jobs.complete"],
@@ -90,29 +93,29 @@ export interface RoleMeta {
 }
 
 export const ROLE_META: RoleMeta[] = [
-  { key: "platform_superadmin", label: "Platform Superadmin", tenantType: "platform" },
-  { key: "insurance_owner_admin", label: "Owner / Admin", tenantType: "insurance_company" },
-  { key: "insurance_claims_handler", label: "Claims Handler", tenantType: "insurance_company" },
+  { key: "platform_superadmin", label: "Plattformsansvarig", tenantType: "platform" },
+  { key: "insurance_owner_admin", label: "Ägare / Administratör", tenantType: "insurance_company" },
+  { key: "insurance_claims_handler", label: "Skadehandläggare", tenantType: "insurance_company" },
   {
     key: "insurance_roadside_handler",
-    label: "Resqly Handler",
+    label: "Assistanshandläggare",
     tenantType: "insurance_company",
   },
-  { key: "insurance_fraud_reviewer", label: "Fraud / Risk Reviewer", tenantType: "insurance_company" },
-  { key: "insurance_finance", label: "Finance", tenantType: "insurance_company" },
-  { key: "insurance_support", label: "Support", tenantType: "insurance_company" },
+  { key: "insurance_fraud_reviewer", label: "Riskgranskare", tenantType: "insurance_company" },
+  { key: "insurance_finance", label: "Ekonomi", tenantType: "insurance_company" },
+  { key: "insurance_support", label: "Kundsupport", tenantType: "insurance_company" },
   {
     key: "insurance_integration_manager",
-    label: "API / Integration Manager",
+    label: "Integrationsansvarig",
     tenantType: "insurance_company",
   },
-  { key: "insurance_viewer", label: "Read-only Viewer", tenantType: "insurance_company" },
-  { key: "tow_owner_admin", label: "Owner / Admin", tenantType: "tow_company" },
-  { key: "tow_dispatcher", label: "Dispatcher", tenantType: "tow_company" },
-  { key: "tow_driver", label: "Towing Driver", tenantType: "tow_company" },
-  { key: "tow_vehicle_manager", label: "Vehicle Manager", tenantType: "tow_company" },
-  { key: "tow_finance", label: "Finance", tenantType: "tow_company" },
-  { key: "tow_viewer", label: "Read-only Viewer", tenantType: "tow_company" },
+  { key: "insurance_viewer", label: "Läsbehörighet", tenantType: "insurance_company" },
+  { key: "tow_owner_admin", label: "Ägare / Administratör", tenantType: "tow_company" },
+  { key: "tow_dispatcher", label: "Trafikledare", tenantType: "tow_company" },
+  { key: "tow_driver", label: "Bärgare / Förare", tenantType: "tow_company" },
+  { key: "tow_vehicle_manager", label: "Fordonsansvarig", tenantType: "tow_company" },
+  { key: "tow_finance", label: "Ekonomi", tenantType: "tow_company" },
+  { key: "tow_viewer", label: "Läsbehörighet", tenantType: "tow_company" },
 ];
 
 export const ALL_PERMISSIONS: PermissionKey[] = ROLE_PERMISSIONS.platform_superadmin;

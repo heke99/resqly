@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 type Row = Record<string, unknown>;
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAYS = ["Söndag", "Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag"];
 
 function minutesToTime(m: unknown): string {
   const n = Number(m);
@@ -30,28 +30,35 @@ export default async function TillgänglighetPage({
   const [windows, drivers] = await Promise.all([listAvailabilityWindows(tenant.id), listDrivers(tenant.id)]);
   const online = drivers.filter((d) => d.is_online);
 
+  const DUTY_LABELS: Record<string, string> = {
+    off_duty: "Ej i tjänst",
+    on_duty: "I tjänst",
+    on_call: "Jour",
+    busy: "Upptagen",
+  };
+
   const windowColumns: Column<Row>[] = [
-    { key: "day", header: "Day", render: (r) => WEEKDAYS[Number(r.weekday)] ?? String(r.weekday) },
-    { key: "start", header: "Start", render: (r) => minutesToTime(r.start_minute) },
-    { key: "end", header: "End", render: (r) => minutesToTime(r.end_minute) },
-    { key: "oncall", header: "On call", render: (r) => (r.on_call ? "Yes" : "No") },
+    { key: "day", header: "Dag", render: (r) => WEEKDAYS[Number(r.weekday)] ?? String(r.weekday) },
+    { key: "start", header: "Öppnar", render: (r) => minutesToTime(r.start_minute) },
+    { key: "end", header: "Stänger", render: (r) => minutesToTime(r.end_minute) },
+    { key: "oncall", header: "Jour", render: (r) => (r.on_call ? "Ja" : "Nej") },
   ];
   const driverColumns: Column<Row>[] = [
-    { key: "name", header: "Driver", render: (r) => String(r.full_name ?? "") },
-    { key: "online", header: "Online", render: (r) => <StatusChip status={r.is_online ? "active" : "off_duty"} /> },
-    { key: "duty", header: "Duty", render: (r) => String(r.duty_status ?? "") },
-    { key: "seen", header: "Last seen", render: (r) => String(r.last_seen_at ?? "—").slice(0, 16).replace("T", " ") },
+    { key: "name", header: "Förare", render: (r) => String(r.full_name ?? "") },
+    { key: "online", header: "Status", render: (r) => <StatusChip status={r.is_online ? "active" : "off_duty"} /> },
+    { key: "duty", header: "Tjänst", render: (r) => DUTY_LABELS[String(r.duty_status ?? "")] ?? String(r.duty_status ?? "") },
+    { key: "seen", header: "Senast sedd", render: (r) => String(r.last_seen_at ?? "—").slice(0, 16).replace("T", " ") },
   ];
 
   return (
     <div>
       <PageHeader title="Tillgänglighet" subtitle="Öppettider och aktuell förartillgänglighet" />
       <Card style={{ marginBottom: 24 }}>
-        <strong>{online.length}</strong> of {drivers.length} drivers are online right now.
+        <strong>{online.length}</strong> av {drivers.length} förare är i tjänst just nu.
       </Card>
-      <h3>Operating windows</h3>
+      <h3>Öppettider</h3>
       <DataTable columns={windowColumns} rows={windows} empty="Inga tillgänglighetstider konfigurerade" />
-      <h3 style={{ marginTop: 24 }}>Driver availability</h3>
+      <h3 style={{ marginTop: 24 }}>Förartillgänglighet</h3>
       <DataTable columns={driverColumns} rows={drivers} empty="Inga förare ännu" />
     </div>
   );

@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getServiceClient } from "@resqly/web-kit/server";
 import type { AppSupabaseClient } from "@resqly/database";
-import { PORTAL_AUTH_COOKIE } from "./constants";
+import { PORTAL_AUTH_COOKIE, PORTAL_TENANT_COOKIE } from "./constants";
 
 type AuthUser = {
   id: string;
@@ -68,36 +68,53 @@ export async function getPortalTenants(): Promise<{ db: AppSupabaseClient; userI
 
 export async function requirePortalTenant(tenantId?: string | null): Promise<{ db: AppSupabaseClient; userId: string; tenant: PortalTenant }> {
   const { db, userId, tenants } = await getPortalTenants();
-  const tenant = tenantId ? tenants.find((t) => t.id === tenantId) : tenants[0];
+  // Priority: explicit ?tenant= param, then the switcher cookie, then the
+  // first membership. The user must always belong to the resolved tenant.
+  const store = await cookies();
+  const cookieTenant = store.get(PORTAL_TENANT_COOKIE)?.value ?? null;
+  const tenant =
+    (tenantId ? tenants.find((t) => t.id === tenantId) : undefined) ??
+    (cookieTenant ? tenants.find((t) => t.id === cookieTenant) : undefined) ??
+    tenants[0];
   if (!tenant) redirect("/login?error=no_tenant_access");
   return { db, userId, tenant };
 }
 
 /**
- * Best-effort active tenant for layout/navigation. Never redirects (so it is
- * safe on /login and /set-password). Returns null when unauthenticated.
+ * Best-effort active tenant + memberships for layout/navigation. Never
+ * redirects (safe on /login and /set-password). Returns nulls when
+ * unauthenticated.
  */
 export async function getOptionalActiveTenant(): Promise<PortalTenant | null> {
+  const { tenant } = await getOptionalTenantContext();
+  return tenant;
+}
+
+export async function getOptionalTenantContext(): Promise<{ tenant: PortalTenant | null; tenants: PortalTenant[] }> {
   try {
     const accessToken = await token();
-    if (!accessToken) return null;
+    if (!accessToken) return { tenant: null, tenants: [] };
     const db = getServiceClient();
-    if (!db) return null;
+    if (!db) return { tenant: null, tenants: [] };
     const { data, error } = await db.auth.getUser(accessToken);
-    if (error || !data.user) return null;
+    if (error || !data.user) return { tenant: null, tenants: [] };
     const { data: memberships } = await db
       .from("tenant_users" as never)
       .select("tenant_id")
       .eq("user_id", data.user.id)
       .eq("status", "active");
     const ids = ((memberships as Array<{ tenant_id: string }> | null) ?? []).map((m) => m.tenant_id);
-    if (ids.length === 0) return null;
+    if (ids.length === 0) return { tenant: null, tenants: [] };
     const { data: tenants } = await db
       .from("tenants" as never)
       .select("id, name, slug, type, case_number_prefix")
       .in("id", ids);
-    return ((tenants as PortalTenant[] | null) ?? [])[0] ?? null;
+    const list = (tenants as PortalTenant[] | null) ?? [];
+    const store = await cookies();
+    const cookieTenant = store.get(PORTAL_TENANT_COOKIE)?.value ?? null;
+    const active = (cookieTenant ? list.find((t) => t.id === cookieTenant) : undefined) ?? list[0] ?? null;
+    return { tenant: active, tenants: list };
   } catch {
-    return null;
+    return { tenant: null, tenants: [] };
   }
 }

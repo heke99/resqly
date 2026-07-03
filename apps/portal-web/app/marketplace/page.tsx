@@ -25,38 +25,37 @@ export default async function MarketplacePage({
   return (
     <div>
       <PageHeader
-        title="Direct marketplace"
-        subtitle="Styr om ni tar emot fri/privat bärgning utan försäkringsavtal"
+        title="Fri bärgning"
+        subtitle="Styr om ni tar emot privat/direkt bärgning utan försäkringsavtal"
       />
       <Card style={{ maxWidth: 560 }}>
         <form action={saveMarketplaceSettings} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <input type="hidden" name="tenant_id" value={tenant.id} />
           <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <input type="checkbox" name="accepts_direct_orders" defaultChecked={acceptsDirect} />
-            Accept direct marketplace orders
+            Ta emot direkta uppdrag
           </label>
           <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <input type="checkbox" name="private_customer_enabled" defaultChecked={privateEnabled} />
-            Enable private customer towing
+            Ta emot privatkunder
           </label>
           <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <input type="checkbox" name="active" defaultChecked={active} />
-            Marketplace participation active
+            Fri bärgning aktiv
           </label>
-          <Field label="Minimum price (SEK)">
+          <Field label="Lägsta pris (SEK)">
             <input name="min_price_sek" type="number" min={0} step="1" defaultValue={minPrice} />
           </Field>
           <div>
-            <Button type="submit">Save settings</Button>
+            <Button type="submit">Spara inställningar</Button>
           </div>
         </form>
       </Card>
       <Card style={{ marginTop: 24, maxWidth: 560 }}>
-        <strong>How this works</strong>
+        <strong>Så fungerar det</strong>
         <p style={{ opacity: 0.72, marginBottom: 0 }}>
-          When a customer requests private towing (without insurance), only tow companies with direct marketplace
-          orders enabled are eligible to receive the dispatch offer. Insurance jobs are routed via your agreements,
-          not this setting.
+          När en kund begär privat bärgning (utan försäkring) skickas erbjudandet bara till bärgningsbolag som har
+          fri bärgning aktiverad här. Försäkringsuppdrag styrs alltid av era avtal — aldrig av den här inställningen.
         </p>
       </Card>
     </div>

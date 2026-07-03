@@ -10,8 +10,8 @@ type Row = Record<string, unknown>;
 
 const columns: Column<Row>[] = [
   { key: "reg", header: "Reg #", render: (r) => String(r.registration_number ?? "") },
-  { key: "type", header: "Type", render: (r) => String(r.vehicle_type ?? "").replaceAll("_", " ") },
-  { key: "weight", header: "Max kg", render: (r) => String(r.max_weight_kg ?? "-") },
+  { key: "type", header: "Typ", render: (r) => String(r.vehicle_type ?? "").replaceAll("_", " ") },
+  { key: "weight", header: "Maxvikt (kg)", render: (r) => String(r.max_weight_kg ?? "-") },
   { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "active")} /> },
 ];
 

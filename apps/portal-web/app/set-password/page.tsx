@@ -14,7 +14,7 @@ export default function SetPasswordPage() {
   const supabase = createBrowserSupabase();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [message, setMessage] = useState("Checking invite link...");
+  const [message, setMessage] = useState("Kontrollerar inbjudningslänken…");
   const [hasSession, setHasSession] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -28,9 +28,9 @@ export default function SetPasswordPage() {
       setHasSession(Boolean(session));
       if (session?.access_token) {
         setSessionCookie(session.access_token, session.expires_in);
-        setMessage("Choose a password for your Resqly portal account.");
+        setMessage("Välj ett lösenord för ditt portalkonto.");
       } else {
-        setMessage("The invite link is missing or expired. Ask your Resqly admin to resend the invite, or request a password link from the login page.");
+        setMessage("Inbjudningslänken saknas eller har gått ut. Be din administratör skicka en ny inbjudan, eller begär en lösenordslänk från inloggningssidan.");
       }
     }
     load();
@@ -38,7 +38,7 @@ export default function SetPasswordPage() {
       if (session?.access_token) {
         setSessionCookie(session.access_token, session.expires_in);
         setHasSession(true);
-        setMessage("Choose a password for your Resqly portal account.");
+        setMessage("Välj ett lösenord för ditt portalkonto.");
       }
     }) ?? { data: null };
     return () => {
@@ -47,31 +47,31 @@ export default function SetPasswordPage() {
     };
   }, [supabase]);
 
-  if (!supabase) return <p>Set password is unavailable until Supabase is configured.</p>;
+  if (!supabase) return <p>Sidan är inte tillgänglig just nu. Försök igen om en stund.</p>;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setMessage("");
     if (password.length < 8) {
-      setMessage("Password must be at least 8 characters.");
+      setMessage("Lösenordet måste vara minst 8 tecken.");
       return;
     }
     if (password !== confirmPassword) {
-      setMessage("Passwords do not match.");
+      setMessage("Lösenorden matchar inte.");
       return;
     }
     setIsSaving(true);
     const { data, error } = await supabase!.auth.updateUser({ password });
     setIsSaving(false);
     if (error) {
-      setMessage(error.message);
+      setMessage("Lösenordet kunde inte sparas. Försök igen.");
       return;
     }
     const { data: sessionData } = await supabase!.auth.getSession();
     if (sessionData.session?.access_token) {
       setSessionCookie(sessionData.session.access_token, sessionData.session.expires_in);
     }
-    setMessage(`Password saved for ${data.user?.email ?? "your account"}. Redirecting...`);
+    setMessage(`Lösenordet är sparat för ${data.user?.email ?? "ditt konto"}. Du skickas vidare…`);
     window.setTimeout(() => {
       window.location.href = "/";
     }, 700);
@@ -79,12 +79,12 @@ export default function SetPasswordPage() {
 
   return (
     <main style={{ maxWidth: 460 }}>
-      <h1 style={{ fontSize: 24, marginBottom: 8 }}>Set portal password</h1>
+      <h1 style={{ fontSize: 24, marginBottom: 8 }}>Välj lösenord</h1>
       <p style={{ opacity: 0.7 }}>
-        Use this page after opening an invite or password reset link from Resqly.
+        Använd den här sidan efter att du öppnat en inbjudan eller lösenordslänk från Resqly.
       </p>
       <form onSubmit={submit}>
-        <label htmlFor="password">New password</label>
+        <label htmlFor="password">Nytt lösenord</label>
         <input
           id="password"
           type="password"
@@ -94,7 +94,7 @@ export default function SetPasswordPage() {
           disabled={!hasSession || isSaving}
           required
         />
-        <label htmlFor="confirmPassword">Confirm password</label>
+        <label htmlFor="confirmPassword">Bekräfta lösenordet</label>
         <input
           id="confirmPassword"
           type="password"
@@ -105,11 +105,11 @@ export default function SetPasswordPage() {
           required
         />
         <button type="submit" disabled={!hasSession || isSaving} style={{ marginTop: 16, padding: "10px 16px" }}>
-          {isSaving ? "Saving..." : "Save password"}
+          {isSaving ? "Sparar…" : "Spara lösenord"}
         </button>
       </form>
       {message ? <p style={{ marginTop: 16 }}>{message}</p> : null}
-      <p style={{ marginTop: 16 }}><a href="/login">Back to login</a></p>
+      <p style={{ marginTop: 16 }}><a href="/login">Tillbaka till inloggningen</a></p>
     </main>
   );
 }

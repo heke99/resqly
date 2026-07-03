@@ -45,7 +45,7 @@ export default async function SlaPage({
         <StatCard label="SLA risk (open)" value={num(stats?.sla_risk)} />
         <StatCard label="Active towing" value={num(stats?.active_towing)} />
         <StatCard label="Avg ETA" value={num(stats?.avg_eta_seconds) ? `${Math.round(num(stats?.avg_eta_seconds) / 60)} min` : "—"} />
-        <StatCard label="Completed cases" value={num(stats?.completed_cases)} />
+        <StatCard label="Avslutade ärenden" value={num(stats?.completed_cases)} />
       </KpiGrid>
       <h3 style={{ marginTop: 24 }}>Uppdrag med SLA-risk</h3>
       <DataTable columns={columns} rows={atRisk} empty="Inga uppdrag bryter mot SLA just nu" />

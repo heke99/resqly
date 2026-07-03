@@ -5,7 +5,7 @@ export interface NavItem {
 
 const SHARED: NavItem[] = [
   { href: "/settings", label: "Inställningar" },
-  { href: "/integrations", label: "API & webhooks" },
+  { href: "/integrations", label: "Integrationer" },
   { href: "/roles", label: "Användare & roller" },
 ];
 
@@ -17,8 +17,8 @@ const INSURANCE_NAV: NavItem[] = [
   { href: "/sla", label: "SLA" },
   { href: "/partners", label: "Bärgarpartners" },
   { href: "/legal", label: "Juridik" },
-  { href: "/notifications", label: "Notiser & fallback" },
-  { href: "/readiness", label: "Produktionsklar" },
+  { href: "/notifications", label: "Notiser & reservkanaler" },
+  { href: "/readiness", label: "Redo för drift" },
   { href: "/statistics", label: "Statistik" },
   ...SHARED,
 ];
@@ -34,8 +34,9 @@ const TOW_NAV: NavItem[] = [
   { href: "/agreements", label: "Försäkringsavtal" },
   { href: "/marketplace", label: "Fri bärgning" },
   { href: "/statistics", label: "Statistik" },
-  { href: "/completion-reports", label: "Utföranderapporter" },
+  { href: "/completion-reports", label: "Slutrapporter" },
   { href: "/invoices", label: "Fakturaunderlag" },
+  { href: "/readiness", label: "Redo för drift" },
   ...SHARED,
 ];
 

@@ -56,6 +56,7 @@ export default async function CasesPage({
       <PageHeader
         title="Ärenden"
         subtitle="Försäkringsbolagets operativa ärendekö: BankID, skadeuppgifter, bärgning, ETA och nästa åtgärd."
+        actions={<a href="/api/export/cases">Exportera (CSV)</a>}
       />
       <Card style={{ marginBottom: 16 }}>
         <form method="get" style={{ display: "flex", gap: 8, alignItems: "end" }}>

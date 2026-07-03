@@ -22,17 +22,21 @@ export default async function InvoicesPage({
   const ready = invoices.filter((i) => String(i.status) === "ready");
 
   const columns: Column<Row>[] = [
-    { key: "job", header: "Job", render: (r) => String(r.tow_job_id ?? "").slice(0, 8) },
-    { key: "payer", header: "Payer", render: (r) => String(r.payer_type ?? "").replaceAll("_", " ") },
+    { key: "job", header: "Uppdrag", render: (r) => <a href={`/jobs/${String(r.tow_job_id)}`}>{String(r.tow_job_id ?? "").slice(0, 8).toUpperCase()}</a> },
+    { key: "payer", header: "Betalning", render: (r) => (String(r.payer_type) === "customer_private" ? "Privat" : "Försäkring") },
     { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "draft")} /> },
-    { key: "subtotal", header: "Subtotal", render: (r) => formatMoneyMinor(r.subtotal_minor, String(r.currency ?? "SEK")) },
+    { key: "subtotal", header: "Netto", render: (r) => formatMoneyMinor(r.subtotal_minor, String(r.currency ?? "SEK")) },
     { key: "vat", header: "VAT", render: (r) => formatMoneyMinor(r.vat_minor, String(r.currency ?? "SEK")) },
-    { key: "total", header: "Total", render: (r) => formatMoneyMinor(r.total_minor, String(r.currency ?? "SEK")) },
+    { key: "total", header: "Totalt", render: (r) => formatMoneyMinor(r.total_minor, String(r.currency ?? "SEK")) },
   ];
 
   return (
     <div>
-      <PageHeader title="Fakturaunderlag" subtitle="Fakturaunderlag från slutförda uppdrag" />
+      <PageHeader
+        title="Fakturaunderlag"
+        subtitle="Fakturaunderlag från slutförda uppdrag"
+        actions={<a href="/api/export/invoices">Exportera (CSV)</a>}
+      />
       <KpiGrid>
         <StatCard label="Invoices" value={invoices.length} />
         <StatCard label="Ready to bill" value={ready.length} />

@@ -2,12 +2,24 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createHash, randomBytes } from "node:crypto";
 import { newApiKey, sha256Hex } from "@resqly/utils";
 import { requirePortalTenant } from "./auth";
+import { PORTAL_TENANT_COOKIE } from "./constants";
 
 async function portalDb(tenantId?: string | null) {
   return requirePortalTenant(tenantId);
+}
+
+/** Switch the active organization for users who belong to several. */
+export async function switchTenant(formData: FormData): Promise<void> {
+  const tenantId = String(formData.get("tenant_id") ?? "");
+  // Only allow switching to organizations the user actually belongs to.
+  await requirePortalTenant(tenantId);
+  const store = await cookies();
+  store.set(PORTAL_TENANT_COOKIE, tenantId, { httpOnly: true, sameSite: "lax", path: "/" });
+  redirect("/");
 }
 
 function assertTenant(expected: string, actual: string) {
@@ -82,6 +94,19 @@ export async function updateSettings(formData: FormData): Promise<void> {
   revalidatePath("/settings");
 }
 
+interface AdminAuthUser {
+  id: string;
+  email?: string | null;
+}
+interface AdminAuthError {
+  message?: string;
+}
+
+/**
+ * Create a driver profile. When an email is given and "send invite" is
+ * checked, the driver also gets a login invitation so they can sign in to
+ * the driver app (auth account + tenant membership + linked driver row).
+ */
 export async function createDriver(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
   const { db: client, tenant } = await portalDb(tenantId);
@@ -92,13 +117,56 @@ export async function createDriver(formData: FormData): Promise<void> {
     .eq("tenant_id", tenantId)
     .maybeSingle();
   const companyId = (company as { id?: string } | null)?.id;
-  if (!companyId) throw new Error("This tenant is not a tow company.");
+  if (!companyId) throw new Error("Organisationen är inte ett bärgningsbolag.");
+
+  const fullName = String(formData.get("full_name") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase() || null;
+  const sendInvite = formData.get("send_invite") === "on";
+  if (!fullName) throw new Error("Ange förarens namn.");
+
+  let userId: string | null = null;
+  if (email && sendInvite) {
+    const admin = client.auth.admin as unknown as {
+      inviteUserByEmail(
+        email: string,
+        options?: { redirectTo?: string; data?: Record<string, unknown> },
+      ): Promise<{ data: { user: AdminAuthUser | null }; error: AdminAuthError | null }>;
+      listUsers(options?: { page?: number; perPage?: number }): Promise<{ data: { users: AdminAuthUser[] }; error: AdminAuthError | null }>;
+    };
+    const { data, error } = await admin.inviteUserByEmail(email, {
+      data: { full_name: fullName, role: "tow_driver" },
+    });
+    if (!error && data.user?.id) {
+      userId = data.user.id;
+    } else {
+      // Already-registered users keep their account; just link the profile.
+      const { data: listed } = await admin.listUsers({ page: 1, perPage: 1000 });
+      userId = listed.users.find((u) => u.email?.toLowerCase() === email)?.id ?? null;
+    }
+    if (userId) {
+      await client.from("user_profiles" as never).upsert({ id: userId, email, full_name: fullName } as never);
+      await client.from("tenant_users" as never).upsert(
+        { tenant_id: tenantId, user_id: userId, status: "active" } as never,
+        { onConflict: "tenant_id,user_id" } as never,
+      );
+      await client.from("tow_company_users" as never).upsert(
+        { tenant_id: tenantId, tow_company_id: companyId, user_id: userId } as never,
+        { onConflict: "tow_company_id,user_id" } as never,
+      );
+      await client.from("user_roles" as never).upsert(
+        { tenant_id: tenantId, user_id: userId, role_key: "tow_driver" } as never,
+        { onConflict: "tenant_id,user_id,role_key" } as never,
+      );
+    }
+  }
+
   await client.from("tow_drivers" as never).insert({
     tenant_id: tenantId,
     tow_company_id: companyId,
-    full_name: String(formData.get("full_name") ?? ""),
+    user_id: userId,
+    full_name: fullName,
     phone: String(formData.get("phone") ?? "") || null,
-    email: String(formData.get("email") ?? "") || null,
+    email,
     duty_status: "off_duty",
   } as never);
   revalidatePath("/drivers");

@@ -1,4 +1,5 @@
 import { Card, DataTable, Field, Filters, PageHeader, StatusChip, type Column } from "@resqly/web-kit";
+import { towStatusLabel } from "@resqly/ui";
 import { getActiveTenant } from "../lib/tenant";
 import { listCompanyJobs, listInsuranceTowJobs } from "../lib/data";
 import { NoTenant } from "../lib/ui";
@@ -7,12 +8,17 @@ export const dynamic = "force-dynamic";
 
 type Row = Record<string, unknown>;
 
+const PRIORITY_LABELS: Record<string, string> = { normal: "Normal", high: "Hög", urgent: "Akut" };
+
 const columns: Column<Row>[] = [
-  { key: "id", header: "Uppdrag", render: (r) => String(r.id).slice(0, 8) },
+  {
+    key: "id",
+    header: "Uppdrag",
+    render: (r) => <a href={`/jobs/${String(r.id)}`}>{String(r.id).slice(0, 8).toUpperCase()}</a>,
+  },
   { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "")} /> },
-  { key: "priority", header: "Prioritet", render: (r) => String(r.priority ?? "") },
-  { key: "payer", header: "Betalare", render: (r) => String(r.payer_type ?? "").replaceAll("_", " ") },
-  { key: "driver", header: "Förare", render: (r) => String(r.driver_id ?? "—").slice(0, 8) },
+  { key: "priority", header: "Prioritet", render: (r) => PRIORITY_LABELS[String(r.priority ?? "normal")] ?? String(r.priority ?? "") },
+  { key: "payer", header: "Betalning", render: (r) => (String(r.payer_type) === "customer_private" ? "Privat" : "Försäkring") },
   { key: "created", header: "Skapad", render: (r) => String(r.created_at ?? "").slice(0, 16).replace("T", " ") },
 ];
 
@@ -45,7 +51,7 @@ export default async function JobsPage({
             {["offered", "accepted", "driver_en_route", "driver_arrived", "transporting", "completed", "invoiced", "manual_review", "cancelled"].map(
               (s) => (
                 <option key={s} value={s}>
-                  {s.replaceAll("_", " ")}
+                  {towStatusLabel(s as never)}
                 </option>
               ),
             )}
@@ -60,9 +66,9 @@ export default async function JobsPage({
         </Field>
       </Filters>
       <Card style={{ marginBottom: 16 }}>
-        <strong>Livekarta</strong>
+        <strong>Export</strong>
         <p style={{ opacity: 0.7, margin: "8px 0 0" }}>
-          Här visas en Google Maps-karta med aktiva uppdrag och förarpositioner när webbkartan är konfigurerad. ETA-snapshots från servern används i kund- och portalvyerna.
+          <a href="/api/export/jobs">Ladda ner uppdragslistan (CSV)</a>
         </p>
       </Card>
       <DataTable columns={columns} rows={jobs} empty="Inga bärgningsuppdrag matchar filtren" />

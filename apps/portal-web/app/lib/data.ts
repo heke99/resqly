@@ -304,6 +304,79 @@ export async function getInsurerProductionReadiness(tenantId: string): Promise<R
   return (data as Row | null) ?? null;
 }
 
+export async function getTowCompanyProductionReadiness(tenantId: string): Promise<Row | null> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("tow_company_production_readiness" as never)
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  return (data as Row | null) ?? null;
+}
+
+/**
+ * Load a single tow job scoped to the active organization: insurers see jobs
+ * on their own tenant, tow companies see jobs assigned to their company.
+ */
+export async function getPortalTowJob(tenant: { id: string; type: string }, jobId: string): Promise<Row | null> {
+  const { db } = await requirePortalTenant(tenant.id);
+  if (tenant.type === "tow_company") {
+    const companyId = await getTowCompanyId(tenant.id);
+    if (!companyId) return null;
+    const { data } = await db
+      .from("tow_jobs" as never)
+      .select("*")
+      .eq("id", jobId)
+      .eq("tow_company_id", companyId)
+      .maybeSingle();
+    return (data as Row | null) ?? null;
+  }
+  const { data } = await db
+    .from("tow_jobs" as never)
+    .select("*")
+    .eq("id", jobId)
+    .eq("tenant_id", tenant.id)
+    .maybeSingle();
+  return (data as Row | null) ?? null;
+}
+
+export async function listTowJobEvents(tenantId: string, jobId: string): Promise<Row[]> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("tow_job_status_events" as never)
+    .select("*")
+    .eq("tow_job_id", jobId)
+    .order("created_at", { ascending: true });
+  return (data as Row[] | null) ?? [];
+}
+
+export async function getTowJobCompletionReport(tenantId: string, jobId: string): Promise<Row | null> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("tow_job_completion_reports" as never)
+    .select("*")
+    .eq("tow_job_id", jobId)
+    .maybeSingle();
+  return (data as Row | null) ?? null;
+}
+
+export async function getTowJobInvoice(tenantId: string, jobId: string): Promise<Row | null> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db
+    .from("tow_job_invoices" as never)
+    .select("*")
+    .eq("tow_job_id", jobId)
+    .maybeSingle();
+  return (data as Row | null) ?? null;
+}
+
+export async function getDriverName(tenantId: string, driverId: string | null): Promise<string | null> {
+  if (!driverId) return null;
+  const { db } = await requirePortalTenant(tenantId);
+  const { data } = await db.from("tow_drivers" as never).select("full_name").eq("id", driverId).maybeSingle();
+  return (data as { full_name?: string } | null)?.full_name ?? null;
+}
+
 export async function listOperationalNotifications(tenantId: string): Promise<Row[]> {
   const { db } = await requirePortalTenant(tenantId);
   const { data } = await db

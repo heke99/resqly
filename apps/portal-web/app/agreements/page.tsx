@@ -25,11 +25,11 @@ export default async function AgreementsPage({
   const insurerName = (id: unknown) => insurers.find((i) => i.id === String(id))?.name ?? String(id).slice(0, 8);
 
   const columns: Column<Row>[] = [
-    { key: "insurer", header: "Insurance company", render: (r) => insurerName(r.insurance_tenant_id) },
+    { key: "insurer", header: "Försäkringsbolag", render: (r) => insurerName(r.insurance_tenant_id) },
     { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "—")} /> },
-    { key: "priority", header: "Priority", render: (r) => String(r.priority ?? 100) },
+    { key: "priority", header: "Prioritet", render: (r) => String(r.priority ?? 100) },
     { key: "sla", header: "SLA (min)", render: (r) => String(r.sla_minutes ?? 45) },
-    { key: "pricing", header: "Pricing", render: (r) => String(r.pricing_model ?? "standard") },
+    { key: "pricing", header: "Prismodell", render: (r) => String(r.pricing_model ?? "standard") },
   ];
 
   return (
