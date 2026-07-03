@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireCustomer, jsonError } from "../_lib";
+import { requireCustomer, jsonError, replayIfIdempotent, storeIdempotentResponse } from "../_lib";
 
 const TOWING_TYPES = new Set(["towing", "roadside_assistance"]);
 
@@ -7,12 +7,18 @@ export async function POST(request: Request) {
   const session = await requireCustomer(request);
   if (session instanceof NextResponse) return session;
   const { db, user } = session;
+
+  // Replay protection: double clicks / mobile retries never create two cases.
+  const { key: idemKey, replay } = await replayIfIdempotent(db, user.id, "case.create", request);
+  if (replay) return replay;
+
   const body = await request.json().catch(() => ({}));
   const vehicleId = String(body.vehicle_id ?? "");
   const type = String(body.type ?? "towing");
   const subtype = String(body.subtype ?? "");
   const description = body.description ? String(body.description) : null;
   const coords = body.coords && typeof body.coords === "object" ? body.coords as { lat?: number; lng?: number } : null;
+  const manualAddress = typeof body.address === "string" && body.address.trim() ? body.address.trim().slice(0, 300) : null;
   if (!vehicleId) return jsonError(400, "Välj vilket fordon ärendet gäller.");
   if (!["towing", "roadside_assistance", "damage_claim"].includes(type)) return jsonError(400, "Ogiltig ärendetyp.");
 
@@ -90,9 +96,12 @@ export async function POST(request: Request) {
     p_tenant: tenantId,
     p_scope: "default",
   } as never);
-  if (rpcErr) return jsonError(400, rpcErr.message);
+  if (rpcErr) return jsonError(503, "Ärendet kunde inte skapas just nu. Försök igen om en stund.");
 
   const initialStatus = requiresBankid ? "awaiting_bankid" : "submitted";
+  const combinedDescription = manualAddress && !coords?.lat
+    ? [description, `Upphämtningsadress (angiven av kund): ${manualAddress}`].filter(Boolean).join("\n")
+    : description;
   const { data: incident, error } = await db
     .from("incidents" as never)
     .insert({
@@ -104,14 +113,14 @@ export async function POST(request: Request) {
       status: initialStatus,
       damage_type: type === "damage_claim" ? subtype : null,
       problem_type: TOWING_TYPES.has(type) ? subtype : null,
-      description,
+      description: combinedDescription,
       requires_bankid: requiresBankid,
       bankid_verified: false,
       case_number: caseNo as unknown as string,
     } as never)
     .select("id")
     .single();
-  if (error) return jsonError(400, error.message);
+  if (error) return jsonError(400, "Ärendet kunde inte skapas. Försök igen.");
   const incidentId = (incident as { id: string }).id;
 
   await db.from("incident_status_events" as never).insert({
@@ -128,7 +137,23 @@ export async function POST(request: Request) {
       kind: "pickup",
       lat: coords.lat,
       lng: coords.lng,
+      address: manualAddress,
     } as never);
+  } else if (manualAddress) {
+    // GPS denied/unavailable: geocode the manual address server-side when the
+    // map service is configured; otherwise the address stays on the case and
+    // the tow request is routed to manual help instead of failing.
+    const geocoded = await tryGeocode(manualAddress);
+    if (geocoded) {
+      await db.from("incident_locations" as never).insert({
+        incident_id: incidentId,
+        kind: "pickup",
+        lat: geocoded.lat,
+        lng: geocoded.lng,
+        address: manualAddress,
+        manually_adjusted: true,
+      } as never);
+    }
   }
 
   await db.from("audit_logs" as never).insert({
@@ -141,8 +166,27 @@ export async function POST(request: Request) {
     metadata: { mode },
   } as never);
 
-  return NextResponse.json(
-    { incident_id: incidentId, case_number: caseNo, status: initialStatus, requires_bankid: requiresBankid, mode },
-    { status: 201 },
-  );
+  const responseBody = { incident_id: incidentId, case_number: caseNo, status: initialStatus, requires_bankid: requiresBankid, mode };
+  await storeIdempotentResponse(db, user.id, "case.create", idemKey, incidentId, responseBody);
+  return NextResponse.json(responseBody, { status: 201 });
+}
+
+async function tryGeocode(address: string): Promise<{ lat: number; lng: number } | null> {
+  const key = process.env.GOOGLE_MAPS_SERVER_KEY;
+  if (!key || process.env.GOOGLE_MAPS_GEOCODING_ENABLED === "false") return null;
+  try {
+    const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+    url.searchParams.set("address", address);
+    url.searchParams.set("region", "se");
+    url.searchParams.set("key", key);
+    const res = await fetch(url.toString());
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      results?: Array<{ geometry?: { location?: { lat?: number; lng?: number } } }>;
+    };
+    const loc = json.results?.[0]?.geometry?.location;
+    return typeof loc?.lat === "number" && typeof loc?.lng === "number" ? { lat: loc.lat, lng: loc.lng } : null;
+  } catch {
+    return null;
+  }
 }

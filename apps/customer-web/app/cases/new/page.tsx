@@ -36,8 +36,15 @@ function NewCaseInner() {
   const [subtype, setSubtype] = useState(isDamage ? DAMAGE_TYPES[0]! : TOW_PROBLEMS[0]!);
   const [description, setDescription] = useState("");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [address, setAddress] = useState("");
+  const [gpsDenied, setGpsDenied] = useState(false);
   const [created, setCreated] = useState<{ id: string; caseNumber: string; requiresBankid: boolean; towStatus?: string } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // One key per form mount: double clicks and retries never create two cases.
+  const [idempotencyKey] = useState(() =>
+    typeof globalThis.crypto?.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+  );
 
   const load = useCallback(async () => {
     if (!supabase) return;
@@ -70,10 +77,20 @@ function NewCaseInner() {
   const selectedPolicy = vehicleId ? policyByVehicle.get(vehicleId) : null;
 
   function shareLocation() {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      setGpsDenied(true);
+      setStatus("Platsdelning stöds inte i den här webbläsaren. Ange adressen manuellt nedan.");
+      return;
+    }
     navigator.geolocation.getCurrentPosition(
-      (pos) => setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => setStatus("Kunde inte hämta din position. Du kan ändå skapa ärendet och lägga till plats senare."),
+      (pos) => {
+        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setGpsDenied(false);
+      },
+      () => {
+        setGpsDenied(true);
+        setStatus("Kunde inte hämta din position. Ange adressen manuellt nedan så hjälper vi dig ändå.");
+      },
     );
   }
 
@@ -85,6 +102,7 @@ function NewCaseInner() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setStatus(null);
     const accessToken = await token();
     if (!accessToken) { setStatus("not_authed"); return; }
@@ -94,31 +112,49 @@ function NewCaseInner() {
       setStatus("Koppla detta fordon till ett försäkringsbolag först, eller välj privat bärgning.");
       return;
     }
-    const res = await fetch("/api/customer/cases", {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ vehicle_id: vehicleId, type, subtype, description, coords, mode: effectiveMode }),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) { setStatus(json.error ?? "Kunde inte skapa ärendet."); return; }
-    setCreated({ id: json.incident_id, caseNumber: json.case_number, requiresBankid: Boolean(json.requires_bankid) });
+    setBusy(true);
+    try {
+      const res = await fetch("/api/customer/cases", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${accessToken}`,
+          "idempotency-key": idempotencyKey,
+        },
+        body: JSON.stringify({ vehicle_id: vehicleId, type, subtype, description, coords, address: address || null, mode: effectiveMode }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { setStatus(json.error ?? "Ärendet kunde inte skapas. Försök igen."); return; }
+      setCreated({ id: json.incident_id, caseNumber: json.case_number, requiresBankid: Boolean(json.requires_bankid) });
+    } catch {
+      setStatus("Något gick fel. Kontrollera din uppkoppling och försök igen.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function verifyWithBankid() {
-    if (!created) return;
+    if (!created || busy) return;
     const accessToken = await token();
     if (!accessToken) return;
-    const res = await fetch(`/api/customer/cases/${created.id}/bankid/sign`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) { setStatus(json.error ?? "BankID-verifieringen kunde inte startas."); return; }
-    if (json.bankid_verified || json.status === "complete") {
-      setStatus("BankID verifierad.");
-      setCreated({ ...created, requiresBankid: false });
-      return;
-    }
-    if (json.session_id) {
-      setStatus("BankID är startat. Slutför i BankID-appen.");
-      await pollBankid(json.session_id);
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/customer/cases/${created.id}/bankid/sign`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { setStatus(json.error ?? "BankID-verifieringen kunde inte startas. Försök igen."); return; }
+      if (json.bankid_verified || json.status === "complete") {
+        setStatus("BankID verifierad.");
+        setCreated({ ...created, requiresBankid: false });
+        return;
+      }
+      if (json.session_id) {
+        setStatus("BankID är startat. Slutför i BankID-appen.");
+        await pollBankid(json.session_id);
+      }
+    } catch {
+      setStatus("Något gick fel. Kontrollera din uppkoppling och försök igen.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -144,20 +180,31 @@ function NewCaseInner() {
   }
 
   async function requestTow() {
-    if (!created) return;
+    if (!created || busy) return;
     const accessToken = await token();
     if (!accessToken) return;
-    const res = await fetch(`/api/customer/cases/${created.id}/request-tow`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ priority: "normal" }),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) setStatus(json.error ?? "Kunde inte begära bärgning.");
-    else setCreated({ ...created, towStatus: towStatusLabel(json.status ?? "manual_review") });
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/customer/cases/${created.id}/request-tow`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${accessToken}`,
+          "idempotency-key": idempotencyKey,
+        },
+        body: JSON.stringify({ priority: "normal", address: address || null }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) setStatus(json.error ?? "Bärgningen kunde inte skickas. Försök igen.");
+      else setCreated({ ...created, towStatus: towStatusLabel(json.status ?? "manual_review") });
+    } catch {
+      setStatus("Något gick fel. Kontrollera din uppkoppling och försök igen.");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  if (!supabase) return <p>Tjänsten är inte konfigurerad ännu.</p>;
+  if (!supabase) return <p>Tjänsten är inte tillgänglig just nu. Försök igen om en stund.</p>;
   if (status === "not_authed") return <p>Du behöver <a href="/login">logga in</a> för att skapa ett ärende.</p>;
 
   if (created) {
@@ -170,17 +217,17 @@ function NewCaseInner() {
           {created.requiresBankid ? (
             <>
               <p>Detta ärende behöver BankID-verifieras innan det skickas vidare.</p>
-              <button className="bigbtn" onClick={verifyWithBankid}>Verifiera med BankID</button>
+              <button className="bigbtn" onClick={verifyWithBankid} disabled={busy}>{busy ? "Väntar på BankID…" : "Verifiera med BankID"}</button>
             </>
           ) : isDamage ? (
             <>
-              <p>Ärendet är verifierat och skickas till försäkringsbolagets portal.</p>
+              <p>Ärendet är verifierat och skickas vidare till ditt försäkringsbolag.</p>
               <a className="bigbtn" href={`/cases/${created.id}`}>Visa ärendet</a>
             </>
           ) : (
             <>
-              <p>{created.towStatus ? `Bärgning begärd: ${created.towStatus}` : "BankID klart. Nu kan vi begära bärgning."}</p>
-              {created.towStatus ? <a className="bigbtn" href={`/cases/${created.id}`}>Följ ärendet</a> : <button className="bigbtn" onClick={requestTow}>Begär bärgning</button>}
+              <p>{created.towStatus ? `Bärgning begärd: ${created.towStatus}` : "Verifieringen är klar. Nu kan vi skicka ut bärgningen."}</p>
+              {created.towStatus ? <a className="bigbtn" href={`/cases/${created.id}`}>Följ ärendet</a> : <button className="bigbtn" onClick={requestTow} disabled={busy}>{busy ? "Skickar…" : "Begär bärgning"}</button>}
             </>
           )}
         </div>
@@ -234,7 +281,20 @@ function NewCaseInner() {
             {coords ? `Position delad (${coords.lat.toFixed(3)}, ${coords.lng.toFixed(3)})` : "Dela min position"}
           </button>
         </div>
-        <div style={{ marginTop: 16 }}><button className="bigbtn" type="submit">Skapa ärende</button></div>
+        {(gpsDenied || address) && !coords ? (
+          <div style={{ marginTop: 12 }}>
+            <label htmlFor="address">Adress där fordonet står</label>
+            <input
+              id="address"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="Gatuadress, ort"
+            />
+          </div>
+        ) : null}
+        <div style={{ marginTop: 16 }}>
+          <button className="bigbtn" type="submit" disabled={busy}>{busy ? "Skapar ärende…" : "Skapa ärende"}</button>
+        </div>
       </form>
       {vehicles.length === 0 ? <p><a href="/vehicles">Lägg till fordon först</a></p> : null}
       {status && status !== "created" ? <p style={{ marginTop: 12 }}>{status}</p> : null}

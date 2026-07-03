@@ -22,6 +22,7 @@ function VehiclesInner() {
   const [make, setMake] = useState("");
   const [model, setModel] = useState("");
   const [status, setStatus] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!supabase) return;
@@ -44,32 +45,39 @@ function VehiclesInner() {
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
-    if (!supabase) return;
-    const { data: auth } = await supabase.auth.getUser();
-    if (!auth.user) {
+    if (!supabase || busy) return;
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    if (!accessToken) {
       setStatus("not_authed");
       return;
     }
-    await supabase.from("user_profiles").upsert({ id: auth.user.id, email: auth.user.email ?? null } as never);
-    const normalized = reg.toUpperCase().replace(/[\s-]/g, "");
-    const { error } = await supabase.from("vehicles").insert({
-      owner_user_id: auth.user.id,
-      registration_number: normalized,
-      make: make || null,
-      model: model || null,
-      is_default: vehicles.length === 0,
-    } as never);
-    if (error) setStatus(error.message);
-    else {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const res = await fetch("/api/customer/vehicles", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ registration_number: reg, make: make || null, model: model || null }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStatus(typeof json.error === "string" ? json.error : "Fordonet kunde inte sparas. Försök igen.");
+        return;
+      }
       setReg("");
       setMake("");
       setModel("");
-      setStatus("Fordon sparat. Koppla nu rätt försäkring.");
+      setStatus(json.duplicate ? "Fordonet finns redan bland dina fordon." : "Fordon sparat. Koppla nu rätt försäkring.");
       await load();
+    } catch {
+      setStatus("Något gick fel. Kontrollera din uppkoppling och försök igen.");
+    } finally {
+      setBusy(false);
     }
   }
 
-  if (!supabase) return <p>Tjänsten är inte konfigurerad ännu.</p>;
+  if (!supabase) return <p>Tjänsten är inte tillgänglig just nu. Försök igen om en stund.</p>;
   if (status === "not_authed")
     return (
       <p>
@@ -103,7 +111,7 @@ function VehiclesInner() {
         <label htmlFor="model">Modell</label>
         <input id="model" value={model} onChange={(e) => setModel(e.target.value)} placeholder="XC60" />
         <div style={{ marginTop: 16 }}>
-          <button className="bigbtn" type="submit">Lägg till fordon</button>
+          <button className="bigbtn" type="submit" disabled={busy}>{busy ? "Sparar…" : "Lägg till fordon"}</button>
         </div>
       </form>
       {status && status !== "not_authed" ? <p>{status}</p> : null}
