@@ -95,3 +95,57 @@ describe("migrations", () => {
     expect(sql).toContain("on conflict (tow_job_id) do nothing");
   });
 });
+
+describe("production hardening (0020)", () => {
+  const sql = readFileSync(join(migrationsDir, "0020_production_hardening.sql"), "utf8");
+
+  it("supports the full agreement lifecycle", () => {
+    for (const status of ["draft", "pending", "active", "paused", "suspended", "expired", "terminated"]) {
+      expect(sql).toContain(`'${status}'`);
+    }
+  });
+
+  it("rejects expired offers in accept_tow_offer", () => {
+    expect(sql).toContain("offer_expired");
+    expect(sql).toMatch(/expires_at is not null and v_offer\.expires_at < now\(\)/);
+  });
+
+  it("is idempotent when the winning driver retries accept", () => {
+    expect(sql).toContain("already_accepted_by_driver");
+  });
+
+  it("locks the staging demo seed away from client roles", () => {
+    expect(sql).toContain("revoke execute on function public.create_resqly_staging_demo() from anon");
+    expect(sql).toContain("revoke execute on function public.create_resqly_staging_demo() from authenticated");
+    expect(sql).toMatch(/if auth\.uid\(\) is not null and not public\.is_platform_admin\(\)/);
+  });
+
+  it("locks dispatch candidates and case-number allocation to the service role", () => {
+    expect(sql).toMatch(/revoke execute on function public\.dispatch_eligible_candidates[\s\S]*from authenticated/);
+    expect(sql).toContain("revoke execute on function public.allocate_case_number(uuid, text) from authenticated");
+    expect(sql).toContain("grant execute on function public.allocate_case_number(uuid, text) to service_role");
+  });
+
+  it("guarantees one live tow job per incident", () => {
+    expect(sql).toContain("uq_tow_jobs_active_incident");
+    expect(sql).toContain("status not in ('cancelled', 'failed', 'closed')");
+  });
+
+  it("adds the idempotency key table without client policies", () => {
+    expect(sql).toContain("create table if not exists public.request_idempotency_keys");
+    expect(sql).toContain("unique (user_id, action, idempotency_key)");
+    expect(sql).toMatch(/request_idempotency_keys enable row level security/);
+  });
+
+  it("seeds the agreements.manage permission referenced by 0018 RLS", () => {
+    expect(sql).toContain("'agreements.manage'");
+    expect(sql).toContain("('insurance_owner_admin', 'agreements.manage')");
+  });
+
+  it("adds a tow company readiness view with Swedish blockers", () => {
+    expect(sql).toContain("create or replace view public.tow_company_production_readiness");
+    expect(sql).toContain("security_invoker = on");
+    expect(sql).toContain("ready_for_live_operation");
+    expect(sql).toContain("Saknar aktiv bärgningsbil");
+  });
+});
