@@ -1,7 +1,7 @@
 import { Button, Card, EmptyState, PageHeader } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
-import { getTenantInställningar } from "../lib/data";
-import { updateInställningar } from "../lib/actions";
+import { getTenantSettings } from "../lib/data";
+import { updateSettings } from "../lib/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -31,13 +31,13 @@ export default async function InställningarPage({
       </div>
     );
   }
-  const settings = await getTenantInställningar(tenant.id);
+  const settings = await getTenantSettings(tenant.id);
 
   return (
     <div>
       <PageHeader title="Inställningar och varumärke" subtitle={tenant.name} />
       <Card style={{ maxWidth: 520 }}>
-        <form action={updateInställningar}>
+        <form action={updateSettings}>
           <input type="hidden" name="tenant_id" value={tenant.id} />
           <h3 style={{ marginTop: 0 }}>White-label</h3>
           <label htmlFor="product_name">Product name</label>

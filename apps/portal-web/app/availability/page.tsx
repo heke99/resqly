@@ -1,6 +1,6 @@
 import { Card, DataTable, PageHeader, StatusChip, type Column } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
-import { listTillgänglighetWindows, listFörare } from "../lib/data";
+import { listAvailabilityWindows, listDrivers } from "../lib/data";
 import { NoTenant, WrongTenantType } from "../lib/ui";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ export default async function TillgänglighetPage({
   if (!tenant) return <NoTenant />;
   if (tenant.type !== "tow_company") return <WrongTenantType need="tow_company" />;
 
-  const [windows, drivers] = await Promise.all([listTillgänglighetWindows(tenant.id), listFörare(tenant.id)]);
+  const [windows, drivers] = await Promise.all([listAvailabilityWindows(tenant.id), listDrivers(tenant.id)]);
   const online = drivers.filter((d) => d.is_online);
 
   const windowColumns: Column<Row>[] = [

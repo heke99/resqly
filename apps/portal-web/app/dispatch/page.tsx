@@ -1,6 +1,6 @@
 import { Card, DataTable, KpiGrid, PageHeader, StatCard, StatusChip, type Column } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
-import { listCompanyJobs, listFörare } from "../lib/data";
+import { listCompanyJobs, listDrivers } from "../lib/data";
 import { NoTenant, WrongTenantType } from "../lib/ui";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export default async function DispatchPage({
   if (!tenant) return <NoTenant />;
   if (tenant.type !== "tow_company") return <WrongTenantType need="tow_company" />;
 
-  const [jobs, drivers] = await Promise.all([listCompanyJobs(tenant.id), listFörare(tenant.id)]);
+  const [jobs, drivers] = await Promise.all([listCompanyJobs(tenant.id), listDrivers(tenant.id)]);
   const active = jobs.filter((j) => ACTIVE.includes(String(j.status)));
   const offered = jobs.filter((j) => String(j.status) === "offered");
   const online = drivers.filter((d) => d.is_online);
