@@ -379,4 +379,165 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     expect(res.status).toBe(200);
     expect((res.body as { source: string }).source).toBe("haversine_fallback");
   });
+
+  it("persists the pickup location when an incident is created with coordinates", async () => {
+    const res = await env.app.handle({
+      method: "POST",
+      path: "/api/v1/incidents",
+      headers: auth(),
+      body: {
+        type: "towing",
+        customer_user_id: CUSTOMER_USER_ID,
+        problem_type: "dead_battery",
+        pickup: { lat: 59.33, lng: 18.06 },
+        pickup_address: "Drottninggatan 1",
+      },
+    });
+    expect(res.status).toBe(201);
+    const incidentId = (res.body as { incident_id: string }).incident_id;
+    const loc = env.repo.incidentLocations.find((l) => l.incident_id === incidentId && l.kind === "pickup");
+    expect(loc).toBeDefined();
+    expect(loc!.lat).toBe(59.33);
+    expect(loc!.address).toBe("Drottninggatan 1");
+  });
+
+  it("replays idempotent incident creation instead of creating duplicates", async () => {
+    const headers = { ...auth(), "idempotency-key": "case-key-1" };
+    const body = { type: "towing", customer_user_id: CUSTOMER_USER_ID, problem_type: "dead_battery" };
+    const first = await env.app.handle({ method: "POST", path: "/api/v1/incidents", headers, body });
+    const second = await env.app.handle({ method: "POST", path: "/api/v1/incidents", headers, body });
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    expect(second.headers?.["x-idempotent-replay"]).toBe("true");
+    expect((second.body as { incident_id: string }).incident_id).toBe(
+      (first.body as { incident_id: string }).incident_id,
+    );
+    expect(env.repo.incidents.size).toBe(1);
+  });
+
+  it("replays idempotent request-tow so double clicks never create two jobs", async () => {
+    const created = (await createIncident()).body as { incident_id: string };
+    const id = created.incident_id;
+    await env.app.handle({
+      method: "POST",
+      path: `/api/v1/incidents/${id}/bankid/sign`,
+      headers: auth(),
+      body: { purpose: "Sign", personal_number: "199001011234" },
+    });
+    env.repo.seedContact(id, {
+      name: "A", phone: "+460", email: null, registration_number: "X1", problem_summary: "x",
+      pickup: { lat: 59, lng: 18 }, pickup_address: null, destination_address: null, customer_notes: null,
+    });
+    const headers = { ...auth(), "idempotency-key": "tow-key-1" };
+    const body = { pickup: { lat: 59, lng: 18 }, payer_type: "insurance_company", priority: "normal" };
+    const first = await env.app.handle({ method: "POST", path: `/api/v1/incidents/${id}/request-tow`, headers, body });
+    const second = await env.app.handle({ method: "POST", path: `/api/v1/incidents/${id}/request-tow`, headers, body });
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    expect((second.body as { tow_job_id: string }).tow_job_id).toBe(
+      (first.body as { tow_job_id: string }).tow_job_id,
+    );
+    expect(env.repo.towJobs.size).toBe(1);
+  });
+
+  it("lets an assigned driver update job status with only the driver session token", async () => {
+    const repo = env.repo;
+    const job = await repo.createTowJob({
+      tenant_id: "t-if", incident_id: "inc-drv", status: "offered", payer_type: "insurance_company", priority: "normal",
+    });
+    await repo.createOffers([
+      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv1", tow_company_id: "tc1", rank: 0, expires_at: new Date(Date.now() + 60000).toISOString() },
+    ]);
+    repo.seedContact("inc-drv", {
+      name: "A", phone: "+460", email: null, registration_number: "X1", problem_summary: "x",
+      pickup: { lat: 59, lng: 18 }, pickup_address: null, destination_address: null, customer_notes: null,
+    });
+
+    // The driver mobile app never ships a tenant API key: only the Supabase
+    // session token authenticates these calls.
+    const driverOnly = { authorization: `Bearer ${DRIVER_TOKEN}` };
+    const accept = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/tow/jobs/${job.id}/accept`,
+      headers: driverOnly,
+      body: {},
+    });
+    expect(accept.status).toBe(200);
+
+    const status = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/tow/jobs/${job.id}/status`,
+      headers: driverOnly,
+      body: { status: "driver_en_route" },
+    });
+    expect(status.status).toBe(200);
+    expect(repo.towJobs.get(job.id)?.status).toBe("driver_en_route");
+
+    // Another driver must not be able to update this job.
+    const otherDriver = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/tow/jobs/${job.id}/status`,
+      headers: { authorization: `Bearer ${DRIVER2_TOKEN}` },
+      body: { status: "driver_arrived" },
+    });
+    expect([403, 404]).toContain(otherDriver.status);
+    expect(repo.towJobs.get(job.id)?.status).toBe("driver_en_route");
+  });
+
+  it("returns friendly Swedish user messages on errors", async () => {
+    const res = await env.app.handle({
+      method: "GET",
+      path: "/api/v1/incidents/00000000-0000-4000-8000-000000000000",
+      headers: auth(),
+    });
+    expect(res.status).toBe(404);
+    const error = (res.body as { error: { user_message?: string } }).error;
+    expect(error.user_message).toBe("Uppgiften kunde inte hittas.");
+  });
+
+  it("rate limits the driver user-token lane", async () => {
+    const repo = new MemoryRepo();
+    repo.seedTenant({ id: "t-if", case_number_prefix: "IF" });
+    repo.seedDriverProfile({ id: "drv1", user_id: "user-drv1" });
+    const app = new App({
+      repo,
+      maps: { routesEnabled: false },
+      bankid: { env: "mock", mockEnabled: true },
+      encryptionKey: "p",
+      rateLimiter: new RateLimiter(1, 60_000),
+      driverAuth: {
+        async getUserIdFromAccessToken(token: string) {
+          return token === DRIVER_TOKEN ? "user-drv1" : null;
+        },
+      },
+    });
+    const headers = { authorization: `Bearer ${DRIVER_TOKEN}` };
+    const first = await app.handle({ method: "GET", path: "/api/v1/drivers/me/offers", headers });
+    const second = await app.handle({ method: "GET", path: "/api/v1/drivers/me/offers", headers });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+    const error = (second.body as { error: { user_message?: string } }).error;
+    expect(error.user_message).toContain("försök igen");
+  });
+});
+
+describe("production safety", () => {
+  it("health endpoint never enumerates configuration or environment details", async () => {
+    const { app } = setup();
+    const res = await app.handle({ method: "GET", path: "/health", headers: {} });
+    const body = res.body as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(["ok", "request_id", "service"]);
+    expect(JSON.stringify(body)).not.toContain("env");
+    expect(JSON.stringify(body)).not.toContain("bankid");
+    expect(JSON.stringify(body)).not.toContain("key");
+  });
+
+  it("serves a friendly Swedish BankID browser callback page", async () => {
+    const { app } = setup();
+    const res = await app.handle({ method: "GET", path: "/api/v1/bankid/callback?sessionId=missing", headers: {} });
+    expect(res.status).toBe(200);
+    expect(res.rawBody).toContain('lang="sv"');
+    expect(res.rawBody).toContain("tillbaka till appen");
+    expect(res.rawBody).not.toContain("error");
+  });
 });

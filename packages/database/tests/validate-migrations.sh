@@ -78,4 +78,24 @@ end $$;
 select 'migration chain OK' as result;
 SQL
 
+echo "==> Running pgTAP business-rule tests (if pgtap is available)"
+if run_psql -d "$DB" -tAc "select count(*) from pg_available_extensions where name = 'pgtap'" | grep -q '^1$'; then
+  run_psql -v ON_ERROR_STOP=1 -d "$DB" -q -c "create extension if not exists pgtap;"
+  for t in "$HERE/rls_assumptions.sql" "$HERE/dispatch_rules.sql"; do
+    echo "==> $(basename "$t")"
+    if ! OUT="$(run_psql -v ON_ERROR_STOP=1 -d "$DB" -f "$t" 2>&1)"; then
+      echo "$OUT" | tail -30
+      echo "FAILED (SQL error): $t"
+      exit 1
+    fi
+    echo "$OUT" | grep -E "^\s*(not ok|# )" || true
+    if echo "$OUT" | grep -qE "^\s*not ok|failed"; then
+      echo "FAILED: $t"
+      exit 1
+    fi
+  done
+else
+  echo "    pgtap extension not available — skipping (install postgresql-XX-pgtap to run)"
+fi
+
 echo "==> OK: all migrations applied cleanly to $DB"
