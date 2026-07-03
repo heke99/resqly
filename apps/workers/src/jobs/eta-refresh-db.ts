@@ -1,5 +1,5 @@
 import type { AppSupabaseClient } from "@resqly/database";
-import { MapsClient, buildEtaSnapshot } from "@resqly/maps";
+import { buildEtaSnapshot, type MapsClient } from "@resqly/maps";
 import type { TowJobStatus } from "@resqly/types";
 import { jobsNeedingEtaRefresh, type ActiveJob } from "./eta-refresh";
 
