@@ -102,7 +102,7 @@ function HomeInner() {
         <div className="status-card" style={{ marginTop: 16 }}>
           <strong>Försäkringslänk aktiv</strong>
           <p className="vehicle-meta">
-            Försäkringsbolaget <code>{partner}</code> förväljs när du kopplar ny försäkring. Befintliga ärenden styrs alltid av valt fordons verifierade försäkring.
+            Ditt försäkringsbolag förväljs när du kopplar ny försäkring. Befintliga ärenden styrs alltid av valt fordons verifierade försäkring.
           </p>
         </div>
       ) : null}

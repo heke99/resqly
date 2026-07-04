@@ -12,6 +12,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.2.0",
     "@resqly/types": "workspace:*",
     "@resqly/ui": "workspace:*",
     "@resqly/utils": "workspace:*",

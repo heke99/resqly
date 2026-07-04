@@ -105,25 +105,65 @@ Implementation:
 - Driver devices register Expo push tokens via `/api/v1/drivers/me/device`.
 - Dispatch offer push payloads avoid customer PII.
 
-### Partner/insurance webhooks
+### SMS (46elks — operational fallback)
+
+SMS is an operational reserve channel: when offer pushes fail and the tenant's
+fallback rule allows it, the on-call contacts receive an SMS **without any
+customer details**. The platform runs fine without SMS — the readiness view in
+the internal portal simply shows it as not configured.
 
 Environment:
 
 ```env
-WEBHOOK_SIGNING_SECRET=
+SMS_ENABLED=true
+SMS_PROVIDER=46elks
+SMS_API_KEY=<api-user>:<api-password>
+SMS_FROM=Resqly
 ```
 
 Implementation:
 
+- `packages/notifications/src/sms.ts` — `HttpSmsAdapter` (46elks HTTPS API,
+  basic auth) + `resolveSmsConfig()` which returns null unless SMS is
+  explicitly enabled and fully configured.
+- `apps/workers` consumes `operational_notification_queue` and delivers SMS/
+  email with retry + backoff; unconfigured channels are marked `skipped` and
+  surfaced in the internal portal under "Drift & åtgärder".
+
+### Partner/insurance webhooks
+
+Implementation:
+
 - Webhook events are queued on important lifecycle changes.
-- Worker polls `webhook_deliveries`, signs payloads and retries with backoff.
-- Per-tenant webhook URL/secrets/events stay in `tenant_webhooks`.
+- The worker polls `webhook_deliveries`, signs payloads with the
+  per-organization secret from `tenant_webhooks` and retries with backoff
+  (max 6 attempts, then `exhausted`).
+- Failed/exhausted deliveries are visible in the internal portal
+  ("Drift & åtgärder") with a one-click retry.
+- If a partner has no API integration, the portal offers CSV export instead
+  (`/api/export/cases|jobs|invoices`).
+
+## Background workers (`apps/workers`)
+
+The worker loop runs every `WORKER_INTERVAL_MS` (default 15 s) and is
+idempotent — a single failed job never stops the loop:
+
+| Job | Purpose |
+|---|---|
+| offer-expiry | Expires stale pending offers; escalates jobs with no candidates left to manual help |
+| offer-push-retry | Retries failed offer pushes (max 3 attempts, real pickup coordinates) |
+| offer-fallback | Applies tenant fallback rules: enqueues operational SMS and escalates to manual help after the configured window |
+| notification-queue | Delivers queued SMS/email with retry + backoff |
+| eta-refresh | Refreshes ETA snapshots for active jobs (Google Routes, haversine fallback) |
+| webhook-delivery | Signs + delivers partner integration events with backoff |
 
 ## Apply order
 
-1. Run Supabase migrations `0015_tic_bankid.sql`, `0016_notifications_resend.sql`, `0017_dispatch_webhook_production.sql`.
-2. Add all production env values to API, workers, web apps and mobile build profiles.
+1. Run all Supabase migrations (through `0020_production_hardening.sql`):
+   `cd packages/database && supabase db push`.
+   Validate the chain locally first: `bash packages/database/tests/validate-migrations.sh`.
+2. Add all production env values to API, workers, web apps and mobile build profiles (see each app's `.env.example`).
 3. Deploy API/worker first.
 4. Deploy web apps.
-5. Build driver mobile with EAS project ID and push credentials.
-6. Test full flow: incident → TIC sign → request tow → Google Route Matrix dispatch → Expo push → driver accept → status/completion → Resend email → partner webhook.
+5. Build both mobile apps with EAS project IDs and push credentials.
+6. Run the acceptance script in [e2e-acceptance.md](e2e-acceptance.md).

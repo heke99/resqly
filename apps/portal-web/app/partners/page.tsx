@@ -76,7 +76,7 @@ export default async function PartnersPage({
       <DataTable
         columns={partnerColumns}
         rows={partners}
-        empty="Ingen partneraktivitet ännu. Koppla bärgningsbolag via superadmin eller avtalssidan."
+        empty="Ingen partneraktivitet ännu. Bärgningsbolag kopplas via avtal av plattformsansvarig."
       />
 
       <Card style={{ marginTop: 24, marginBottom: 16 }}>

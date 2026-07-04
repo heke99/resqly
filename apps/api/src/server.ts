@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { createServiceClient } from "@resqly/database";
-import { boolEnv, optionalEnv, requireEnv } from "@resqly/utils";
+import { assertNoMockBankidInProduction, boolEnv, optionalEnv, requireEnv } from "@resqly/utils";
 import { App } from "./app";
 import { SupabaseRepo } from "./repo/supabase";
 
@@ -11,9 +11,8 @@ function buildApp(): App {
   const bankidProvider = optionalEnv("BANKID_PROVIDER", "tic") as "mock" | "tic";
   const bankidEnv = (optionalEnv("BANKID_ENV", "production") as "mock" | "test" | "production") ?? "production";
   const bankidMockEnabled = boolEnv("BANKID_MOCK_ENABLED", false);
-  if (process.env.NODE_ENV === "production" && bankidMockEnabled) {
-    throw new Error("BANKID_MOCK_ENABLED must be false in production");
-  }
+  // Hard production guard: mock/test BankID can never run in production.
+  assertNoMockBankidInProduction();
   if (bankidProvider === "tic" && !optionalEnv("TIC_API_KEY")) {
     throw new Error("TIC_API_KEY is required when BANKID_PROVIDER=tic");
   }
@@ -60,10 +59,29 @@ function buildApp(): App {
 const port = Number(process.env.PORT ?? 4000);
 const app = buildApp();
 
+const MAX_BODY_BYTES = 1024 * 1024; // 1 MiB — largest legitimate payloads are small JSON documents.
+
 const server = createServer((req, res) => {
   const chunks: Buffer[] = [];
-  req.on("data", (c) => chunks.push(c as Buffer));
+  let received = 0;
+  let tooLarge = false;
+  req.on("data", (c) => {
+    received += (c as Buffer).length;
+    if (received > MAX_BODY_BYTES) {
+      // Stop buffering but keep draining so the 'end' event still fires and
+      // the client gets a clean 413 instead of a dropped connection.
+      tooLarge = true;
+      chunks.length = 0;
+      return;
+    }
+    chunks.push(c as Buffer);
+  });
   req.on("end", async () => {
+    if (tooLarge) {
+      res.writeHead(413, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "bad_request", message: "Request body too large" } }));
+      return;
+    }
     let body: unknown = undefined;
     const raw = Buffer.concat(chunks).toString("utf8");
     if (raw) {
@@ -85,8 +103,13 @@ const server = createServer((req, res) => {
       rawBody: raw,
       ip: req.socket.remoteAddress ?? null,
     });
-    res.writeHead(result.status, { "content-type": "application/json", ...(result.headers ?? {}) });
-    res.end(JSON.stringify(result.body ?? null));
+    if (typeof result.rawBody === "string") {
+      res.writeHead(result.status, { "content-type": "text/html; charset=utf-8", ...(result.headers ?? {}) });
+      res.end(result.rawBody);
+    } else {
+      res.writeHead(result.status, { "content-type": "application/json", ...(result.headers ?? {}) });
+      res.end(JSON.stringify(result.body ?? null));
+    }
   });
 });
 

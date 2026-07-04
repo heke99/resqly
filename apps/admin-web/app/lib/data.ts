@@ -172,3 +172,70 @@ export async function listInsurerReadiness(): Promise<Array<Record<string, unkno
     .order("insurer_name", { ascending: true });
   return (data as Array<Record<string, unknown>> | null) ?? [];
 }
+
+export async function listTowReadiness(): Promise<Array<Record<string, unknown>>> {
+  const { db } = await requirePlatformAdmin();
+  const { data } = await db
+    .from("tow_company_production_readiness" as never)
+    .select("*")
+    .order("tow_company_name", { ascending: true });
+  return (data as Array<Record<string, unknown>> | null) ?? [];
+}
+
+/** Cases/jobs that are stuck in manual help and waiting for an operator. */
+export async function listManualHelpCases(): Promise<Array<Record<string, unknown>>> {
+  const { db } = await requirePlatformAdmin();
+  const { data } = await db
+    .from("manual_reviews" as never)
+    .select("*")
+    .eq("status", "open")
+    .order("created_at", { ascending: false })
+    .limit(100);
+  return (data as Array<Record<string, unknown>> | null) ?? [];
+}
+
+/** Failed/skipped operational notifications (SMS fallback etc). */
+export async function listNotificationFailures(): Promise<Array<Record<string, unknown>>> {
+  const { db } = await requirePlatformAdmin();
+  const { data } = await db
+    .from("operational_notification_queue" as never)
+    .select("*")
+    .in("status", ["failed", "skipped"] as never)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  return (data as Array<Record<string, unknown>> | null) ?? [];
+}
+
+/** Failed offer pushes still pending on their offers. */
+export async function listPushFailures(): Promise<Array<Record<string, unknown>>> {
+  const { db } = await requirePlatformAdmin();
+  const { data } = await db
+    .from("tow_job_offers" as never)
+    .select("id, tow_job_id, driver_id, status, push_status, push_attempts, push_error, updated_at")
+    .eq("push_status", "failed")
+    .order("updated_at", { ascending: false })
+    .limit(100);
+  return (data as Array<Record<string, unknown>> | null) ?? [];
+}
+
+/** Integration deliveries that failed or exhausted their retries. */
+export async function listIntegrationFailures(): Promise<Array<Record<string, unknown>>> {
+  const { db } = await requirePlatformAdmin();
+  const { data } = await db
+    .from("webhook_deliveries" as never)
+    .select("id, tenant_id, event, status, attempts, last_error, next_attempt_at, created_at")
+    .in("status", ["failed", "exhausted"] as never)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  return (data as Array<Record<string, unknown>> | null) ?? [];
+}
+
+/** Agreement × tow vehicle approval matrix across all insurers. */
+export async function listAgreementVehicleMatrixAll(): Promise<Array<Record<string, unknown>>> {
+  const { db } = await requirePlatformAdmin();
+  const { data } = await db
+    .from("insurer_agreement_vehicle_matrix" as never)
+    .select("*")
+    .order("tow_company_name", { ascending: true });
+  return (data as Array<Record<string, unknown>> | null) ?? [];
+}

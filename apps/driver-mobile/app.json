@@ -7,14 +7,36 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.resqly.driver",
+      "infoPlist": {
+        "UIBackgroundModes": ["location", "fetch"],
+        "NSLocationWhenInUseUsageDescription": "Din position används för att skicka rätt bärgningsuppdrag till dig och visa kunden när du är framme.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Din position delas medan du är i tjänst så att kunden ser din beräknade ankomsttid, även när appen är i bakgrunden."
+      }
     },
     "android": {
-      "package": "com.resqly.driver"
+      "package": "com.resqly.driver",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION"
+      ]
     },
     "plugins": [
-      "expo-location",
-      "expo-notifications"
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Din position används för att skicka rätt bärgningsuppdrag till dig.",
+          "locationAlwaysAndWhenInUsePermission": "Din position delas medan du är i tjänst så att kunden ser din beräknade ankomsttid.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      "expo-notifications",
+      "expo-task-manager"
     ]
   }
 }

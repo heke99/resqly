@@ -1,6 +1,6 @@
-import { Card, DataTable, KpiGrid, PageHeader, StatCard, StatusChip, type Column } from "@resqly/web-kit";
+import { DataTable, KpiGrid, PageHeader, StatCard, StatusChip, type Column } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
-import { listCompanyJobs, listFörare } from "../lib/data";
+import { listCompanyJobs, listDrivers } from "../lib/data";
 import { NoTenant, WrongTenantType } from "../lib/ui";
 
 export const dynamic = "force-dynamic";
@@ -19,21 +19,20 @@ export default async function DispatchPage({
   if (!tenant) return <NoTenant />;
   if (tenant.type !== "tow_company") return <WrongTenantType need="tow_company" />;
 
-  const [jobs, drivers] = await Promise.all([listCompanyJobs(tenant.id), listFörare(tenant.id)]);
+  const [jobs, drivers] = await Promise.all([listCompanyJobs(tenant.id), listDrivers(tenant.id)]);
   const active = jobs.filter((j) => ACTIVE.includes(String(j.status)));
   const offered = jobs.filter((j) => String(j.status) === "offered");
   const online = drivers.filter((d) => d.is_online);
 
   const jobColumns: Column<Row>[] = [
-    { key: "job", header: "Job", render: (r) => String(r.id).slice(0, 8) },
+    { key: "job", header: "Uppdrag", render: (r) => <a href={`/jobs/${String(r.id)}`}>{String(r.id).slice(0, 8).toUpperCase()}</a> },
     { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "")} /> },
-    { key: "priority", header: "Priority", render: (r) => String(r.priority ?? "normal") },
-    { key: "driver", header: "Driver", render: (r) => String(r.driver_id ?? "—").slice(0, 8) },
+    { key: "priority", header: "Prioritet", render: (r) => (String(r.priority) === "high" ? "Hög" : String(r.priority) === "urgent" ? "Akut" : "Normal") },
   ];
   const driverColumns: Column<Row>[] = [
-    { key: "name", header: "Driver", render: (r) => String(r.full_name ?? "") },
+    { key: "name", header: "Förare", render: (r) => String(r.full_name ?? "") },
     { key: "online", header: "Status", render: (r) => <StatusChip status={r.is_online ? "active" : "off_duty"} /> },
-    { key: "loc", header: "Last location", render: (r) =>
+    { key: "loc", header: "Senaste position", render: (r) =>
         r.last_lat != null && r.last_lng != null ? `${Number(r.last_lat).toFixed(3)}, ${Number(r.last_lng).toFixed(3)}` : "—" },
   ];
 
@@ -41,18 +40,11 @@ export default async function DispatchPage({
     <div>
       <PageHeader title="Tilldelningstavla" subtitle="Livekontroll av uppdrag, aktiva körningar och förare" />
       <KpiGrid>
-        <StatCard label="Offered" value={offered.length} />
+        <StatCard label="Utskickade erbjudanden" value={offered.length} />
         <StatCard label="Aktiva uppdrag" value={active.length} />
-        <StatCard label="Förare online" value={online.length} />
+        <StatCard label="Förare i tjänst" value={online.length} />
       </KpiGrid>
-      <Card style={{ marginTop: 24, marginBottom: 24 }}>
-        <strong>Live map</strong>
-        <p style={{ opacity: 0.7, margin: "8px 0 0" }}>
-          Driver positions and active job pickups render on a Google Map here when a browser Maps key is configured.
-          Positions below come from each driver&apos;s latest reported location.
-        </p>
-      </Card>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 24, alignItems: "start", marginTop: 24 }}>
         <div>
           <h3>Aktiva uppdrag</h3>
           <DataTable columns={jobColumns} rows={active} empty="Inga aktiva uppdrag" />

@@ -138,7 +138,7 @@ export default async function Dashboard({
         <StatCard label="Slutförda ärenden" value={num(s.completed_cases)} />
         <StatCard label="Avbrutna ärenden" value={num(s.cancelled_cases)} />
         <StatCard label="Kostnad period" value={formatMoneyMinor(s.total_cost_minor)} />
-        <StatCard label="Webhook-fel" value={num(s.webhook_errors)} />
+        <StatCard label="Integrationsfel" value={num(s.webhook_errors)} />
       </KpiGrid>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 24, alignItems: "start" }}>

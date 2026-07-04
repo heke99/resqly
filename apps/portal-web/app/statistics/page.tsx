@@ -37,10 +37,10 @@ export default async function StatistikPage({
 
   const filters = (
     <Filters>
-      <Field label="From">
+      <Field label="Från">
         <input type="date" name="from" defaultValue={from} />
       </Field>
-      <Field label="To">
+      <Field label="Till">
         <input type="date" name="to" defaultValue={to} />
       </Field>
     </Filters>
@@ -60,14 +60,14 @@ export default async function StatistikPage({
         <PageHeader title="Statistik" subtitle="Tilldelning och fordons-/förarprestanda" />
         {filters}
         <KpiGrid>
-          <StatCard label="Completed jobs" value={num(stats?.completed_jobs)} />
-          <StatCard label="Accepted jobs" value={num(stats?.accepted_jobs)} />
-          <StatCard label="Missed jobs" value={num(stats?.missed_jobs)} />
-          <StatCard label="Avg accept time" value={formatSeconds(stats?.avg_accept_seconds)} />
-          <StatCard label="Avg arrival time" value={formatSeconds(stats?.avg_arrival_seconds)} />
-          <StatCard label="SLA hit / miss" value={`${num(stats?.sla_hit)} / ${num(stats?.sla_miss)}`} />
+          <StatCard label="Slutförda uppdrag" value={num(stats?.completed_jobs)} />
+          <StatCard label="Accepterade uppdrag" value={num(stats?.accepted_jobs)} />
+          <StatCard label="Missade uppdrag" value={num(stats?.missed_jobs)} />
+          <StatCard label="Snitt-tid till accept" value={formatSeconds(stats?.avg_accept_seconds)} />
+          <StatCard label="Snitt-tid till framme" value={formatSeconds(stats?.avg_arrival_seconds)} />
+          <StatCard label="Inom / utanför tidsgräns" value={`${num(stats?.sla_hit)} / ${num(stats?.sla_miss)}`} />
           <StatCard label="Fakturaunderlag" value={formatMoneyMinor(stats?.revenue_minor)} />
-          <StatCard label="Förare online" value={num(stats?.drivers_online)} />
+          <StatCard label="Förare i tjänst" value={num(stats?.drivers_online)} />
         </KpiGrid>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 24 }}>
           <Card>
@@ -75,7 +75,7 @@ export default async function StatistikPage({
             <Bars data={byStatus} />
           </Card>
           <Card>
-            <h3 style={{ marginTop: 0 }}>Insurance vs direct</h3>
+            <h3 style={{ marginTop: 0 }}>Försäkring vs privat</h3>
             <Bars data={byPayer} />
           </Card>
         </div>
@@ -101,14 +101,14 @@ export default async function StatistikPage({
       <PageHeader title="Statistik" subtitle="Ärenden, bärgning och kostnadsanalys" />
       {filters}
       <KpiGrid>
-        <StatCard label="Total cases" value={num(stats?.total_cases)} />
-        <StatCard label="Completed" value={num(stats?.completed_cases)} />
-        <StatCard label="Cancelled" value={num(stats?.cancelled_cases)} />
+        <StatCard label="Ärenden totalt" value={num(stats?.total_cases)} />
+        <StatCard label="Avslutade" value={num(stats?.completed_cases)} />
+        <StatCard label="Avbrutna" value={num(stats?.cancelled_cases)} />
         <StatCard label="Skadeärenden" value={num(stats?.damage_claims)} />
-        <StatCard label="SLA risk" value={num(stats?.sla_risk)} />
-        <StatCard label="Avg ETA" value={formatSeconds(stats?.avg_eta_seconds)} />
-        <StatCard label="Avg resolution" value={formatSeconds(stats?.avg_resolution_seconds)} />
-        <StatCard label="Cost (period)" value={formatMoneyMinor(stats?.total_cost_minor)} />
+        <StatCard label="Riskerar tidsgräns" value={num(stats?.sla_risk)} />
+        <StatCard label="Snitt ankomsttid" value={formatSeconds(stats?.avg_eta_seconds)} />
+        <StatCard label="Snitt handläggningstid" value={formatSeconds(stats?.avg_resolution_seconds)} />
+        <StatCard label="Kostnad (period)" value={formatMoneyMinor(stats?.total_cost_minor)} />
       </KpiGrid>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 24 }}>
         <Card>
@@ -124,7 +124,7 @@ export default async function StatistikPage({
           <Bars data={countBy(incidents.filter((i) => i.problem_type), "problem_type")} />
         </Card>
         <Card>
-          <h3 style={{ marginTop: 0 }}>Towing by status</h3>
+          <h3 style={{ marginTop: 0 }}>Bärgning per status</h3>
           <Bars data={countBy(jobs, "status")} />
         </Card>
       </div>

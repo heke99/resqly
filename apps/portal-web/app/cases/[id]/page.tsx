@@ -88,7 +88,7 @@ export default async function CaseDetail({
         <Card>
           <h3 style={{ marginTop: 0 }}>Integration och risk</h3>
           <p>Externt skadenummer: {String(consoleRow?.claim_number ?? "Ej skapat")}</p>
-          <p>Webhook-fel för tenant: {num(consoleRow?.tenant_failed_webhooks)}</p>
+          <p>Integrationsfel för organisationen: {num(consoleRow?.tenant_failed_webhooks)}</p>
           <p>Nästa steg: {String(consoleRow?.next_action_label ?? "I handläggning")}</p>
         </Card>
       </div>

@@ -410,12 +410,94 @@ export async function createTenantAdmin(formData: FormData): Promise<void> {
   revalidatePath(`/tenants/${tenantId}`);
 }
 
+/** Platform admin: approve/pause a tow vehicle for a specific insurer agreement. */
+export async function saveVehiclePermissionAdmin(formData: FormData): Promise<void> {
+  const { db, user } = await requirePlatformAdmin();
+  const agreementId = text(formData, "agreement_id");
+  const towVehicleId = text(formData, "tow_vehicle_id");
+  const status = text(formData, "status") ?? "active";
+  if (!agreementId || !towVehicleId) throw new Error("Avtal och bärgningsbil krävs.");
+  await db.from("tow_vehicle_insurance_permissions" as never).upsert(
+    {
+      insurance_agreement_id: agreementId,
+      tow_vehicle_id: towVehicleId,
+      status,
+    } as never,
+    { onConflict: "insurance_agreement_id,tow_vehicle_id" } as never,
+  );
+  await db.from("audit_logs" as never).insert({
+    actor_user_id: user.id,
+    action: "upsert",
+    entity_type: "tow_vehicle_insurance_permission",
+    entity_id: towVehicleId,
+    fields: ["status"],
+    metadata: { agreement_id: agreementId, status },
+  } as never);
+  revalidatePath("/agreements");
+  revalidatePath("/readiness");
+}
+
+/** Platform admin: retry a failed integration delivery. */
+export async function retryIntegrationDelivery(formData: FormData): Promise<void> {
+  const { db, user } = await requirePlatformAdmin();
+  const deliveryId = text(formData, "delivery_id");
+  if (!deliveryId) throw new Error("Leverans-id krävs.");
+  await db
+    .from("webhook_deliveries" as never)
+    .update({ status: "pending", next_attempt_at: new Date().toISOString(), last_error: null } as never)
+    .eq("id", deliveryId);
+  await db.from("audit_logs" as never).insert({
+    actor_user_id: user.id,
+    action: "retry",
+    entity_type: "webhook_delivery",
+    entity_id: deliveryId,
+    fields: ["status"],
+  } as never);
+  revalidatePath("/operations");
+}
+
+/** Platform admin: retry a failed operational notification. */
+export async function retryOperationalNotification(formData: FormData): Promise<void> {
+  const { db, user } = await requirePlatformAdmin();
+  const id = text(formData, "notification_id");
+  if (!id) throw new Error("Notis-id krävs.");
+  await db
+    .from("operational_notification_queue" as never)
+    .update({ status: "pending", attempts: 0, next_attempt_at: new Date().toISOString(), last_error: null } as never)
+    .eq("id", id);
+  await db.from("audit_logs" as never).insert({
+    actor_user_id: user.id,
+    action: "retry",
+    entity_type: "operational_notification",
+    entity_id: id,
+    fields: ["status"],
+  } as never);
+  revalidatePath("/operations");
+}
+
+/** Platform admin: mark a manual help case as resolved. */
+export async function resolveManualReview(formData: FormData): Promise<void> {
+  const { db, user } = await requirePlatformAdmin();
+  const id = text(formData, "review_id");
+  if (!id) throw new Error("Ärende-id krävs.");
+  await db.from("manual_reviews" as never).update({ status: "resolved" } as never).eq("id", id);
+  await db.from("audit_logs" as never).insert({
+    actor_user_id: user.id,
+    action: "update",
+    entity_type: "manual_review",
+    entity_id: id,
+    fields: ["status"],
+    metadata: { status: "resolved" },
+  } as never);
+  revalidatePath("/operations");
+}
+
 /** Superadmin: create the deterministic staging demo constellation. Do not run this in production. */
 export async function createStagingDemo(_formData?: FormData): Promise<void> {
   const { db, user } = await requirePlatformAdmin();
   const appEnv = (process.env.APP_ENV ?? process.env.NODE_ENV ?? "development").toLowerCase();
   if (appEnv === "production") {
-    throw new Error("Staging demo seed is blocked in production.");
+    throw new Error("Demodata kan inte skapas i produktionsmiljön.");
   }
   const { error } = await db.rpc("create_resqly_staging_demo" as never, {} as never);
   if (error) throw new Error(error.message);

@@ -19,6 +19,7 @@ import type { RouteResult } from "../http/router";
 import type { BankidSessionRecord, IncidentRecord } from "../repo/types";
 import { runDispatchForJob } from "./dispatch";
 import { enqueueWebhookEvent, escapeHtml, sendEmail } from "../services/notifications";
+import { withIdempotency } from "../services/idempotency";
 
 const bankidStartSchema = z.object({
   purpose: z.string().min(1).default("Verifiera bärgningsärende"),
@@ -28,50 +29,79 @@ const bankidStartSchema = z.object({
 
 export async function createIncident(ctx: ApiContext, body: unknown): Promise<RouteResult> {
   const input = createIncidentInputSchema.parse(body);
-  const settings = await ctx.repo.getTenantSettings(ctx.tenantId);
-  const requiresBankid = determineRequiresBankid(input.type, {
-    bankidRequiredForClaims: settings.bankid_required_for_claims,
-    bankidRequiredForTow: settings.bankid_required_for_tow,
-  });
-  const caseNumber = await ctx.repo.allocateCaseNumber(ctx.tenantId, "default");
+  return withIdempotency(
+    ctx,
+    "incident.create",
+    async () => {
+      const settings = await ctx.repo.getTenantSettings(ctx.tenantId);
+      const requiresBankid = determineRequiresBankid(input.type, {
+        bankidRequiredForClaims: settings.bankid_required_for_claims,
+        bankidRequiredForTow: settings.bankid_required_for_tow,
+      });
+      const caseNumber = await ctx.repo.allocateCaseNumber(ctx.tenantId, "default");
 
-  const row = buildIncidentRow({
-    tenantId: ctx.tenantId,
-    // The API acts on behalf of the partner, but customer_user_id must be explicit.
-    // Never default to tenant_id because that creates invalid/cross-domain data.
-    customerUserId: input.customer_user_id,
-    input,
-    vehicleId: input.vehicle_id ?? null,
-    insuranceCompanyId: input.insurance_company_id ?? null,
-    requiresBankid,
-    caseNumber,
-  });
-  const incident = await ctx.repo.createIncident(row);
+      const row = buildIncidentRow({
+        tenantId: ctx.tenantId,
+        // The API acts on behalf of the partner, but customer_user_id must be explicit.
+        // Never default to tenant_id because that creates invalid/cross-domain data.
+        customerUserId: input.customer_user_id,
+        input,
+        vehicleId: input.vehicle_id ?? null,
+        insuranceCompanyId: input.insurance_company_id ?? null,
+        requiresBankid,
+        caseNumber,
+      });
+      const incident = await ctx.repo.createIncident(row);
 
-  await ctx.repo.recordAudit({
-    tenant_id: ctx.tenantId,
-    action: "create",
-    entity_type: "incident",
-    entity_id: incident.id,
-    fields: ["type", "case_number"],
-  });
-  await enqueueWebhookEvent(ctx, "incident.created", {
-    incident_id: incident.id,
-    case_number: caseNumber,
-    type: incident.type,
-    status: incident.status,
-    requires_bankid: requiresBankid,
-  });
+      // Persist the pickup location so ETA, dispatch and the post-accept
+      // driver share all work from real coordinates.
+      if (input.pickup) {
+        await ctx.repo.upsertIncidentLocation({
+          incident_id: incident.id,
+          kind: "pickup",
+          lat: input.pickup.lat,
+          lng: input.pickup.lng,
+          address: input.pickup_address ?? null,
+        });
+      }
+      if (input.destination_address) {
+        await ctx.repo.recordAudit({
+          tenant_id: ctx.tenantId,
+          action: "create",
+          entity_type: "incident_destination",
+          entity_id: incident.id,
+          fields: ["destination_address"],
+          metadata: { destination_address: input.destination_address },
+        });
+      }
 
-  return {
-    status: 201,
-    body: {
-      incident_id: incident.id,
-      case_number: caseNumber,
-      status: incident.status,
-      requires_bankid: requiresBankid,
+      await ctx.repo.recordAudit({
+        tenant_id: ctx.tenantId,
+        action: "create",
+        entity_type: "incident",
+        entity_id: incident.id,
+        fields: ["type", "case_number"],
+      });
+      await enqueueWebhookEvent(ctx, "incident.created", {
+        incident_id: incident.id,
+        case_number: caseNumber,
+        type: incident.type,
+        status: incident.status,
+        requires_bankid: requiresBankid,
+      });
+
+      return {
+        status: 201,
+        body: {
+          incident_id: incident.id,
+          case_number: caseNumber,
+          status: incident.status,
+          requires_bankid: requiresBankid,
+        },
+      };
     },
-  };
+    (result) => ((result.body as { incident_id?: string } | undefined)?.incident_id ?? null),
+  );
 }
 
 export async function getIncident(ctx: ApiContext, id: string): Promise<RouteResult> {
@@ -286,48 +316,104 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
     throw new AppError("conflict", "BankID verification is required before requesting a tow");
   }
 
-  const job = await ctx.repo.createTowJob({
-    tenant_id: ctx.tenantId,
-    incident_id: incident.id,
-    status: "created",
-    payer_type: input.payer_type,
-    priority: input.priority,
-  });
-  await enqueueWebhookEvent(ctx, "tow.requested", {
-    incident_id: incident.id,
-    case_number: incident.case_number,
-    tow_job_id: job.id,
-    priority: input.priority,
-    payer_type: input.payer_type,
-  });
+  return withIdempotency(
+    ctx,
+    `tow.request:${incident.id}`,
+    async () => {
+      // Make sure the pickup location is stored on the incident so the
+      // customer share, ETA snapshots and the driver app get real coordinates.
+      await ctx.repo.upsertIncidentLocation({
+        incident_id: incident.id,
+        kind: "pickup",
+        lat: input.pickup.lat,
+        lng: input.pickup.lng,
+        address: null,
+      });
 
-  const outcome = await runDispatchForJob(ctx, {
-    job,
-    pickup: input.pickup,
-    payerType: input.payer_type,
-    priority: input.priority,
-    strategy: input.dispatch_strategy,
-    problemType: incident.problem_type,
-  });
+      const job = await ctx.repo.createTowJob({
+        tenant_id: ctx.tenantId,
+        incident_id: incident.id,
+        status: "created",
+        payer_type: input.payer_type,
+        priority: input.priority,
+      });
+      await enqueueWebhookEvent(ctx, "tow.requested", {
+        incident_id: incident.id,
+        case_number: incident.case_number,
+        tow_job_id: job.id,
+        priority: input.priority,
+        payer_type: input.payer_type,
+      });
 
-  const contact = await ctx.repo.getCustomerContact(incident.id);
-  await sendEmail(ctx, {
-    to: contact?.email,
-    subject: `Bärgningsärende ${incident.case_number ?? job.id} är mottaget`,
-    html: `<p>Vi har tagit emot ditt bärgningsärende.</p><p>Status: ${escapeHtml(outcome.status)}</p>`,
-    incidentId: incident.id,
-    towJobId: job.id,
-  });
+      const outcome = await runDispatchForJob(ctx, {
+        job,
+        pickup: input.pickup,
+        payerType: input.payer_type,
+        priority: input.priority,
+        strategy: input.dispatch_strategy,
+        problemType: incident.problem_type,
+      });
 
-  return {
-    status: 201,
-    body: {
-      tow_job_id: job.id,
-      status: outcome.status,
-      offered_drivers: outcome.offeredDrivers,
-      requires_manual_review: outcome.requiresManualReview,
-      strategy: outcome.strategy,
+      const contact = await ctx.repo.getCustomerContact(incident.id);
+      await sendEmail(ctx, {
+        to: contact?.email,
+        subject: `Bärgningsärende ${incident.case_number ?? job.id} är mottaget`,
+        html: `<p>Vi har tagit emot ditt bärgningsärende.</p><p>Status: ${escapeHtml(outcome.status)}</p>`,
+        incidentId: incident.id,
+        towJobId: job.id,
+      });
+
+      return {
+        status: 201,
+        body: {
+          tow_job_id: job.id,
+          status: outcome.status,
+          offered_drivers: outcome.offeredDrivers,
+          requires_manual_review: outcome.requiresManualReview,
+          strategy: outcome.strategy,
+        },
+      };
     },
+    (result) => ((result.body as { tow_job_id?: string } | undefined)?.tow_job_id ?? null),
+  );
+}
+
+/**
+ * Browser redirect target after a hosted BankID flow (TIC redirects the
+ * end-user here). We only confirm session state and hand the user back to
+ * the app — the authoritative completion comes from poll/collect/webhook.
+ * Response is a friendly Swedish HTML page, never raw errors.
+ */
+export async function bankidCallback(ctx: ApiContext, query: URLSearchParams): Promise<RouteResult> {
+  const sessionId = query.get("sessionId") ?? query.get("session_id") ?? null;
+
+  let completed = false;
+  if (sessionId) {
+    try {
+      const session = await ctx.repo.getBankidSessionById(sessionId);
+      if (session) {
+        const provider = getBankidProvider(ctx.config.bankid);
+        const result = await provider.collect(session.tic_session_id ?? session.order_ref ?? sessionId);
+        const effectiveCtx = session.tenant_id ? { ...ctx, tenantId: session.tenant_id } : ctx;
+        const handled = await handleBankidResult(effectiveCtx, session, result);
+        completed = handled.bankid_verified === true;
+      }
+    } catch {
+      // Never surface technical errors to the end user on this page; the
+      // app keeps polling and shows the real state.
+    }
+  }
+
+  const appUrl = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_CUSTOMER_WEB_URL || null;
+  const heading = completed ? "Verifieringen är klar" : "Tack!";
+  const message = completed
+    ? "Din BankID-verifiering är genomförd. Du kan nu gå tillbaka till appen."
+    : "Du kan nu gå tillbaka till appen för att se status på din verifiering.";
+  const link = appUrl ? `<p><a href="${escapeHtml(appUrl)}">Tillbaka till appen</a></p>` : "";
+  return {
+    status: 200,
+    headers: { "content-type": "text/html; charset=utf-8" },
+    rawBody: `<!doctype html><html lang="sv"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>BankID</title></head><body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc"><main style="text-align:center;padding:24px;max-width:420px"><h1 style="font-size:22px">${heading}</h1><p style="color:#334155">${message}</p>${link}</main></body></html>`,
   };
 }
 

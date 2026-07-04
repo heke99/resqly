@@ -197,7 +197,7 @@ export function Filters({ children, action }: { children: ReactNode; action?: st
             cursor: "pointer",
           }}
         >
-          Apply
+          Filtrera
         </button>
       </form>
     </Card>
@@ -217,7 +217,7 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 export function Bars({ data }: { data: Array<{ label: string; value: number }> }) {
   const max = Math.max(1, ...data.map((d) => d.value));
   if (data.length === 0) {
-    return <p style={{ opacity: 0.6, fontSize: 14 }}>No data for this period.</p>;
+    return <p style={{ opacity: 0.6, fontSize: 14 }}>Ingen data för perioden.</p>;
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -258,11 +258,11 @@ export interface Column<T> {
 
 export function DataTable<T>({ columns, rows, empty }: { columns: Column<T>[]; rows: T[]; empty?: string }) {
   if (rows.length === 0) {
-    return <EmptyState title={empty ?? "No data yet"} hint="Records you create will appear here." />;
+    return <EmptyState title={empty ?? "Ingen data ännu"} hint="Poster som skapas visas här." />;
   }
   return (
-    <Card style={{ padding: 0, overflow: "hidden" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+    <Card style={{ padding: 0, overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
         <thead>
           <tr>
             {columns.map((c) => (
@@ -288,11 +288,13 @@ export function DataTable<T>({ columns, rows, empty }: { columns: Column<T>[]; r
   );
 }
 
-export function Sidebar({ brand, items }: { brand: string; items: Array<{ href: string; label: string }> }) {
+export function Sidebar({ brand, items, footer }: { brand: string; items: Array<{ href: string; label: string }>; footer?: ReactNode }) {
   return (
     <nav
       style={{
         width: 240,
+        minWidth: 200,
+        flex: "0 1 240px",
         background: "var(--rs-color-surface)",
         padding: 20,
         minHeight: "100vh",
@@ -318,15 +320,16 @@ export function Sidebar({ brand, items }: { brand: string; items: Array<{ href: 
           </li>
         ))}
       </ul>
+      {footer ? <div style={{ marginTop: 24 }}>{footer}</div> : null}
     </nav>
   );
 }
 
 export function AppShell({ sidebar, children }: { sidebar: ReactNode; children: ReactNode }) {
   return (
-    <div style={{ display: "flex" }}>
+    <div style={{ display: "flex", flexWrap: "wrap" }}>
       {sidebar}
-      <main style={{ flex: 1, padding: 32, maxWidth: 1200 }}>{children}</main>
+      <main style={{ flex: "1 1 480px", padding: 32, maxWidth: 1200, minWidth: 0, boxSizing: "border-box" }}>{children}</main>
     </div>
   );
 }

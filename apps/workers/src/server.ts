@@ -1,14 +1,26 @@
 import { createServiceClient, type AppSupabaseClient } from "@resqly/database";
-import { optionalEnv } from "@resqly/utils";
-import { buildOfferPushMessage, sendExpoPush } from "@resqly/notifications";
+import { assertNoMockBankidInProduction, boolEnv, optionalEnv } from "@resqly/utils";
+import {
+  HttpSmsAdapter,
+  ResendEmailAdapter,
+  buildOfferPushMessage,
+  resolveSmsConfig,
+  sendExpoPush,
+  type ChannelAdapter,
+} from "@resqly/notifications";
+import { MapsClient } from "@resqly/maps";
 import { evaluateOfferExpiry, type OfferRow } from "./jobs/offer-expiry";
 import { selectOfferPushRetries, type OfferPushRow } from "./jobs/offer-push";
 import { pollWebhookDeliveries } from "./jobs/webhook-db-delivery";
+import { pollOperationalNotificationQueue } from "./jobs/notification-queue-db";
+import { pollOfferFallbacks } from "./jobs/offer-fallback-db";
+import { pollEtaRefresh } from "./jobs/eta-refresh-db";
 
 /**
- * Worker runner. Polls the database for due offer expiries and failed offer
- * pushes and processes them on an interval. The job decision logic lives in
- * ./jobs and is unit-tested in isolation; this module wires it to Supabase.
+ * Worker runner. Polls the database for due offer expiries, failed offer
+ * pushes, SMS/manual-review fallbacks, ETA refreshes and webhook deliveries
+ * and processes them on an interval. The job decision logic lives in ./jobs
+ * and is unit-tested in isolation; this module wires it to Supabase.
  *
  * When Supabase env is not configured the worker starts cleanly and the tick
  * is a no-op (useful for local/dev without a database).
@@ -22,6 +34,37 @@ function dbOrNull(): AppSupabaseClient | null {
   const key = optionalEnv("SUPABASE_SERVICE_ROLE_KEY");
   if (!url || !key) return null;
   return createServiceClient(url, key);
+}
+
+function buildChannelAdapters(): Partial<Record<"sms" | "email", ChannelAdapter>> {
+  const adapters: Partial<Record<"sms" | "email", ChannelAdapter>> = {};
+  const sms = resolveSmsConfig();
+  if (sms) {
+    try {
+      adapters.sms = new HttpSmsAdapter(sms);
+    } catch (e) {
+      console.error("[workers] SMS adapter disabled:", e instanceof Error ? e.message : e);
+    }
+  }
+  const resendKey = optionalEnv("RESEND_API_KEY");
+  const emailFrom = optionalEnv("EMAIL_FROM");
+  if (boolEnv("NOTIFICATIONS_EMAIL_ENABLED", true) && resendKey && emailFrom) {
+    adapters.email = new ResendEmailAdapter({
+      apiKey: resendKey,
+      from: emailFrom,
+      replyTo: optionalEnv("EMAIL_REPLY_TO") || undefined,
+    });
+  }
+  return adapters;
+}
+
+function buildMapsClient(): MapsClient {
+  return new MapsClient({
+    serverKey: optionalEnv("GOOGLE_MAPS_SERVER_KEY") || undefined,
+    routesEnabled: boolEnv("GOOGLE_MAPS_ROUTES_API_ENABLED", true),
+    routeMatrixEnabled: boolEnv("GOOGLE_MAPS_ROUTE_MATRIX_ENABLED", true),
+    tenantId: "workers",
+  });
 }
 
 /** Expire stale pending offers and escalate jobs with no remaining candidate. */
@@ -57,6 +100,25 @@ export async function pollOfferExpiry(db: AppSupabaseClient, now = Date.now()): 
   }
 }
 
+/** Approximate pickup area (rounded coordinates — no exact address pre-accept). */
+async function approxAreaForJob(db: AppSupabaseClient, towJobId: string): Promise<string> {
+  const { data: job } = await db
+    .from("tow_jobs" as never)
+    .select("incident_id")
+    .eq("id", towJobId)
+    .maybeSingle();
+  const incidentId = (job as { incident_id: string } | null)?.incident_id;
+  if (!incidentId) return "okänt område";
+  const { data: loc } = await db
+    .from("incident_locations" as never)
+    .select("lat, lng")
+    .eq("incident_id", incidentId)
+    .eq("kind", "pickup")
+    .maybeSingle();
+  const l = loc as { lat: number; lng: number } | null;
+  return l ? `${l.lat.toFixed(1)}, ${l.lng.toFixed(1)}` : "okänt område";
+}
+
 /** Retry pushes for pending offers whose last push attempt failed. */
 export async function pollOfferPushRetries(db: AppSupabaseClient): Promise<void> {
   if (!pushEnabled) return;
@@ -84,12 +146,13 @@ export async function pollOfferPushRetries(db: AppSupabaseClient): Promise<void>
         .eq("driver_id", retry.driverId);
       continue;
     }
+    const approxArea = await approxAreaForJob(db, retry.towJobId);
     const messages = tokens.map((t) =>
       buildOfferPushMessage({
         expoPushToken: t,
         offerId: `${retry.towJobId}:${retry.driverId}`,
         towJobId: retry.towJobId,
-        approxArea: "your area",
+        approxArea,
         problemType: "assistance",
         expiresAt: offer?.expires_at ?? new Date().toISOString(),
       }),
@@ -108,22 +171,42 @@ export async function pollOfferPushRetries(db: AppSupabaseClient): Promise<void>
   }
 }
 
-async function tick(db: AppSupabaseClient | null): Promise<void> {
+interface TickDeps {
+  adapters: Partial<Record<"sms" | "email", ChannelAdapter>>;
+  maps: MapsClient;
+}
+
+async function tick(db: AppSupabaseClient | null, deps: TickDeps): Promise<void> {
   if (!db) return;
-  try {
-    await pollOfferExpiry(db);
-    await pollOfferPushRetries(db);
-    await pollWebhookDeliveries(db);
-  } catch (e) {
-    console.error("[workers] tick error", e instanceof Error ? e.message : e);
+  // Each job is individually guarded: one failing job must never take down
+  // the loop or starve the other jobs.
+  const jobs: Array<[string, () => Promise<void>]> = [
+    ["offer-expiry", () => pollOfferExpiry(db)],
+    ["offer-push-retry", () => pollOfferPushRetries(db)],
+    ["offer-fallback", () => pollOfferFallbacks(db)],
+    ["notification-queue", () => pollOperationalNotificationQueue(db, deps.adapters)],
+    ["eta-refresh", () => pollEtaRefresh(db, deps.maps)],
+    ["webhook-delivery", () => pollWebhookDeliveries(db)],
+  ];
+  for (const [name, run] of jobs) {
+    try {
+      await run();
+    } catch (e) {
+      console.error(`[workers] ${name} error`, e instanceof Error ? e.message : e);
+    }
   }
 }
 
 async function main(): Promise<void> {
+  // Hard production guard: never run with mock BankID config in production.
+  assertNoMockBankidInProduction();
   const db = dbOrNull();
-  console.log(`[workers] starting, interval=${intervalMs}ms, db=${db ? "on" : "off"}`);
+  const deps: TickDeps = { adapters: buildChannelAdapters(), maps: buildMapsClient() };
+  console.log(
+    `[workers] starting, interval=${intervalMs}ms, db=${db ? "on" : "off"}, sms=${deps.adapters.sms ? "on" : "off"}, email=${deps.adapters.email ? "on" : "off"}`,
+  );
   for (;;) {
-    await tick(db);
+    await tick(db, deps);
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 }

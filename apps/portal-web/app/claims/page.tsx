@@ -21,19 +21,19 @@ export default async function ClaimsPage({
   const damageCases = incidents.filter((i) => String(i.type) === "damage_claim");
 
   const claimColumns: Column<Row>[] = [
-    { key: "claim", header: "Claim", render: (r) => String(r.claim_number ?? String(r.id).slice(0, 8)) },
+    { key: "claim", header: "Skadeärende", render: (r) => String(r.claim_number ?? String(r.id).slice(0, 8)) },
     { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "—")} /> },
-    { key: "created", header: "Created", render: (r) => String(r.created_at ?? "").slice(0, 16).replace("T", " ") },
+    { key: "created", header: "Skapat", render: (r) => String(r.created_at ?? "").slice(0, 16).replace("T", " ") },
   ];
   const caseColumns: Column<Row>[] = [
     {
       key: "case",
-      header: "Case",
+      header: "Ärende",
       render: (r) => <a href={`/cases/${String(r.id)}`}>{String(r.case_number ?? String(r.id).slice(0, 8))}</a>,
     },
-    { key: "damage", header: "Damage type", render: (r) => String(r.damage_type ?? "—").replaceAll("_", " ") },
+    { key: "damage", header: "Skadetyp", render: (r) => String(r.damage_type ?? "—").replaceAll("_", " ") },
     { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "—")} /> },
-    { key: "created", header: "Created", render: (r) => String(r.created_at ?? "").slice(0, 16).replace("T", " ") },
+    { key: "created", header: "Skapat", render: (r) => String(r.created_at ?? "").slice(0, 16).replace("T", " ") },
   ];
 
   return (

@@ -195,6 +195,14 @@ export interface ApiRepo {
   allocateCaseNumber(tenantId: string, scope: string): Promise<string>;
 
   createIncident(row: Record<string, unknown>): Promise<IncidentRecord>;
+  /** Insert or replace an incident location (kind = pickup/destination). */
+  upsertIncidentLocation(row: {
+    incident_id: string;
+    kind: string;
+    lat: number;
+    lng: number;
+    address?: string | null;
+  }): Promise<void>;
   getIncident(tenantId: string, id: string): Promise<IncidentRecord | null>;
   setIncidentStatus(id: string, status: IncidentStatus): Promise<void>;
   setIncidentBankidVerified(id: string): Promise<void>;
@@ -208,6 +216,8 @@ export interface ApiRepo {
 
   createTowJob(row: Record<string, unknown>): Promise<TowJobRecord>;
   getTowJob(tenantId: string, id: string): Promise<TowJobRecord | null>;
+  /** Lookup by id only — callers MUST verify driver/tenant authorization. */
+  getTowJobById(id: string): Promise<TowJobRecord | null>;
   listTowJobs(tenantId: string, opts: { status?: string; limit: number }): Promise<TowJobRecord[]>;
   setTowJobStatus(id: string, status: TowJobStatus): Promise<void>;
   addTowJobStatusEvent(row: Record<string, unknown>): Promise<void>;
@@ -247,6 +257,8 @@ export interface ApiRepo {
       distance_meters: number | null;
     }>
   >;
+  /** Jobs currently assigned to the driver (accepted through transporting). */
+  listDriverJobs(driverId: string): Promise<TowJobRecord[]>;
   listDriverDevices(driverId: string): Promise<DriverDeviceRecord[]>;
   markOfferPush(jobId: string, driverId: string, status: string, error?: string | null): Promise<void>;
 
@@ -279,4 +291,21 @@ export interface ApiRepo {
 
   /** Resolve the driver record id for an authenticated driver user (if any). */
   getDriverIdForUser(userId: string): Promise<string | null>;
+
+  /**
+   * Replay protection: returns the stored response for a previously
+   * completed request with the same scope + action + idempotency key.
+   */
+  findIdempotentResponse(
+    scope: string,
+    action: string,
+    key: string,
+  ): Promise<{ resource_id: string | null; response: unknown } | null>;
+  storeIdempotentResponse(
+    scope: string,
+    action: string,
+    key: string,
+    resourceId: string | null,
+    response: unknown,
+  ): Promise<void>;
 }

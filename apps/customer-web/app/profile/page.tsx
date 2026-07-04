@@ -27,7 +27,7 @@ export default function ProfilePage() {
     window.location.href = "/login";
   }
 
-  if (!supabase) return <p>Tjänsten är inte tillgänglig förrän Supabase är konfigurerat.</p>;
+  if (!supabase) return <p>Tjänsten är inte tillgänglig just nu. Försök igen om en stund.</p>;
   if (authed === false)
     return (
       <p>

@@ -4,8 +4,11 @@ import { buildSignatureRecord } from "@resqly/bankid";
 import { requireCustomer, jsonError } from "../../../../_lib";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (process.env.NODE_ENV === "production" || process.env.BANKID_MOCK_ENABLED !== "true") {
-    return jsonError(404, "BankID mock is disabled. Use /bankid/sign.");
+  // Hard production guard: this local/staging-only helper is invisible in
+  // production regardless of BANKID_MOCK_ENABLED.
+  const isProduction = (process.env.APP_ENV ?? process.env.NODE_ENV) === "production";
+  if (isProduction || process.env.NODE_ENV === "production" || process.env.BANKID_MOCK_ENABLED !== "true") {
+    return jsonError(404, "Sidan hittades inte.");
   }
   const session = await requireCustomer(request);
   if (session instanceof NextResponse) return session;

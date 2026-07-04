@@ -19,12 +19,12 @@ export default async function CompletionReportsPage({
 
   const reports = await listCompletionReports(tenant.id);
   const columns: Column<Row>[] = [
-    { key: "job", header: "Job", render: (r) => String(r.tow_job_id ?? "").slice(0, 8) },
-    { key: "work", header: "Work performed", render: (r) => String(r.work_performed ?? "—") },
-    { key: "picked", header: "Picked up", render: (r) => (r.vehicle_picked_up ? "Yes" : "No") },
+    { key: "job", header: "Uppdrag", render: (r) => <a href={`/jobs/${String(r.tow_job_id)}`}>{String(r.tow_job_id ?? "").slice(0, 8).toUpperCase()}</a> },
+    { key: "work", header: "Utfört arbete", render: (r) => String(r.work_performed ?? "—") },
+    { key: "picked", header: "Fordon hämtat", render: (r) => (r.vehicle_picked_up ? "Ja" : "Nej") },
     { key: "waiting", header: "Waiting (min)", render: (r) => String(r.waiting_minutes ?? 0) },
-    { key: "failed", header: "Failed trip", render: (r) => (r.failed_trip ? "Yes" : "No") },
-    { key: "created", header: "Submitted", render: (r) => String(r.created_at ?? "").slice(0, 16).replace("T", " ") },
+    { key: "failed", header: "Bomkörning", render: (r) => (r.failed_trip ? "Ja" : "Nej") },
+    { key: "created", header: "Inskickad", render: (r) => String(r.created_at ?? "").slice(0, 16).replace("T", " ") },
   ];
 
   return (

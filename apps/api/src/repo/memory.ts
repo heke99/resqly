@@ -62,6 +62,8 @@ export class MemoryRepo implements ApiRepo {
   invoices: Array<Record<string, unknown>> = [];
   auditLogs: Array<Record<string, unknown>> = [];
   apiRequestLogs: Array<Record<string, unknown>> = [];
+  incidentLocations: Array<{ incident_id: string; kind: string; lat: number; lng: number; address: string | null }> = [];
+  idempotencyRecords: Array<{ scope: string; action: string; key: string; resource_id: string | null; response: unknown }> = [];
   bankidSessions = new Map<string, BankidSessionRecord>();
   notificationDeliveries: Array<Record<string, unknown>> = [];
   webhookDeliveries: Array<Record<string, unknown>> = [];
@@ -154,6 +156,24 @@ export class MemoryRepo implements ApiRepo {
     this.incidents.set(rec.id, rec);
     return rec;
   }
+  async upsertIncidentLocation(row: {
+    incident_id: string;
+    kind: string;
+    lat: number;
+    lng: number;
+    address?: string | null;
+  }) {
+    this.incidentLocations = this.incidentLocations.filter(
+      (l) => !(l.incident_id === row.incident_id && l.kind === row.kind),
+    );
+    this.incidentLocations.push({ ...row, address: row.address ?? null });
+    // Keep the contact pickup in sync so dispatch/share tests see real coords.
+    const contact = this.contacts.get(row.incident_id);
+    if (contact && row.kind === "pickup") {
+      contact.pickup = { lat: row.lat, lng: row.lng };
+      contact.pickup_address = row.address ?? contact.pickup_address;
+    }
+  }
   async getIncident(tenantId: string, id: string) {
     const inc = this.incidents.get(id);
     return inc && inc.tenant_id === tenantId ? inc : null;
@@ -208,6 +228,9 @@ export class MemoryRepo implements ApiRepo {
     const job = this.towJobs.get(id);
     return job && job.tenant_id === tenantId ? job : null;
   }
+  async getTowJobById(id: string) {
+    return this.towJobs.get(id) ?? null;
+  }
   async listTowJobs(tenantId: string, opts: { status?: string; limit: number }) {
     return [...this.towJobs.values()]
       .filter((j) => j.tenant_id === tenantId && (!opts.status || j.status === opts.status))
@@ -251,15 +274,28 @@ export class MemoryRepo implements ApiRepo {
     const o = this.offers.find((x) => x.tow_job_id === jobId && x.driver_id === driverId);
     if (o) o.status = status;
   }
+  // Mirrors the accept_tow_offer SQL function (0020): row-lock semantics are
+  // approximated, expired offers are rejected, and a retry by the winning
+  // driver is idempotent.
   async acceptOffer(jobId: string, driverId: string): Promise<AcceptOfferResult> {
     const job = this.towJobs.get(jobId);
     if (!job) return { accepted: false, towCompanyId: null, reason: "job_not_found" };
     if (job.driver_id && job.driver_id !== driverId) {
       return { accepted: false, towCompanyId: job.tow_company_id ?? null, reason: "already_assigned" };
     }
+    if (job.driver_id === driverId && job.status === "accepted") {
+      return { accepted: true, towCompanyId: job.tow_company_id ?? null, reason: "already_accepted_by_driver" };
+    }
+    if (job.status !== "offered" && job.status !== "matching") {
+      return { accepted: false, towCompanyId: job.tow_company_id ?? null, reason: "job_not_offerable" };
+    }
     const offer = this.offers.find((o) => o.tow_job_id === jobId && o.driver_id === driverId);
     if (!offer || offer.status !== "pending") {
       return { accepted: false, towCompanyId: job.tow_company_id ?? null, reason: "no_pending_offer" };
+    }
+    if (offer.expires_at && new Date(offer.expires_at).getTime() < Date.now()) {
+      offer.status = "expired";
+      return { accepted: false, towCompanyId: job.tow_company_id ?? null, reason: "offer_expired" };
     }
     offer.status = "accepted";
     for (const o of this.offers) {
@@ -342,6 +378,12 @@ export class MemoryRepo implements ApiRepo {
         };
       });
   }
+  async listDriverJobs(driverId: string): Promise<TowJobRecord[]> {
+    const active = ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"];
+    return [...this.towJobs.values()].filter(
+      (j) => j.driver_id === driverId && active.includes(j.status),
+    );
+  }
   async listDriverDevices(driverId: string): Promise<DriverDeviceRecord[]> {
     return this.devices
       .filter((d) => d.driver_id === driverId)
@@ -387,5 +429,22 @@ export class MemoryRepo implements ApiRepo {
   }
   async getDriverIdForUser(userId: string) {
     return this.driverUsers.get(userId) ?? null;
+  }
+  async findIdempotentResponse(scope: string, action: string, key: string) {
+    const rec = this.idempotencyRecords.find(
+      (r) => r.scope === scope && r.action === action && r.key === key,
+    );
+    return rec ? { resource_id: rec.resource_id, response: rec.response } : null;
+  }
+  async storeIdempotentResponse(
+    scope: string,
+    action: string,
+    key: string,
+    resourceId: string | null,
+    response: unknown,
+  ) {
+    const existing = await this.findIdempotentResponse(scope, action, key);
+    if (existing) return;
+    this.idempotencyRecords.push({ scope, action, key, resource_id: resourceId, response });
   }
 }

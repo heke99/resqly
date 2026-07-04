@@ -23,6 +23,8 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
   const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
     if (!supabase) return;
@@ -31,7 +33,14 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
     setAuthed(true);
     const { data: inc } = await supabase.from("incidents").select("*").eq("id", id).maybeSingle();
     setIncident((inc as Incident | null) ?? null);
-    const { data: job } = await supabase.from("tow_jobs").select("id, status").eq("incident_id", id).maybeSingle();
+    setLoaded(true);
+    const { data: job } = await supabase
+      .from("tow_jobs")
+      .select("id, status")
+      .eq("incident_id", id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
     const jobRow = job as { id: string; status: TowJobStatus } | null;
     if (jobRow) {
       setTowStatus(jobRow.status);
@@ -60,19 +69,27 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
   }
 
   async function verifyWithBankid() {
+    if (busy) return;
     const token = await accessToken();
     if (!token) return;
-    const res = await fetch(`/api/customer/cases/${id}/bankid/sign`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) { setMessage(json.error ?? "BankID-verifieringen kunde inte startas."); return; }
-    if (json.bankid_verified || json.status === "complete") {
-      setMessage("BankID verifierad.");
-      await load();
-      return;
-    }
-    if (json.session_id) {
-      setMessage("BankID är startat. Slutför i BankID-appen.");
-      await pollBankid(json.session_id);
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/customer/cases/${id}/bankid/sign`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { setMessage(json.error ?? "BankID-verifieringen kunde inte startas. Försök igen."); return; }
+      if (json.bankid_verified || json.status === "complete") {
+        setMessage("BankID verifierad.");
+        await load();
+        return;
+      }
+      if (json.session_id) {
+        setMessage("BankID är startat. Slutför i BankID-appen.");
+        await pollBankid(json.session_id);
+      }
+    } catch {
+      setMessage("Något gick fel. Kontrollera din uppkoppling och försök igen.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -98,17 +115,34 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
   }
 
   async function requestTow() {
+    if (busy) return;
     const token = await accessToken();
     if (!token) return;
-    const res = await fetch(`/api/customer/cases/${id}/request-tow`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify({ priority: "normal" }) });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) setMessage(json.error ?? "Kunde inte begära bärgning.");
-    else { setMessage(`Bärgning begärd: ${towStatusLabel(json.status)}`); await load(); }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/customer/cases/${id}/request-tow`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify({ priority: "normal" }) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) setMessage(json.error ?? "Bärgningen kunde inte skickas. Försök igen.");
+      else { setMessage(`Bärgning begärd: ${towStatusLabel(json.status)}`); await load(); }
+    } catch {
+      setMessage("Något gick fel. Kontrollera din uppkoppling och försök igen.");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  if (!supabase) return <p>Tjänsten är inte konfigurerad ännu.</p>;
+  if (!supabase) return <p>Tjänsten är inte tillgänglig just nu. Försök igen om en stund.</p>;
   if (authed === false) return <p>Du behöver <a href="/login">logga in</a>.</p>;
-  if (!incident) return <p>Laddar ärende…</p>;
+  if (!incident && !loaded) return <p>Laddar ärende…</p>;
+  if (!incident) {
+    return (
+      <div>
+        <h1 style={{ fontSize: 24 }}>Ärendet hittades inte</h1>
+        <p style={{ opacity: 0.72 }}>Ärendet finns inte eller tillhör ett annat konto.</p>
+        <a className="bigbtn" href="/cases">Till mina ärenden</a>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -119,7 +153,7 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
         <div className="status-card">
           <strong>BankID krävs</strong>
           <p className="vehicle-meta">Verifiera ärendet innan det skickas vidare till försäkringsbolag/bärgning.</p>
-          <button className="bigbtn" onClick={verifyWithBankid}>Verifiera med BankID</button>
+          <button className="bigbtn" onClick={verifyWithBankid} disabled={busy}>{busy ? "Väntar på BankID…" : "Verifiera med BankID"}</button>
         </div>
       ) : null}
 
@@ -127,7 +161,7 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
         <div className="status-card">
           <strong>Redo för bärgning</strong>
           <p className="vehicle-meta">Vi kan nu begära bärgning för ärendet.</p>
-          <button className="bigbtn" onClick={requestTow}>Begär bärgning</button>
+          <button className="bigbtn" onClick={requestTow} disabled={busy}>{busy ? "Skickar…" : "Begär bärgning"}</button>
         </div>
       ) : null}
 
@@ -145,7 +179,7 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
 
       <div className="status-card" style={{ marginTop: 12 }}>
         <strong>Vad händer nu?</strong>
-        <p className="vehicle-meta">Status uppdateras här. Om realtime är nere hämtar appen ny status via polling.</p>
+        <p className="vehicle-meta">Statusen på ärendet uppdateras automatiskt på den här sidan.</p>
       </div>
       {message ? <p>{message}</p> : null}
     </div>

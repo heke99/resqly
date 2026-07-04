@@ -93,6 +93,26 @@ export class SupabaseRepo implements ApiRepo {
     if (error) throw new Error(error.message);
     return data as IncidentRecord;
   }
+  async upsertIncidentLocation(row: {
+    incident_id: string;
+    kind: string;
+    lat: number;
+    lng: number;
+    address?: string | null;
+  }): Promise<void> {
+    await this.table("incident_locations")
+      .delete()
+      .eq("incident_id", row.incident_id)
+      .eq("kind", row.kind);
+    const { error } = await this.table("incident_locations").insert({
+      incident_id: row.incident_id,
+      kind: row.kind,
+      lat: row.lat,
+      lng: row.lng,
+      address: row.address ?? null,
+    } as never);
+    if (error) throw new Error(error.message);
+  }
   async getIncident(tenantId: string, id: string): Promise<IncidentRecord | null> {
     const { data } = await this.table("incidents")
       .select("*")
@@ -199,6 +219,10 @@ export class SupabaseRepo implements ApiRepo {
       .eq("tenant_id", tenantId)
       .eq("id", id)
       .maybeSingle();
+    return (data as TowJobRecord | null) ?? null;
+  }
+  async getTowJobById(id: string): Promise<TowJobRecord | null> {
+    const { data } = await this.table("tow_jobs").select("*").eq("id", id).maybeSingle();
     return (data as TowJobRecord | null) ?? null;
   }
   async listTowJobs(tenantId: string, opts: { status?: string; limit: number }) {
@@ -414,6 +438,16 @@ export class SupabaseRepo implements ApiRepo {
     return result;
   }
 
+  async listDriverJobs(driverId: string): Promise<TowJobRecord[]> {
+    const { data } = await this.table("tow_jobs")
+      .select("*")
+      .eq("driver_id", driverId)
+      .in("status", ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"] as never)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    return (data as TowJobRecord[] | null) ?? [];
+  }
+
   async listDriverDevices(driverId: string): Promise<DriverDeviceRecord[]> {
     const { data } = await this.table("driver_devices")
       .select("expo_push_token, platform")
@@ -553,5 +587,33 @@ export class SupabaseRepo implements ApiRepo {
   async getDriverIdForUser(userId: string): Promise<string | null> {
     const { data } = await this.table("tow_drivers").select("id").eq("user_id", userId).maybeSingle();
     return (data as { id: string } | null)?.id ?? null;
+  }
+
+  async findIdempotentResponse(scope: string, action: string, key: string) {
+    const { data } = await this.table("request_idempotency_keys")
+      .select("resource_id, response")
+      .eq("scope", scope)
+      .eq("action", action)
+      .eq("idempotency_key", key)
+      .maybeSingle();
+    return (data as { resource_id: string | null; response: unknown } | null) ?? null;
+  }
+  async storeIdempotentResponse(
+    scope: string,
+    action: string,
+    key: string,
+    resourceId: string | null,
+    response: unknown,
+  ): Promise<void> {
+    await this.table("request_idempotency_keys").upsert(
+      {
+        scope,
+        action,
+        idempotency_key: key,
+        resource_id: resourceId,
+        response,
+      } as never,
+      { onConflict: "scope,action,idempotency_key", ignoreDuplicates: true } as never,
+    );
   }
 }

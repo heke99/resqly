@@ -22,12 +22,12 @@ export default async function OffersPage({
   const history = offers.filter((o) => String(o.status) !== "pending");
 
   const columns: Column<Row>[] = [
-    { key: "job", header: "Job", render: (r) => String(r.tow_job_id ?? "").slice(0, 8) },
-    { key: "driver", header: "Driver", render: (r) => String(r.driver_id ?? "—").slice(0, 8) },
+    { key: "job", header: "Uppdrag", render: (r) => <a href={`/jobs/${String(r.tow_job_id)}`}>{String(r.tow_job_id ?? "").slice(0, 8).toUpperCase()}</a> },
+    { key: "driver", header: "Förare", render: (r) => String(r.driver_id ?? "—").slice(0, 8) },
     { key: "status", header: "Status", render: (r) => <StatusChip status={String(r.status ?? "—")} /> },
-    { key: "rank", header: "Rank", render: (r) => String(r.rank ?? 0) },
-    { key: "expires", header: "Expires", render: (r) => String(r.expires_at ?? "").slice(0, 16).replace("T", " ") },
-    { key: "push", header: "Push", render: (r) => <StatusChip status={String(r.push_status ?? "pending")} /> },
+    { key: "rank", header: "Turordning", render: (r) => String(r.rank ?? 0) },
+    { key: "expires", header: "Gäller till", render: (r) => String(r.expires_at ?? "").slice(0, 16).replace("T", " ") },
+    { key: "push", header: "Notis", render: (r) => <StatusChip status={String(r.push_status ?? "pending")} /> },
   ];
 
   return (

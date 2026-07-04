@@ -1,12 +1,14 @@
 import type { AppSupabaseClient } from "@resqly/database";
-import { buildSignatureRecord, getBankidProvider, type BankidCollectResult } from "@resqly/bankid";
+import { buildSignatureRecord, type BankidCollectResult } from "@resqly/bankid";
 
 export function bankidConfig() {
   const env = (process.env.BANKID_ENV ?? (process.env.NODE_ENV === "production" ? "production" : "mock")) as "mock" | "test" | "production";
   const provider = (process.env.BANKID_PROVIDER ?? (env === "production" ? "tic" : "mock")) as "mock" | "tic";
   const mockEnabled = process.env.BANKID_MOCK_ENABLED === "true" || env === "mock";
-  if (process.env.NODE_ENV === "production" && mockEnabled) {
-    throw new Error("BANKID_MOCK_ENABLED must be false in production");
+  // Hard production guard: mock/test BankID can never run in production.
+  const isProduction = (process.env.APP_ENV ?? process.env.NODE_ENV) === "production";
+  if (isProduction && (mockEnabled || env !== "production" || provider !== "tic")) {
+    throw new Error("Mock/test BankID configuration is not allowed in production");
   }
   return {
     env,
@@ -18,6 +20,16 @@ export function bankidConfig() {
       defaultProvider: "bankid" as const,
     },
   };
+}
+
+/** Pepper for hashing personal numbers. Weak dev fallback is blocked in production. */
+export function bankidPepper(): string {
+  const pepper = process.env.ENCRYPTION_KEY;
+  if (pepper) return pepper;
+  if ((process.env.APP_ENV ?? process.env.NODE_ENV) === "production") {
+    throw new Error("ENCRYPTION_KEY is required in production");
+  }
+  return "dev-only-change-me";
 }
 
 export function customerVisibleBankidText(incident: { case_number?: string | null; type?: string | null; problem_type?: string | null; damage_type?: string | null }): string {
@@ -72,7 +84,7 @@ export async function completeCustomerBankidSession(input: {
       incidentId: null,
       orderRef: result.orderRef,
       environment: bankidConfig().env,
-      pepper: process.env.ENCRYPTION_KEY ?? "dev-only-change-me",
+      pepper: bankidPepper(),
       signedPayload: payload,
       completion: result.completionData,
       ip: ip ?? null,
@@ -138,7 +150,7 @@ export async function completeCustomerBankidSession(input: {
     incidentId: session.incident_id,
     orderRef: result.orderRef,
     environment: bankidConfig().env,
-    pepper: process.env.ENCRYPTION_KEY ?? "dev-only-change-me",
+    pepper: bankidPepper(),
     signedPayload: payload,
     completion: result.completionData,
     ip: ip ?? null,
