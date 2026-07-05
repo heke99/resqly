@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCustomer, jsonError, replayIfIdempotent, storeIdempotentResponse } from "../_lib";
 import { recordConsent, type ConsentKind } from "../_consent";
+import { sendCustomerEmail, escapeHtml } from "../_email";
 
 const TOWING_TYPES = new Set(["towing", "roadside_assistance"]);
 
@@ -207,6 +208,17 @@ export async function POST(request: Request) {
     fields: ["vehicle_id", "insurance_company_id", "case_number", "status"],
     metadata: { mode },
   } as never);
+
+  await sendCustomerEmail(db, {
+    tenantId,
+    to: user.email,
+    subject: `Vi har tagit emot ditt ärende ${caseNo}`,
+    html: requiresBankid
+      ? `<p>Ditt ärende <strong>${escapeHtml(String(caseNo))}</strong> är skapat.</p><p>Nästa steg: verifiera ärendet med BankID i appen så att det kan skickas vidare.</p>`
+      : `<p>Ditt ärende <strong>${escapeHtml(String(caseNo))}</strong> är skapat.</p><p>Du kan följa status i appen.</p>`,
+    incidentId,
+    dedupeKey: `email:case_created:${incidentId}`,
+  });
 
   const responseBody = { incident_id: incidentId, case_number: caseNo, status: initialStatus, requires_bankid: requiresBankid, mode };
   await storeIdempotentResponse(db, user.id, "case.create", idemKey, incidentId, responseBody);

@@ -532,7 +532,18 @@ export class SupabaseRepo implements ApiRepo {
   }
 
   async recordNotificationDelivery(row: Record<string, unknown>): Promise<void> {
+    // A dedupe-key conflict means the notification was already recorded —
+    // silently skip so retries stay idempotent.
     await this.table("notification_deliveries").insert(row as never);
+  }
+
+  async hasNotificationDelivery(dedupeKey: string): Promise<boolean> {
+    const { data } = await this.table("notification_deliveries")
+      .select("id")
+      .eq("dedupe_key", dedupeKey)
+      .limit(1)
+      .maybeSingle();
+    return Boolean(data);
   }
 
   async enqueueWebhookEvent(tenantId: string, event: string, payload: Record<string, unknown>): Promise<void> {

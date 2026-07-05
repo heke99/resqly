@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCustomer, jsonError } from "../../../_lib";
+import { sendCustomerEmail } from "../../../_email";
 
 /** Incident statuses a customer may cancel from without support involvement. */
 const CANCELLABLE_INCIDENT_STATUSES = new Set([
@@ -98,6 +99,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     fields: ["status"],
     metadata: { from: inc.status, to: "cancelled", by: "customer", tow_job_cancelled: liveJob?.id ?? null },
   } as never);
+
+  await sendCustomerEmail(db, {
+    tenantId: inc.tenant_id,
+    to: user.email,
+    subject: "Ditt ärende är avbrutet",
+    html: `<p>Ditt ärende är avbrutet enligt din begäran.</p><p>Behöver du hjälp igen är det bara att skapa ett nytt ärende.</p>`,
+    incidentId: inc.id,
+    dedupeKey: `email:case_cancelled:${inc.id}`,
+  });
 
   return NextResponse.json({ status: "cancelled", tow_job_cancelled: Boolean(liveJob) });
 }

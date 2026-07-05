@@ -298,6 +298,8 @@ export interface ApiRepo {
   markOfferPush(jobId: string, driverId: string, status: string, error?: string | null): Promise<void>;
 
   recordNotificationDelivery(row: Record<string, unknown>): Promise<void>;
+  /** True when a notification with this dedupe key was already recorded. */
+  hasNotificationDelivery(dedupeKey: string): Promise<boolean>;
   enqueueWebhookEvent(tenantId: string, event: string, payload: Record<string, unknown>): Promise<void>;
   recordUsageEvent(tenantId: string, kind: string, quantity?: number): Promise<void>;
 

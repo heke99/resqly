@@ -5,6 +5,7 @@ import {
   orchestrateDispatch,
 } from "@resqly/dispatch";
 import { requireCustomer, jsonError, replayIfIdempotent, storeIdempotentResponse } from "../../../_lib";
+import { sendCustomerEmail } from "../../../_email";
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -191,6 +192,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (outcome.status === "offered") {
     await db.from("incidents" as never).update({ status: "submitted" } as never).eq("id", inc.id).eq("customer_user_id", user.id);
   }
+
+  await sendCustomerEmail(db, {
+    tenantId: inc.tenant_id,
+    to: user.email,
+    subject: `Bärgning begärd för ärende ${inc.case_number ?? ""}`.trim(),
+    html:
+      outcome.status === "offered"
+        ? `<p>Vi söker nu en bärgare åt dig. Du får besked så snart någon accepterar uppdraget.</p>`
+        : `<p>Din förfrågan hanteras manuellt av en handläggare. Vi hör av oss så snart som möjligt.</p>`,
+    incidentId: inc.id,
+    towJobId: jobId,
+    dedupeKey: `email:tow_requested:${jobId}`,
+  });
 
   const okBody = {
     tow_job_id: jobId,

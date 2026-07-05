@@ -437,7 +437,13 @@ export class MemoryRepo implements ApiRepo {
     if (o) o.push_status = status;
   }
   async recordNotificationDelivery(row: Record<string, unknown>) {
+    if (row.dedupe_key && this.notificationDeliveries.some((d) => d.dedupe_key === row.dedupe_key)) {
+      return;
+    }
     this.notificationDeliveries.push(row);
+  }
+  async hasNotificationDelivery(dedupeKey: string): Promise<boolean> {
+    return this.notificationDeliveries.some((d) => d.dedupe_key === dedupeKey);
   }
   async enqueueWebhookEvent(tenantId: string, event: string, payload: Record<string, unknown>) {
     this.webhookDeliveries.push({ tenant_id: tenantId, event, payload, status: "pending" });

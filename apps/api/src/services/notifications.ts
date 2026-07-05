@@ -18,10 +18,17 @@ export async function sendEmail(
     incidentId?: string | null;
     towJobId?: string | null;
     provider?: "resend";
+    /** Business-event key (e.g. "email:driver_accepted:<job>") — the same
+     * key is never sent twice, making retries idempotent. */
+    dedupeKey?: string;
   },
 ): Promise<void> {
   if (!params.to) return;
   if (ctx.config.email?.enabled === false) return;
+  if (params.dedupeKey) {
+    const alreadySent = await ctx.repo.hasNotificationDelivery(params.dedupeKey).catch(() => false);
+    if (alreadySent) return;
+  }
   const apiKey = ctx.config.email?.resendApiKey;
   const from = ctx.config.email?.from;
   if (!apiKey || !from) {
@@ -36,6 +43,7 @@ export async function sendEmail(
       status: "skipped",
       error: "Resend is not configured",
       payload: { reason: "missing_resend_env" },
+      dedupe_key: params.dedupeKey ?? null,
     }).catch(() => undefined);
     return;
   }
@@ -65,6 +73,8 @@ export async function sendEmail(
     error: result.error ?? null,
     payload: { subject: params.subject },
     sent_at: result.delivered ? new Date().toISOString() : null,
+    // Failed sends keep no dedupe key so a retry can attempt again.
+    dedupe_key: result.delivered ? params.dedupeKey ?? null : null,
   }).catch(() => undefined);
 }
 

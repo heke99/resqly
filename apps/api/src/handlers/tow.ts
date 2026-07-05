@@ -194,6 +194,7 @@ export async function acceptJobForDriver(
     html: `<p>En bärgare har accepterat ditt ärende.</p><p>Fordon: ${escapeHtml(contact.registration_number)}</p>`,
     incidentId: job.incident_id,
     towJobId: jobId,
+    dedupeKey: `email:driver_accepted:${jobId}`,
   });
 
   return {
@@ -514,9 +515,10 @@ export async function completeTowJob(
   await sendEmail(ctx, {
     to: contact?.email,
     subject: "Bärgningsärendet är avslutat",
-    html: `<p>Ditt bärgningsärende är avslutat.</p><p>Status: invoiced</p>`,
+    html: `<p>Ditt bärgningsärende är avslutat.</p><p>Tack för att du använde tjänsten.</p>`,
     incidentId: job.incident_id,
     towJobId: id,
+    dedupeKey: `email:tow_completed:${id}`,
   });
 
   return {

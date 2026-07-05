@@ -169,3 +169,13 @@ describe("security hardening (0021)", () => {
     expect(sql).toContain('"tenant_assets_delete" on storage.objects for delete');
   });
 });
+
+describe("notification idempotency (0024)", () => {
+  const sql = readFileSync(join(migrationsDir, "0024_notification_dedupe.sql"), "utf8");
+
+  it("enforces a unique dedupe key on notification deliveries", () => {
+    expect(sql).toContain("add column if not exists dedupe_key text");
+    expect(sql).toContain("uq_notification_deliveries_dedupe");
+    expect(sql).toContain("where dedupe_key is not null");
+  });
+});

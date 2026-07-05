@@ -361,6 +361,7 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
         html: `<p>Vi har tagit emot ditt bärgningsärende.</p><p>Status: ${escapeHtml(outcome.status)}</p>`,
         incidentId: incident.id,
         towJobId: job.id,
+        dedupeKey: `email:tow_requested:${job.id}`,
       });
 
       return {
@@ -504,6 +505,7 @@ async function handleBankidResult(
         subject: `BankID klart för ärende ${incident.case_number ?? incident.id}`,
         html: `<p>Din BankID-verifiering är klar.</p><p>Ärende: ${escapeHtml(incident.case_number ?? incident.id)}</p>`,
         incidentId: incident.id,
+        dedupeKey: `email:bankid_verified:${incident.id}`,
       });
     }
   }
