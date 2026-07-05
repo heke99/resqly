@@ -15,6 +15,7 @@ export const dynamic = "force-dynamic";
 const NAV = [
   { href: "/", label: "Översikt" },
   { href: "/tenants", label: "Organisationer" },
+  { href: "/cases", label: "Ärenden" },
   { href: "/agreements", label: "Avtal & fri bärgning" },
   { href: "/operations", label: "Drift & åtgärder" },
   { href: "/readiness", label: "Redo för drift" },

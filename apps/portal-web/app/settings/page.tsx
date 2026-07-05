@@ -65,6 +65,28 @@ export default async function InställningarPage({
             type="number"
             defaultValue={String(settings?.max_dispatch_radius_km ?? 50)}
           />
+
+          {tenant.type === "insurance_company" ? (
+            <>
+              <h3>Antaganden för besparingsstatistik</h3>
+              <label htmlFor="stats_minutes_saved_per_case">Sparad handläggartid per ärende (minuter)</label>
+              <input
+                id="stats_minutes_saved_per_case"
+                name="stats_minutes_saved_per_case"
+                type="number"
+                min={0}
+                defaultValue={String(settings?.stats_minutes_saved_per_case ?? 45)}
+              />
+              <label htmlFor="stats_admin_hourly_cost_sek">Handläggarkostnad per timme (SEK)</label>
+              <input
+                id="stats_admin_hourly_cost_sek"
+                name="stats_admin_hourly_cost_sek"
+                type="number"
+                min={0}
+                defaultValue={String(Number(settings?.stats_admin_hourly_cost_minor ?? 45000) / 100)}
+              />
+            </>
+          ) : null}
           <div style={{ marginTop: 16 }}>
             <Button type="submit">Spara inställningar</Button>
           </div>

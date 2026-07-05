@@ -110,6 +110,11 @@ export async function updateSettings(formData: FormData): Promise<void> {
   const patch: Record<string, unknown> = {};
   if (strategy) patch.default_dispatch_strategy = strategy;
   if (!Number.isNaN(radius) && radius > 0) patch.max_dispatch_radius_km = radius;
+  // Value dashboard assumptions (insurance tenants).
+  const minutesSaved = Number(formData.get("stats_minutes_saved_per_case") ?? "");
+  if (Number.isFinite(minutesSaved) && minutesSaved >= 0) patch.stats_minutes_saved_per_case = Math.round(minutesSaved);
+  const hourlyCost = Number(formData.get("stats_admin_hourly_cost_sek") ?? "");
+  if (Number.isFinite(hourlyCost) && hourlyCost >= 0) patch.stats_admin_hourly_cost_minor = Math.round(hourlyCost * 100);
   if (Object.keys(patch).length) {
     await client.from("tenant_settings" as never).update(patch as never).eq("tenant_id", tenantId);
   }
