@@ -219,13 +219,24 @@ function AccessDenied({ onBack }: { onBack: () => void }) {
   );
 }
 
+interface HistoryJob {
+  id: string;
+  status: string;
+  payer_type: string;
+  created_at?: string;
+}
+
 function Account({ driver, onSignedOut }: { driver: RoleContext["driver"]; onSignedOut: () => void }) {
   const supabase = getSupabase();
   const [email, setEmail] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryJob[] | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
     void supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
+    void apiGet<{ jobs: HistoryJob[] }>("/api/v1/drivers/me/jobs?history=1").then((res) =>
+      setHistory(res?.jobs ?? []),
+    );
   }, [supabase]);
 
   async function signOut() {
@@ -247,6 +258,25 @@ function Account({ driver, onSignedOut }: { driver: RoleContext["driver"]; onSig
         <Text style={{ fontWeight: "700" }}>Förarprofil</Text>
         <Text>{statusLabel}</Text>
         <Text style={styles.muted}>Kunduppgifter visas först efter att du accepterat ett uppdrag. Personnummer visas aldrig.</Text>
+      </View>
+      <View style={styles.card}>
+        <Text style={{ fontWeight: "700" }}>Slutförda uppdrag</Text>
+        {history === null ? (
+          <Text style={styles.muted}>Laddar…</Text>
+        ) : history.length === 0 ? (
+          <Text style={styles.muted}>Inga slutförda uppdrag ännu.</Text>
+        ) : (
+          history.slice(0, 20).map((job) => (
+            <View key={job.id} style={{ paddingVertical: 6, borderTopWidth: 1, borderTopColor: "#eee" }}>
+              <Text style={{ fontWeight: "600" }}>
+                {towStatusLabel(job.status as never)} • {job.payer_type === "customer_private" ? "Privat" : "Försäkring"}
+              </Text>
+              <Text style={styles.muted}>
+                {job.created_at ? new Date(job.created_at).toLocaleString("sv-SE") : job.id.slice(0, 8).toUpperCase()}
+              </Text>
+            </View>
+          ))
+        )}
       </View>
       <Pressable style={styles.bigbtn} onPress={signOut}>
         <Text style={styles.bigbtnText}>Logga ut</Text>

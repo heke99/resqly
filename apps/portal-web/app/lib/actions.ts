@@ -34,7 +34,7 @@ export async function logoutPortal(): Promise<void> {
 }
 
 function assertTenant(expected: string, actual: string) {
-  if (expected !== actual) throw new Error("You do not have access to this tenant.");
+  if (expected !== actual) throw new Error("Du har inte åtkomst till den här organisationen.");
 }
 
 async function setIncidentStatus(
@@ -52,7 +52,7 @@ async function setIncidentStatus(
     .maybeSingle();
   const from = (current as { status?: string } | null)?.status ?? null;
   const currentTenantId = (current as { tenant_id?: string } | null)?.tenant_id ?? null;
-  if (!currentTenantId) throw new Error("Case not found.");
+  if (!currentTenantId) throw new Error("Ärendet hittades inte.");
   assertTenant(tenant.id, currentTenantId);
   await client.from("incidents" as never).update({ status } as never).eq("id", incidentId).eq("tenant_id", tenant.id);
   await client.from("incident_status_events" as never).insert({
@@ -212,7 +212,7 @@ export async function createTowVehicle(formData: FormData): Promise<void> {
     .eq("tenant_id", tenantId)
     .maybeSingle();
   const companyId = (company as { id?: string } | null)?.id;
-  if (!companyId) throw new Error("This tenant is not a tow company.");
+  if (!companyId) throw new Error("Organisationen är inte ett bärgningsbolag.");
   const { data: vehicle } = await client
     .from("tow_vehicles" as never)
     .insert({
@@ -259,7 +259,7 @@ async function towCompanyIdFor(client: Awaited<ReturnType<typeof portalDb>>["db"
     .eq("tenant_id", tenantId)
     .maybeSingle();
   const companyId = (company as { id?: string } | null)?.id;
-  if (!companyId) throw new Error("This tenant is not a tow company.");
+  if (!companyId) throw new Error("Organisationen är inte ett bärgningsbolag.");
   return companyId;
 }
 
@@ -343,7 +343,7 @@ export async function saveAgreement(formData: FormData): Promise<void> {
   assertTenant(tenant.id, tenantId);
   const companyId = await towCompanyIdFor(client, tenantId);
   const insurerTenantId = String(formData.get("insurance_tenant_id") ?? "");
-  if (!insurerTenantId) throw new Error("Select an insurance company.");
+  if (!insurerTenantId) throw new Error("Välj ett försäkringsbolag.");
   const row = {
     tow_company_id: companyId,
     insurance_tenant_id: insurerTenantId,
@@ -364,7 +364,7 @@ export async function setDriverVehicle(formData: FormData): Promise<void> {
   assertTenant(tenant.id, tenantId);
   const driverId = String(formData.get("driver_id") ?? "");
   const vehicleId = String(formData.get("vehicle_id") ?? "") || null;
-  if (!driverId) throw new Error("Driver is required.");
+  if (!driverId) throw new Error("Välj en förare.");
   await client
     .from("tow_drivers" as never)
     .update({ current_vehicle_id: vehicleId } as never)
@@ -426,7 +426,7 @@ export async function saveLegalVersion(formData: FormData): Promise<void> {
   const body = String(formData.get("body") ?? "").trim();
   const version = numberInput(formData, "version", 1);
   const status = String(formData.get("status") ?? "draft");
-  if (!kind || !title || !body) throw new Error("Kind, title and body are required.");
+  if (!kind || !title || !body) throw new Error("Typ, rubrik och text krävs.");
 
   if (status === "active") {
     await client
@@ -474,7 +474,7 @@ export async function saveFallbackRule(formData: FormData): Promise<void> {
   try {
     contacts = JSON.parse(contactsRaw);
   } catch {
-    throw new Error("Operational contacts must be valid JSON.");
+    throw new Error("Driftkontakter måste vara giltig JSON.");
   }
   await client.from("tenant_notification_fallback_rules" as never).upsert(
     {
@@ -511,7 +511,7 @@ export async function saveVehiclePermission(formData: FormData): Promise<void> {
   const agreementId = String(formData.get("agreement_id") ?? "");
   const towVehicleId = String(formData.get("tow_vehicle_id") ?? "");
   const status = String(formData.get("status") ?? "active");
-  if (!agreementId || !towVehicleId) throw new Error("Agreement and tow vehicle are required.");
+  if (!agreementId || !towVehicleId) throw new Error("Avtal och bärgningsbil krävs.");
 
   const { data: agreement } = await client
     .from("tow_company_insurance_agreements" as never)
@@ -519,7 +519,7 @@ export async function saveVehiclePermission(formData: FormData): Promise<void> {
     .eq("id", agreementId)
     .maybeSingle();
   if ((agreement as { insurance_tenant_id?: string } | null)?.insurance_tenant_id !== tenant.id) {
-    throw new Error("Agreement does not belong to this insurer tenant.");
+    throw new Error("Avtalet tillhör inte den här försäkringsorganisationen.");
   }
 
   await client.from("tow_vehicle_insurance_permissions" as never).upsert(

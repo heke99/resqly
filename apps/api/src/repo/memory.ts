@@ -421,10 +421,12 @@ export class MemoryRepo implements ApiRepo {
         };
       });
   }
-  async listDriverJobs(driverId: string): Promise<TowJobRecord[]> {
-    const active = ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"];
+  async listDriverJobs(driverId: string, opts?: { history?: boolean }): Promise<TowJobRecord[]> {
+    const statuses = opts?.history
+      ? ["completed", "invoiced", "closed", "cancelled", "failed"]
+      : ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"];
     return [...this.towJobs.values()].filter(
-      (j) => j.driver_id === driverId && active.includes(j.status),
+      (j) => j.driver_id === driverId && statuses.includes(j.status),
     );
   }
   async listDriverDevices(driverId: string): Promise<DriverDeviceRecord[]> {

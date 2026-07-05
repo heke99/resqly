@@ -507,13 +507,16 @@ export class SupabaseRepo implements ApiRepo {
     return result;
   }
 
-  async listDriverJobs(driverId: string): Promise<TowJobRecord[]> {
+  async listDriverJobs(driverId: string, opts?: { history?: boolean }): Promise<TowJobRecord[]> {
+    const statuses = opts?.history
+      ? ["completed", "invoiced", "closed", "cancelled", "failed"]
+      : ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"];
     const { data } = await this.table("tow_jobs")
       .select("*")
       .eq("driver_id", driverId)
-      .in("status", ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"] as never)
+      .in("status", statuses as never)
       .order("created_at", { ascending: false })
-      .limit(20);
+      .limit(opts?.history ? 50 : 20);
     return (data as TowJobRecord[] | null) ?? [];
   }
 

@@ -20,7 +20,7 @@ export default async function ReadinessPage({
   const blockers = Array.isArray(readiness?.blockers) ? (readiness?.blockers as string[]) : [];
 
   const rows: Row[] = [
-    { item: "White-label branding", ok: readiness?.has_branding, detail: readiness?.has_branding ? "Klar" : "Saknas" },
+    { item: "Varumärkesprofil (white label)", ok: readiness?.has_branding, detail: readiness?.has_branding ? "Klar" : "Saknas" },
     { item: "Tema/färg", ok: readiness?.has_theme, detail: readiness?.has_theme ? "Klar" : "Saknas" },
     { item: "Juridiska versioner", ok: num(readiness?.active_legal_versions) >= 5 || (readiness?.has_simple_terms && readiness?.has_simple_privacy), detail: `${num(readiness?.active_legal_versions)} aktiva versioner` },
     { item: "Aktiva bärgaravtal", ok: num(readiness?.active_agreements) > 0, detail: `${num(readiness?.active_agreements)} avtal` },

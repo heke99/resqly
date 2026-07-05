@@ -33,9 +33,9 @@ export default async function OffersPage({
   return (
     <div>
       <PageHeader title="Nya uppdrag" subtitle="Inkommande uppdrag till era förare" />
-      <h3>Pending</h3>
+      <h3>Väntar på svar</h3>
       <DataTable columns={columns} rows={pending} empty="Inga väntande uppdrag just nu" />
-      <h3 style={{ marginTop: 24 }}>Offer history</h3>
+      <h3 style={{ marginTop: 24 }}>Tidigare erbjudanden</h3>
       <DataTable columns={columns} rows={history.slice(0, 50)} empty="Ingen uppdragshistorik ännu" />
     </div>
   );

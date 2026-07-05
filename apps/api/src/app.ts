@@ -93,7 +93,7 @@ export class App {
     r.post("/api/v1/drivers/me/location", (ctx, a) => drivers.updateLocation(ctx, a.body));
     r.post("/api/v1/drivers/me/device", (ctx, a) => drivers.registerDevice(ctx, a.body));
     r.get("/api/v1/drivers/me/offers", (ctx) => drivers.listOffers(ctx));
-    r.get("/api/v1/drivers/me/jobs", (ctx) => drivers.listJobs(ctx));
+    r.get("/api/v1/drivers/me/jobs", (ctx, a) => drivers.listJobs(ctx, a.query));
     r.post("/api/v1/drivers/offers/:id/accept", (ctx, a) => drivers.acceptOffer(ctx, a.params.id!));
     r.post("/api/v1/drivers/offers/:id/reject", (ctx, a) => drivers.rejectOffer(ctx, a.params.id!, a.body));
 

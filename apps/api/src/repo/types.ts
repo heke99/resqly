@@ -293,7 +293,7 @@ export interface ApiRepo {
     }>
   >;
   /** Jobs currently assigned to the driver (accepted through transporting). */
-  listDriverJobs(driverId: string): Promise<TowJobRecord[]>;
+  listDriverJobs(driverId: string, opts?: { history?: boolean }): Promise<TowJobRecord[]>;
   listDriverDevices(driverId: string): Promise<DriverDeviceRecord[]>;
   markOfferPush(jobId: string, driverId: string, status: string, error?: string | null): Promise<void>;
 

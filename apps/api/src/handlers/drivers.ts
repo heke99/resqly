@@ -64,9 +64,10 @@ export async function listOffers(ctx: ApiContext): Promise<RouteResult> {
   return { status: 200, body: { offers } };
 }
 
-export async function listJobs(ctx: ApiContext): Promise<RouteResult> {
+export async function listJobs(ctx: ApiContext, query?: URLSearchParams): Promise<RouteResult> {
   const driverId = requireDriver(ctx);
-  const jobs = await ctx.repo.listDriverJobs(driverId);
+  const history = query?.get("history") === "1" || query?.get("history") === "true";
+  const jobs = await ctx.repo.listDriverJobs(driverId, { history });
   return { status: 200, body: { jobs } };
 }
 
