@@ -516,6 +516,7 @@ function NewCase({
   const [vehicleId, setVehicleId] = useState<string | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [address, setAddress] = useState("");
+  const [destination, setDestination] = useState("");
   const [gpsDenied, setGpsDenied] = useState(false);
   const [problem, setProblem] = useState<string>(TOW_PROBLEMS[0]!);
   const [mode, setMode] = useState<"insurance" | "private">("insurance");
@@ -576,6 +577,7 @@ function NewCase({
           subtype: problem,
           coords,
           address: address || null,
+          destination: destination || null,
           mode,
         },
       },
@@ -734,6 +736,13 @@ function NewCase({
           <TextInput style={styles.input} value={address} onChangeText={setAddress} placeholder="Gatuadress, ort" />
         </>
       ) : null}
+      <Text style={styles.label}>Vart ska fordonet? (valfritt)</Text>
+      <TextInput
+        style={styles.input}
+        value={destination}
+        onChangeText={setDestination}
+        placeholder="T.ex. verkstad eller hemadress"
+      />
       <Pressable
         style={[styles.bigbtn, { backgroundColor: palette.primary, marginTop: 12 }, busy ? styles.disabled : null]}
         onPress={submit}

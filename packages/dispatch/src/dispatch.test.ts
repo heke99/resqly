@@ -46,7 +46,6 @@ describe("filterCandidates", () => {
       payerType: "insurance_company",
       priority: "normal",
       preferredCompanyIds: ["p1"],
-      allowMarketplaceFallback: false,
     };
     expect(filterCandidates(candidates, req).map((c) => c.driverId)).toEqual(["pref"]);
   });
@@ -58,7 +57,6 @@ describe("filterCandidates", () => {
       payerType: "insurance_company",
       priority: "normal",
       preferredCompanyIds: ["p1"],
-      allowMarketplaceFallback: true,
     };
     expect(filterCandidates(candidates, req).map((c) => c.driverId)).toEqual(["other"]);
   });

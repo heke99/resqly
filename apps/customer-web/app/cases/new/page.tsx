@@ -37,6 +37,7 @@ function NewCaseInner() {
   const [description, setDescription] = useState("");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [address, setAddress] = useState("");
+  const [destination, setDestination] = useState("");
   const [gpsDenied, setGpsDenied] = useState(false);
   const [created, setCreated] = useState<{ id: string; caseNumber: string; requiresBankid: boolean; towStatus?: string } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -121,7 +122,16 @@ function NewCaseInner() {
           authorization: `Bearer ${accessToken}`,
           "idempotency-key": idempotencyKey,
         },
-        body: JSON.stringify({ vehicle_id: vehicleId, type, subtype, description, coords, address: address || null, mode: effectiveMode }),
+        body: JSON.stringify({
+          vehicle_id: vehicleId,
+          type,
+          subtype,
+          description,
+          coords,
+          address: address || null,
+          destination: !isDamage ? destination || null : null,
+          mode: effectiveMode,
+        }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) { setStatus(json.error ?? "Ärendet kunde inte skapas. Försök igen."); return; }
@@ -290,6 +300,18 @@ function NewCaseInner() {
               onChange={(e) => setAddress(e.target.value)}
               placeholder="Gatuadress, ort"
             />
+          </div>
+        ) : null}
+        {!isDamage ? (
+          <div style={{ marginTop: 12 }}>
+            <label htmlFor="destination">Vart ska fordonet? (valfritt)</label>
+            <input
+              id="destination"
+              value={destination}
+              onChange={(e) => setDestination(e.target.value)}
+              placeholder="T.ex. verkstad eller hemadress"
+            />
+            <p className="vehicle-meta">Lämna tomt om du inte vet ännu — bärgaren hjälper dig välja verkstad.</p>
           </div>
         ) : null}
         <div style={{ marginTop: 16 }}>

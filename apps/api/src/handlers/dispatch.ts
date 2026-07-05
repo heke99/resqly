@@ -1,9 +1,13 @@
 import { dispatchRunInputSchema } from "@resqly/types";
 import type { Coordinate, DispatchStrategy } from "@resqly/types";
 import { notFound } from "@resqly/utils";
-import { selectDispatch, type DispatchCandidate, type DispatchRequest } from "@resqly/dispatch";
+import {
+  orchestrateDispatch,
+  type DispatchCandidate,
+  type DispatchStore,
+  type OrchestrateDispatchOutcome,
+} from "@resqly/dispatch";
 import { MapsClient } from "@resqly/maps";
-import { buildOfferPushMessage, sendExpoPush } from "@resqly/notifications";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
 import type { TowJobRecord } from "../repo/types";
@@ -18,132 +22,62 @@ export interface RunDispatchInput {
   problemType?: string | null;
 }
 
-export interface RunDispatchOutcome {
-  status: "offered" | "manual_review";
-  offeredDrivers: string[];
-  requiresManualReview: boolean;
-  strategy: DispatchStrategy;
+export type RunDispatchOutcome = OrchestrateDispatchOutcome;
+
+/** Adapts the API repository to the shared orchestrator's store interface. */
+function dispatchStoreFromRepo(ctx: ApiContext): DispatchStore {
+  return {
+    setJobStatus: (jobId, status) => ctx.repo.setTowJobStatus(jobId, status as never),
+    addJobStatusEvent: (event) => ctx.repo.addTowJobStatusEvent(event as unknown as Record<string, unknown>),
+    getCandidates: (pickup, radiusKm, limit, query) =>
+      ctx.repo.getDispatchCandidates(pickup, radiusKm, limit, {
+        payerType: query.payerType,
+        insuranceTenantId: query.insuranceTenantId,
+        broadcastAllContractVehicles: query.payerType === "insurance_company",
+      }),
+    createOffers: (rows) => ctx.repo.createOffers(rows as unknown as Array<Record<string, unknown>>),
+    listDriverPushTokens: async (driverId) =>
+      (await ctx.repo.listDriverDevices(driverId)).map((d) => d.expo_push_token),
+    markOfferPush: (jobId, driverId, status, error) => ctx.repo.markOfferPush(jobId, driverId, status, error),
+    createManualReview: (row) => ctx.repo.createManualReview(row),
+    recordAudit: (row) => ctx.repo.recordAudit(row),
+  };
 }
 
 /**
- * Shared dispatch orchestration used by both incident request-tow and the
- * standalone /dispatch/run endpoint. Candidate eligibility (insurance agreement
- * vs marketplace) is enforced in the repo's getDispatchCandidates query, so any
- * candidate returned here is already eligible for this case.
+ * Dispatch entry point used by both incident request-tow and the standalone
+ * /dispatch/run endpoint. All orchestration lives in @resqly/dispatch
+ * (orchestrateDispatch) — this wrapper only wires the repo, Google ETA
+ * enrichment, partner webhooks and push configuration.
  */
 export async function runDispatchForJob(
   ctx: ApiContext,
   input: RunDispatchInput,
 ): Promise<RunDispatchOutcome> {
-  const { job, pickup } = input;
   const settings = await ctx.repo.getTenantSettings(ctx.tenantId);
-
-  await ctx.repo.setTowJobStatus(job.id, "matching");
-  await ctx.repo.addTowJobStatusEvent({
-    tow_job_id: job.id,
-    from_status: job.status,
-    to_status: "matching",
-  });
-  await enqueueWebhookEvent(ctx, "tow.dispatch_started", {
-    tow_job_id: job.id,
-    incident_id: job.incident_id,
-    pickup,
-  });
-
-  const candidateLimit =
-    input.payerType === "insurance_company"
-      ? settings.max_insurance_broadcast_candidates
-      : settings.max_dispatch_candidates;
-  const rawCandidates = await ctx.repo.getDispatchCandidates(
-    pickup,
-    settings.max_dispatch_radius_km,
-    candidateLimit,
+  return orchestrateDispatch(
+    dispatchStoreFromRepo(ctx),
     {
+      tenantId: ctx.tenantId,
+      job: { id: input.job.id, incident_id: input.job.incident_id, status: input.job.status },
+      pickup: input.pickup,
       payerType: input.payerType,
-      insuranceTenantId: input.payerType === "insurance_company" ? job.tenant_id : null,
-      broadcastAllContractVehicles: input.payerType === "insurance_company",
+      priority: input.priority,
+      strategy: input.strategy,
+      problemType: input.problemType ?? null,
+      caseNumber: null,
+      settings,
+    },
+    {
+      enrichCandidates: (candidates, pickup) => enrichCandidatesWithGoogleEta(ctx, candidates, pickup),
+      onEvent: (event, payload) => enqueueWebhookEvent(ctx, event, payload),
+      push: {
+        enabled: ctx.config.push?.enabled !== false,
+        url: ctx.config.push?.url,
+        fetchImpl: ctx.config.push?.fetchImpl,
+      },
     },
   );
-  const candidates = await enrichCandidatesWithGoogleEta(ctx, rawCandidates, pickup);
-
-  const strategy = (input.strategy ?? settings.default_dispatch_strategy) as DispatchStrategy;
-  const request: DispatchRequest = {
-    strategy,
-    payerType: input.payerType,
-    priority: input.priority,
-    requirements: input.problemType === "ev_out_of_battery" ? { needsEv: true } : undefined,
-    // Insurance-funded jobs are contract-only and broadcast to all eligible
-    // approved tow vehicles in range. Direct/private jobs are marketplace jobs
-    // and are offered nearest/fastest outward, capped by max_dispatch_candidates.
-    allowMarketplaceFallback: input.payerType === "customer_private" && settings.allow_marketplace_fallback,
-    offerAllEligible: input.payerType === "insurance_company",
-    maxCandidates: input.payerType === "insurance_company" ? candidateLimit : settings.max_dispatch_candidates,
-    maxDistanceMeters: settings.max_dispatch_radius_km * 1000,
-  };
-  const dispatch = selectDispatch(candidates, request);
-
-  if (dispatch.offers.length > 0) {
-    const expiresAt = new Date(Date.now() + settings.offer_expiry_seconds * 1000).toISOString();
-    await ctx.repo.createOffers(
-      dispatch.offers.map((o) => ({
-        tenant_id: ctx.tenantId,
-        tow_job_id: job.id,
-        driver_id: o.driverId,
-        tow_company_id: o.towCompanyId,
-        tow_vehicle_id: o.towVehicleId ?? null,
-        rank: o.rank,
-        distance_meters: o.distanceMeters,
-        eta_seconds: o.etaSeconds ?? null,
-        expires_at: expiresAt,
-      })),
-    );
-    await ctx.repo.setTowJobStatus(job.id, "offered");
-    await ctx.repo.addTowJobStatusEvent({
-      tow_job_id: job.id,
-      from_status: "matching",
-      to_status: "offered",
-    });
-    await enqueueWebhookEvent(ctx, "tow.offered", {
-      tow_job_id: job.id,
-      incident_id: job.incident_id,
-      offered_drivers: dispatch.offers.map((o) => o.driverId),
-      offered_tow_vehicles: dispatch.offers.map((o) => o.towVehicleId).filter(Boolean),
-    });
-    await sendOfferPushes(ctx, job, dispatch.offers, pickup, input.problemType ?? null, expiresAt);
-  } else {
-    await ctx.repo.setTowJobStatus(job.id, "manual_review");
-    await ctx.repo.addTowJobStatusEvent({
-      tow_job_id: job.id,
-      from_status: "matching",
-      to_status: "manual_review",
-    });
-    await enqueueWebhookEvent(ctx, "tow.manual_review", {
-      tow_job_id: job.id,
-      incident_id: job.incident_id,
-      reason: "no_eligible_driver",
-    });
-  }
-
-  await ctx.repo.recordAudit({
-    tenant_id: ctx.tenantId,
-    action: "dispatch",
-    entity_type: "tow_job",
-    entity_id: job.id,
-    fields: ["strategy"],
-    metadata: {
-      strategy: dispatch.strategy,
-      offers: dispatch.offers.length,
-      contract_only: input.payerType === "insurance_company",
-      offer_all_eligible: input.payerType === "insurance_company",
-    },
-  });
-
-  return {
-    status: dispatch.offers.length > 0 ? "offered" : "manual_review",
-    offeredDrivers: dispatch.offers.map((o) => o.driverId),
-    requiresManualReview: dispatch.requiresManualReview,
-    strategy: dispatch.strategy,
-  };
 }
 
 async function enrichCandidatesWithGoogleEta(
@@ -180,59 +114,6 @@ async function enrichCandidatesWithGoogleEta(
     });
   });
   return candidates.map((candidate) => byDriver.get(candidate.driverId) ?? candidate);
-}
-
-/**
- * Best-effort push to offered drivers. Failures are recorded on the offer
- * (push_status) and never abort dispatch. Payload contains no customer PII.
- */
-async function sendOfferPushes(
-  ctx: ApiContext,
-  job: TowJobRecord,
-  offers: Array<{ driverId: string; towCompanyId: string; towVehicleId?: string | null }>,
-  pickup: Coordinate,
-  problemType: string | null,
-  expiresAt: string,
-): Promise<void> {
-  if (ctx.config.push?.enabled === false) return;
-  const approxArea = `${pickup.lat.toFixed(1)}, ${pickup.lng.toFixed(1)}`;
-  for (const o of offers) {
-    try {
-      const devices = await ctx.repo.listDriverDevices(o.driverId);
-      if (devices.length === 0) {
-        await ctx.repo.markOfferPush(job.id, o.driverId, "skipped");
-        continue;
-      }
-      const messages = devices.map((d) =>
-        buildOfferPushMessage({
-          expoPushToken: d.expo_push_token,
-          offerId: `${job.id}:${o.driverId}`,
-          towJobId: job.id,
-          approxArea,
-          problemType: problemType ?? "assistance",
-          expiresAt,
-        }),
-      );
-      const res = await sendExpoPush(messages, {
-        fetchImpl: ctx.config.push?.fetchImpl,
-        url: ctx.config.push?.url,
-      });
-      await ctx.repo.markOfferPush(job.id, o.driverId, res.ok ? "sent" : "failed", res.error ?? null);
-      await enqueueWebhookEvent(ctx, "tow.offer_sent", {
-        tow_job_id: job.id,
-        driver_id: o.driverId,
-        tow_vehicle_id: o.towVehicleId ?? null,
-        push_status: res.ok ? "sent" : "failed",
-      });
-    } catch (e) {
-      await ctx.repo.markOfferPush(
-        job.id,
-        o.driverId,
-        "failed",
-        e instanceof Error ? e.message : "unknown",
-      );
-    }
-  }
 }
 
 export async function runDispatch(ctx: ApiContext, body: unknown): Promise<RouteResult> {

@@ -350,6 +350,18 @@ export async function listTowJobEvents(tenantId: string, jobId: string): Promise
   return (data as Row[] | null) ?? [];
 }
 
+/** Pickup + destination for the job's incident (address or coordinates). */
+export async function listTowJobLocations(tenantId: string, incidentId: string | null): Promise<Row[]> {
+  const { db } = await requirePortalTenant(tenantId);
+  if (!incidentId) return [];
+  const { data } = await db
+    .from("incident_locations" as never)
+    .select("kind, address, lat, lng")
+    .eq("incident_id", incidentId)
+    .order("created_at", { ascending: false });
+  return (data as Row[] | null) ?? [];
+}
+
 export async function getTowJobCompletionReport(tenantId: string, jobId: string): Promise<Row | null> {
   const { db } = await requirePortalTenant(tenantId);
   const { data } = await db

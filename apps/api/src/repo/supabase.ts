@@ -57,6 +57,15 @@ export class SupabaseRepo implements ApiRepo {
     await this.table("audit_logs").insert(row as never);
   }
 
+  async createManualReview(row: {
+    tenant_id: string;
+    incident_id: string | null;
+    tow_job_id: string;
+    reason: string;
+  }): Promise<void> {
+    await this.table("manual_reviews").insert({ ...row, status: "open" } as never);
+  }
+
   async getTenant(id: string): Promise<TenantRecord | null> {
     const { data } = await this.table("tenants")
       .select("id, slug, name, type, case_number_prefix")
@@ -189,6 +198,13 @@ export class SupabaseRepo implements ApiRepo {
       .eq("incident_id", incidentId)
       .eq("kind", "pickup")
       .maybeSingle();
+    const { data: dest } = await this.table("incident_locations")
+      .select("address")
+      .eq("incident_id", incidentId)
+      .eq("kind", "destination")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
     const p = (profile as { full_name?: string; phone?: string; email?: string } | null) ?? {};
     const l = (loc as { lat: number; lng: number; address: string | null } | null) ?? {
       lat: 0,
@@ -203,7 +219,7 @@ export class SupabaseRepo implements ApiRepo {
       problem_summary: inc.problem_type ?? inc.description ?? "",
       pickup: { lat: l.lat, lng: l.lng },
       pickup_address: l.address,
-      destination_address: null,
+      destination_address: (dest as { address?: string | null } | null)?.address ?? null,
       customer_notes: inc.description,
     };
   }

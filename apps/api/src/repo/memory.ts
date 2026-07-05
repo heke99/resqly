@@ -125,6 +125,15 @@ export class MemoryRepo implements ApiRepo {
   async recordAudit(row: Record<string, unknown>) {
     this.auditLogs.push(row);
   }
+  manualReviews: Array<Record<string, unknown>> = [];
+  async createManualReview(row: {
+    tenant_id: string;
+    incident_id: string | null;
+    tow_job_id: string;
+    reason: string;
+  }) {
+    this.manualReviews.push({ ...row, status: "open" });
+  }
   async getTenant(id: string) {
     return this.tenants.get(id) ?? null;
   }

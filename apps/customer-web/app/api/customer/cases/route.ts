@@ -19,6 +19,8 @@ export async function POST(request: Request) {
   const description = body.description ? String(body.description) : null;
   const coords = body.coords && typeof body.coords === "object" ? body.coords as { lat?: number; lng?: number } : null;
   const manualAddress = typeof body.address === "string" && body.address.trim() ? body.address.trim().slice(0, 300) : null;
+  const destinationAddress =
+    typeof body.destination === "string" && body.destination.trim() ? body.destination.trim().slice(0, 300) : null;
   if (!vehicleId) return jsonError(400, "Välj vilket fordon ärendet gäller.");
   if (!["towing", "roadside_assistance", "damage_claim"].includes(type)) return jsonError(400, "Ogiltig ärendetyp.");
 
@@ -154,6 +156,20 @@ export async function POST(request: Request) {
         manually_adjusted: true,
       } as never);
     }
+  }
+
+  // Destination ("where should the vehicle go?") for towing cases. Stored
+  // even without coordinates so drivers always see the address; geocoded
+  // when the maps service is configured (used for private price estimates).
+  if (destinationAddress && TOWING_TYPES.has(type)) {
+    const geocodedDest = await tryGeocode(destinationAddress);
+    await db.from("incident_locations" as never).insert({
+      incident_id: incidentId,
+      kind: "destination",
+      lat: geocodedDest?.lat ?? null,
+      lng: geocodedDest?.lng ?? null,
+      address: destinationAddress,
+    } as never);
   }
 
   await db.from("audit_logs" as never).insert({

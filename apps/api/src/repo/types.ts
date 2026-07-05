@@ -184,6 +184,13 @@ export interface ApiRepo {
     status_code: number;
   }): Promise<void>;
   recordAudit(row: Record<string, unknown>): Promise<void>;
+  /** Operational escalation queue shown to admins when dispatch cannot proceed. */
+  createManualReview(row: {
+    tenant_id: string;
+    incident_id: string | null;
+    tow_job_id: string;
+    reason: string;
+  }): Promise<void>;
 
   getTenant(tenantId: string): Promise<TenantRecord | null>;
   getTenantSettings(tenantId: string): Promise<TenantSettingsRecord>;

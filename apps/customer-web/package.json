@@ -12,6 +12,7 @@
   "dependencies": {
     "@resqly/bankid": "workspace:*",
     "@resqly/database": "workspace:*",
+    "@resqly/dispatch": "workspace:*",
     "@resqly/types": "workspace:*",
     "@resqly/ui": "workspace:*",
     "@resqly/utils": "workspace:*",

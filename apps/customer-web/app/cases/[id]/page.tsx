@@ -15,6 +15,42 @@ interface Incident {
   bankid_verified: boolean;
 }
 
+interface TimelineEntry {
+  at: string;
+  kind: "incident" | "tow";
+  to_status: string;
+  reason: string | null;
+}
+
+interface CaseLocation {
+  kind: string;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+}
+
+const CANCELLABLE = new Set([
+  "draft",
+  "awaiting_bankid",
+  "bankid_verified",
+  "signed",
+  "submitted",
+  "received",
+  "more_info_required",
+]);
+
+function timelineLabel(entry: TimelineEntry): string {
+  return entry.kind === "tow" ? towStatusLabel(entry.to_status as TowJobStatus) : incidentStatusLabel(entry.to_status);
+}
+
+function formatTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+  } catch {
+    return iso.slice(0, 16).replace("T", " ");
+  }
+}
+
 export default function CaseDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const supabase = useSupabase();
@@ -25,6 +61,10 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [locations, setLocations] = useState<CaseLocation[]>([]);
+  const [showCancel, setShowCancel] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
 
   const load = useCallback(async () => {
     if (!supabase) return;
@@ -53,6 +93,23 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
         .maybeSingle();
       const etaRow = eta as { eta_seconds: number } | null;
       if (etaRow) setEtaSeconds(etaRow.eta_seconds);
+    }
+    // Merged timeline (incident + tow events) via the customer API.
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess.session?.access_token;
+    if (token) {
+      try {
+        const res = await fetch(`/api/customer/cases/${id}/timeline`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const json = (await res.json()) as { entries?: TimelineEntry[]; locations?: CaseLocation[] };
+          setTimeline(json.entries ?? []);
+          setLocations(json.locations ?? []);
+        }
+      } catch {
+        // Timeline is progressive enhancement — the page still works without it.
+      }
     }
   }, [supabase, id]);
 
@@ -131,6 +188,32 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
     }
   }
 
+  async function cancelCase() {
+    if (busy) return;
+    if (!cancelReason.trim()) { setMessage("Ange varför du vill avbryta ärendet."); return; }
+    const token = await accessToken();
+    if (!token) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/customer/cases/${id}/cancel`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ reason: cancelReason.trim() }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) setMessage(json.error ?? "Ärendet kunde inte avbrytas. Kontakta supporten.");
+      else {
+        setMessage("Ärendet är avbrutet.");
+        setShowCancel(false);
+        await load();
+      }
+    } catch {
+      setMessage("Något gick fel. Kontrollera din uppkoppling och försök igen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!supabase) return <p>Tjänsten är inte tillgänglig just nu. Försök igen om en stund.</p>;
   if (authed === false) return <p>Du behöver <a href="/login">logga in</a>.</p>;
   if (!incident && !loaded) return <p>Laddar ärende…</p>;
@@ -177,10 +260,75 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
         <p style={{ opacity: 0.7 }}>{whatHappensNext("matching")}</p>
       )}
 
-      <div className="status-card" style={{ marginTop: 12 }}>
-        <strong>Vad händer nu?</strong>
-        <p className="vehicle-meta">Statusen på ärendet uppdateras automatiskt på den här sidan.</p>
-      </div>
+      {locations.length > 0 ? (
+        <div className="status-card" style={{ marginTop: 12 }}>
+          <strong>Platser</strong>
+          {locations.map((loc, i) => (
+            <p key={i} className="vehicle-meta" style={{ margin: "4px 0 0" }}>
+              {loc.kind === "destination" ? "Destination: " : "Upphämtning: "}
+              {loc.address ?? (loc.lat != null && loc.lng != null ? `${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}` : "—")}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      {timeline.length > 0 ? (
+        <div className="status-card" style={{ marginTop: 12 }}>
+          <strong>Händelser</strong>
+          <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0" }}>
+            {timeline.map((entry, i) => (
+              <li key={i} style={{ padding: "6px 0", borderTop: i > 0 ? "1px solid rgba(0,0,0,0.06)" : "none" }}>
+                <span style={{ fontWeight: 600 }}>{timelineLabel(entry)}</span>
+                <span style={{ opacity: 0.6, marginLeft: 8, fontSize: 13 }}>{formatTime(entry.at)}</span>
+                {entry.reason ? <div style={{ opacity: 0.7, fontSize: 13 }}>{entry.reason}</div> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div className="status-card" style={{ marginTop: 12 }}>
+          <strong>Vad händer nu?</strong>
+          <p className="vehicle-meta">Statusen på ärendet uppdateras automatiskt på den här sidan.</p>
+        </div>
+      )}
+
+      {incident.status !== "cancelled" && CANCELLABLE.has(incident.status) ? (
+        <div style={{ marginTop: 16 }}>
+          {showCancel ? (
+            <div className="status-card">
+              <strong>Avbryt ärendet</strong>
+              <label htmlFor="cancel-reason" className="vehicle-meta" style={{ display: "block", marginTop: 6 }}>
+                Varför vill du avbryta?
+              </label>
+              <input
+                id="cancel-reason"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="T.ex. hjälpen behövs inte längre"
+              />
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button className="bigbtn" onClick={cancelCase} disabled={busy}>
+                  {busy ? "Avbryter…" : "Bekräfta avbryt"}
+                </button>
+                <button className="bigbtn" style={{ opacity: 0.7 }} onClick={() => setShowCancel(false)} disabled={busy}>
+                  Ångra
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowCancel(true)}
+              style={{ background: "transparent", border: "none", color: "#B00020", cursor: "pointer", padding: 0 }}
+            >
+              Behöver du avbryta ärendet?
+            </button>
+          )}
+        </div>
+      ) : null}
+
+      <p style={{ marginTop: 16 }}>
+        <a href="/support">Behöver du hjälp? Kontakta supporten</a>
+      </p>
       {message ? <p>{message}</p> : null}
     </div>
   );
