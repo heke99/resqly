@@ -206,12 +206,18 @@ importers:
       '@resqly/bankid':
         specifier: workspace:*
         version: link:../../packages/bankid
+      '@resqly/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
       '@resqly/database':
         specifier: workspace:*
         version: link:../../packages/database
       '@resqly/dispatch':
         specifier: workspace:*
         version: link:../../packages/dispatch
+      '@resqly/maps':
+        specifier: workspace:*
+        version: link:../../packages/maps
       '@resqly/notifications':
         specifier: workspace:*
         version: link:../../packages/notifications

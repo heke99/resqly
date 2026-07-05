@@ -33,6 +33,7 @@ const TOW_NAV: NavItem[] = [
   { href: "/availability", label: "Tillgänglighet" },
   { href: "/agreements", label: "Försäkringsavtal" },
   { href: "/marketplace", label: "Fri bärgning" },
+  { href: "/pricing", label: "Priser (fri bärgning)" },
   { href: "/statistics", label: "Statistik" },
   { href: "/completion-reports", label: "Slutrapporter" },
   { href: "/invoices", label: "Fakturaunderlag" },

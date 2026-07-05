@@ -57,6 +57,22 @@ export interface TowJobRecord {
   status: TowJobStatus;
   payer_type: string;
   priority: string;
+  /** Immutable price terms captured when a driver accepted (private jobs). */
+  price_snapshot?: Record<string, unknown> | null;
+}
+
+export interface PriceListRecord {
+  start_fee_minor: number;
+  per_km_minor: number;
+  per_waiting_minute_minor: number;
+  failed_trip_minor: number;
+  on_call_surcharge_minor: number;
+  heavy_tow_minor: number;
+  minimum_price_minor: number;
+  evening_night_surcharge_minor: number;
+  weekend_surcharge_minor: number;
+  cancellation_policy: string | null;
+  currency: string;
 }
 
 export interface CustomerContact {
@@ -222,6 +238,15 @@ export interface ApiRepo {
   getCustomerContact(incidentId: string): Promise<CustomerContact | null>;
 
   createTowJob(row: Record<string, unknown>): Promise<TowJobRecord>;
+  /** Active price list for a tow company (private marketplace pricing). */
+  getActivePriceList(towCompanyId: string): Promise<PriceListRecord | null>;
+  /** Freeze the accepted price terms on the job. Never overwrites. */
+  setTowJobPriceSnapshot(jobId: string, snapshot: Record<string, unknown>): Promise<void>;
+  /** Pickup + destination coordinates for a case, when known. */
+  getIncidentCoordinates(incidentId: string): Promise<{
+    pickup: Coordinate | null;
+    destination: Coordinate | null;
+  }>;
   getTowJob(tenantId: string, id: string): Promise<TowJobRecord | null>;
   /** Lookup by id only — callers MUST verify driver/tenant authorization. */
   getTowJobById(id: string): Promise<TowJobRecord | null>;

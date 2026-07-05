@@ -29,6 +29,11 @@ interface CaseLocation {
   lng: number | null;
 }
 
+interface PriceSnapshot {
+  estimate?: { total_minor?: number; currency?: string };
+  factors?: { distance_km?: number | null };
+}
+
 const CANCELLABLE = new Set([
   "draft",
   "awaiting_bankid",
@@ -63,6 +68,7 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
   const [loaded, setLoaded] = useState(false);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [locations, setLocations] = useState<CaseLocation[]>([]);
+  const [priceSnapshot, setPriceSnapshot] = useState<PriceSnapshot | null>(null);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
 
@@ -76,14 +82,15 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
     setLoaded(true);
     const { data: job } = await supabase
       .from("tow_jobs")
-      .select("id, status")
+      .select("id, status, price_snapshot")
       .eq("incident_id", id)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    const jobRow = job as { id: string; status: TowJobStatus } | null;
+    const jobRow = job as { id: string; status: TowJobStatus; price_snapshot?: PriceSnapshot | null } | null;
     if (jobRow) {
       setTowStatus(jobRow.status);
+      setPriceSnapshot(jobRow.price_snapshot ?? null);
       const { data: eta } = await supabase
         .from("tow_job_eta_snapshots")
         .select("eta_seconds")
@@ -253,6 +260,12 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
           <strong>{towStatusLabel(towStatus)}</strong>
           <p style={{ margin: "6px 0 0" }}>{whatHappensNext(towStatus)}</p>
           {etaSeconds != null ? <p style={{ margin: "6px 0 0" }}>ETA: {formatEta(etaSeconds)}</p> : null}
+          {priceSnapshot?.estimate?.total_minor != null ? (
+            <p style={{ margin: "6px 0 0" }}>
+              Överenskommet pris: <strong>{(priceSnapshot.estimate.total_minor / 100).toLocaleString("sv-SE")} {priceSnapshot.estimate.currency ?? "SEK"}</strong>
+              <span style={{ opacity: 0.65, fontSize: 13 }}> (låst när bärgaren accepterade — väntetid och extra arbete kan tillkomma)</span>
+            </p>
+          ) : null}
         </div>
       ) : incident.type === "damage_claim" ? (
         <p style={{ opacity: 0.7 }}>Skadeärendet är synligt i försäkringsbolagets portal efter BankID-verifiering.</p>

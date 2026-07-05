@@ -19,6 +19,20 @@ interface Policy {
   insurance_companies?: { name?: string } | null;
 }
 
+interface PricePreview {
+  distance_km: number | null;
+  factors: { evening_night: boolean; weekend: boolean } | null;
+  estimates: Array<{
+    company_name: string;
+    total_minor: number;
+    currency: string;
+    lines: Array<{ type: string; description: string; total_minor: number }>;
+    cancellation_policy: string | null;
+  }>;
+  companies_without_pricing: number;
+  disclaimer: string;
+}
+
 const TOW_PROBLEMS = ["car_does_not_start", "puncture", "accident", "engine_failure", "dead_battery", "stuck_snow_mud", "keys_locked_inside", "misfueling", "ev_out_of_battery", "other"];
 const DAMAGE_TYPES = ["parking_damage", "glass_damage", "collision_damage", "wildlife_collision", "vandalism", "water_damage", "mechanical_damage"];
 
@@ -42,6 +56,8 @@ function NewCaseInner() {
   const [created, setCreated] = useState<{ id: string; caseNumber: string; requiresBankid: boolean; towStatus?: string } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<PricePreview | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
   // One key per form mount: double clicks and retries never create two cases.
   const [idempotencyKey] = useState(() =>
     typeof globalThis.crypto?.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
@@ -99,6 +115,28 @@ function NewCaseInner() {
     if (!supabase) return null;
     const { data } = await supabase.auth.getSession();
     return data.session?.access_token ?? null;
+  }
+
+  async function loadPricePreview() {
+    if (previewBusy) return;
+    const accessToken = await token();
+    if (!accessToken) { setStatus("not_authed"); return; }
+    setPreviewBusy(true);
+    setPreview(null);
+    try {
+      const res = await fetch("/api/customer/private-price-preview", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ pickup: coords, address: address || null, destination: destination || null }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { setStatus(json.error ?? "Prisuppskattningen kunde inte hämtas just nu."); return; }
+      setPreview(json as PricePreview);
+    } catch {
+      setStatus("Något gick fel. Kontrollera din uppkoppling och försök igen.");
+    } finally {
+      setPreviewBusy(false);
+    }
   }
 
   async function submit(e: React.FormEvent) {
@@ -273,7 +311,7 @@ function NewCaseInner() {
               </label>
             </div>
             {mode === "private" ? (
-              <p className="vehicle-meta">Privat bärgning skickas till bärgningsföretag som tar emot direkta uppdrag via marknadsplatsen.</p>
+              <p className="vehicle-meta">Privat bärgning skickas till bärgningsföretag som tar emot direkta uppdrag. Du betalar bärgaren direkt — se prisuppskattning nedan innan du skickar.</p>
             ) : null}
           </div>
         ) : null}
@@ -312,6 +350,49 @@ function NewCaseInner() {
               placeholder="T.ex. verkstad eller hemadress"
             />
             <p className="vehicle-meta">Lämna tomt om du inte vet ännu — bärgaren hjälper dig välja verkstad.</p>
+          </div>
+        ) : null}
+
+        {!isDamage && mode === "private" ? (
+          <div style={{ marginTop: 12 }}>
+            <button type="button" className="bigbtn" onClick={loadPricePreview} disabled={previewBusy}>
+              {previewBusy ? "Hämtar priser…" : "Visa prisuppskattning"}
+            </button>
+            {preview ? (
+              <div className="status-card" style={{ marginTop: 10 }}>
+                <strong>Uppskattat pris</strong>
+                {preview.distance_km != null ? (
+                  <p className="vehicle-meta">Sträcka: cirka {preview.distance_km} km</p>
+                ) : (
+                  <p className="vehicle-meta">Dela din position och ange destination för ett mer exakt pris.</p>
+                )}
+                {preview.factors?.evening_night ? <p className="vehicle-meta">Kvälls-/nattillägg ingår i priset.</p> : null}
+                {preview.factors?.weekend ? <p className="vehicle-meta">Helgtillägg ingår i priset.</p> : null}
+                {preview.estimates.length === 0 ? (
+                  <p className="vehicle-meta">Inga förhandspriser tillgängliga just nu — du får hjälp ändå och bärgaren bekräftar priset.</p>
+                ) : (
+                  <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0" }}>
+                    {preview.estimates.map((e, i) => (
+                      <li key={i} style={{ padding: "6px 0", borderTop: i > 0 ? "1px solid rgba(0,0,0,0.06)" : "none" }}>
+                        <span style={{ fontWeight: 600 }}>{e.company_name}</span>
+                        <span style={{ float: "right", fontWeight: 700 }}>
+                          {(e.total_minor / 100).toLocaleString("sv-SE")} {e.currency}
+                        </span>
+                        {e.cancellation_policy ? (
+                          <div style={{ opacity: 0.65, fontSize: 12 }}>Avbokning: {e.cancellation_policy}</div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {preview.companies_without_pricing > 0 ? (
+                  <p className="vehicle-meta">
+                    Ytterligare {preview.companies_without_pricing} bärgare kan ta uppdraget utan förhandspris.
+                  </p>
+                ) : null}
+                <p className="vehicle-meta" style={{ marginTop: 8 }}>{preview.disclaimer}</p>
+              </div>
+            ) : null}
           </div>
         ) : null}
         <div style={{ marginTop: 16 }}>

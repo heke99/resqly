@@ -12,8 +12,8 @@ import {
   SHAREABLE_CUSTOMER_FIELDS,
 } from "@resqly/tow";
 import { buildCustomerShareAudit } from "@resqly/audit";
-import { buildInvoiceBasis, type PriceList } from "@resqly/billing";
-import { MapsClient, buildEtaSnapshot } from "@resqly/maps";
+import { buildInvoiceBasis, estimatePrivateTowPrice, type PriceList } from "@resqly/billing";
+import { MapsClient, buildEtaSnapshot, haversineMeters } from "@resqly/maps";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
 import { enqueueWebhookEvent, escapeHtml, sendEmail } from "../services/notifications";
@@ -133,6 +133,12 @@ export async function acceptJobForDriver(
     };
   }
 
+  // Freeze the accepted price terms for private jobs (the customer's price
+  // must never change because the company edits its price list afterwards).
+  if (job.payer_type === "customer_private" && result.towCompanyId) {
+    await snapshotAcceptedPrice(ctx, jobId, job, result.towCompanyId);
+  }
+
   // ---- The critical step: share customer data ONLY now, after accept. ----
   const contact = await ctx.repo.getCustomerContact(job.incident_id);
   if (!contact) throw new AppError("internal_error", "Customer contact unavailable");
@@ -186,6 +192,73 @@ export async function acceptJobForDriver(
       tow_company_id: result.towCompanyId,
     },
   };
+}
+
+interface PriceSnapshot {
+  tow_company_id: string;
+  price_list: PriceList;
+  estimate: {
+    lines: unknown[];
+    subtotal_minor: number;
+    vat_minor: number;
+    total_minor: number;
+    currency: string;
+  };
+  factors: { evening_night: boolean; weekend: boolean; distance_km: number | null };
+  computed_at: string;
+}
+
+/**
+ * Best-effort price snapshot at accept time. Uses the accepting company's
+ * active price list plus the case's pickup/destination distance (haversine
+ * with road factor when route data is unavailable). Never blocks accept.
+ */
+async function snapshotAcceptedPrice(
+  ctx: ApiContext,
+  jobId: string,
+  job: { incident_id: string; tenant_id: string; price_snapshot?: Record<string, unknown> | null },
+  towCompanyId: string,
+): Promise<void> {
+  try {
+    if (job.price_snapshot) return;
+    const priceList = await ctx.repo.getActivePriceList(towCompanyId);
+    if (!priceList) return;
+    const coords = await ctx.repo.getIncidentCoordinates(job.incident_id);
+    const distanceKm =
+      coords.pickup && coords.destination
+        ? Math.round((haversineMeters(coords.pickup, coords.destination) * 1.3) / 100) / 10
+        : null;
+    const estimate = estimatePrivateTowPrice({ priceList, distanceKm });
+    const snapshot: PriceSnapshot = {
+      tow_company_id: towCompanyId,
+      price_list: priceList,
+      estimate: {
+        lines: estimate.lines,
+        subtotal_minor: estimate.subtotal_minor,
+        vat_minor: estimate.vat_minor,
+        total_minor: estimate.total_minor,
+        currency: estimate.currency,
+      },
+      factors: estimate.factors,
+      computed_at: new Date().toISOString(),
+    };
+    await ctx.repo.setTowJobPriceSnapshot(jobId, snapshot as unknown as Record<string, unknown>);
+    await ctx.repo.recordAudit({
+      tenant_id: job.tenant_id,
+      action: "update",
+      entity_type: "tow_job",
+      entity_id: jobId,
+      fields: ["price_snapshot"],
+      metadata: {
+        total_minor: estimate.total_minor,
+        currency: estimate.currency,
+        distance_km: distanceKm,
+        tow_company_id: towCompanyId,
+      },
+    });
+  } catch {
+    // Pricing snapshot is best-effort; accept must never fail because of it.
+  }
 }
 
 export async function acceptTowJob(
@@ -331,9 +404,22 @@ export async function completeTowJob(
   });
   await ctx.repo.createCompletionReport(report);
 
+  // The invoice basis uses the price terms frozen at accept time when
+  // available (private jobs), otherwise the company's current price list.
+  const snapshot = (job.price_snapshot ?? null) as {
+    price_list?: PriceList;
+    factors?: { evening_night?: boolean; weekend?: boolean; distance_km?: number | null };
+  } | null;
+  const priceList =
+    snapshot?.price_list ??
+    (job.tow_company_id ? await ctx.repo.getActivePriceList(job.tow_company_id) : null) ??
+    DEFAULT_PRICE_LIST;
   const invoice = buildInvoiceBasis({
     payerType: job.payer_type === "customer_private" ? "customer_private" : "insurance_company",
-    priceList: DEFAULT_PRICE_LIST,
+    priceList,
+    distanceKm: snapshot?.factors?.distance_km ?? undefined,
+    eveningNight: snapshot?.factors?.evening_night ?? false,
+    weekend: snapshot?.factors?.weekend ?? false,
     waitingMinutes: input.waiting_minutes,
     failedTrip: input.failed_trip,
   });

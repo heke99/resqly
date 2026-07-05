@@ -281,6 +281,62 @@ export async function saveMarketplaceSettings(formData: FormData): Promise<void>
   revalidatePath("/marketplace");
 }
 
+function sekToMinor(formData: FormData, key: string): number {
+  const value = Number(formData.get(key) ?? "0");
+  return Number.isFinite(value) && value > 0 ? Math.round(value * 100) : 0;
+}
+
+/**
+ * Save the company's private-towing price list. A new active row replaces the
+ * old one (history is kept for audit); running jobs are unaffected because
+ * their price terms were snapshotted at accept time.
+ */
+export async function savePriceList(formData: FormData): Promise<void> {
+  const tenantId = String(formData.get("tenant_id"));
+  const { db: client, tenant, userId } = await portalDb(tenantId, "billing.manage");
+  assertTenant(tenant.id, tenantId);
+  const companyId = await towCompanyIdFor(client, tenantId);
+
+  const row = {
+    tenant_id: tenantId,
+    tow_company_id: companyId,
+    name: "Fri bärgning",
+    start_fee_minor: sekToMinor(formData, "start_fee_sek"),
+    per_km_minor: sekToMinor(formData, "per_km_sek"),
+    per_waiting_minute_minor: sekToMinor(formData, "per_waiting_minute_sek"),
+    failed_trip_minor: sekToMinor(formData, "failed_trip_sek"),
+    on_call_surcharge_minor: sekToMinor(formData, "on_call_sek"),
+    heavy_tow_minor: sekToMinor(formData, "heavy_tow_sek"),
+    minimum_price_minor: sekToMinor(formData, "minimum_price_sek"),
+    evening_night_surcharge_minor: sekToMinor(formData, "evening_night_sek"),
+    weekend_surcharge_minor: sekToMinor(formData, "weekend_sek"),
+    cancellation_policy: nullableText(formData, "cancellation_policy"),
+    currency: "SEK",
+    active: true,
+  };
+
+  await client
+    .from("tow_price_lists" as never)
+    .update({ active: false } as never)
+    .eq("tow_company_id", companyId)
+    .eq("active", true);
+  await client.from("tow_price_lists" as never).insert(row as never);
+  await client.from("audit_logs" as never).insert({
+    tenant_id: tenantId,
+    actor_user_id: userId,
+    action: "update",
+    entity_type: "tow_price_list",
+    entity_id: companyId,
+    fields: ["start_fee_minor", "per_km_minor", "minimum_price_minor", "surcharges", "cancellation_policy"],
+    metadata: {
+      start_fee_minor: row.start_fee_minor,
+      per_km_minor: row.per_km_minor,
+      minimum_price_minor: row.minimum_price_minor,
+    },
+  } as never);
+  revalidatePath("/pricing");
+}
+
 export async function saveAgreement(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
   const { db: client, tenant } = await portalDb(tenantId, "agreements.manage");

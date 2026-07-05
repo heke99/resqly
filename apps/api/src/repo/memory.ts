@@ -12,6 +12,7 @@ import type {
   EtaSnapshotRecord,
   IncidentRecord,
   OfferRecord,
+  PriceListRecord,
   RoleContext,
   TenantRecord,
   TenantSettingsRecord,
@@ -133,6 +134,29 @@ export class MemoryRepo implements ApiRepo {
     reason: string;
   }) {
     this.manualReviews.push({ ...row, status: "open" });
+  }
+
+  priceLists = new Map<string, PriceListRecord>(); // keyed by tow company id
+  async getActivePriceList(towCompanyId: string): Promise<PriceListRecord | null> {
+    return this.priceLists.get(towCompanyId) ?? null;
+  }
+  async setTowJobPriceSnapshot(jobId: string, snapshot: Record<string, unknown>): Promise<void> {
+    const job = this.towJobs.get(jobId);
+    if (job && !job.price_snapshot) {
+      this.towJobs.set(jobId, { ...job, price_snapshot: snapshot });
+    }
+  }
+  async getIncidentCoordinates(incidentId: string): Promise<{
+    pickup: { lat: number; lng: number } | null;
+    destination: { lat: number; lng: number } | null;
+  }> {
+    const coord = (kind: string) => {
+      const row = [...this.incidentLocations]
+        .reverse()
+        .find((l) => l.incident_id === incidentId && l.kind === kind && l.lat != null && l.lng != null);
+      return row ? { lat: row.lat, lng: row.lng } : null;
+    };
+    return { pickup: coord("pickup"), destination: coord("destination") };
   }
   async getTenant(id: string) {
     return this.tenants.get(id) ?? null;

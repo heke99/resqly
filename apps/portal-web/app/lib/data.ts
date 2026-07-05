@@ -350,6 +350,22 @@ export async function listTowJobEvents(tenantId: string, jobId: string): Promise
   return (data as Row[] | null) ?? [];
 }
 
+/** The company's active private-towing price list (latest active row). */
+export async function getCompanyPriceList(tenantId: string): Promise<Row | null> {
+  const { db } = await requirePortalTenant(tenantId);
+  const companyId = await getTowCompanyId(tenantId);
+  if (!companyId) return null;
+  const { data } = await db
+    .from("tow_price_lists" as never)
+    .select("*")
+    .eq("tow_company_id", companyId)
+    .eq("active", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as Row | null) ?? null;
+}
+
 /** Pickup + destination for the job's incident (address or coordinates). */
 export async function listTowJobLocations(tenantId: string, incidentId: string | null): Promise<Row[]> {
   const { db } = await requirePortalTenant(tenantId);

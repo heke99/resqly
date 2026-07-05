@@ -7,6 +7,11 @@ export interface PriceList {
   failed_trip_minor: number;
   on_call_surcharge_minor: number;
   heavy_tow_minor: number;
+  /** Private marketplace pricing factors (0023). All optional for old rows. */
+  minimum_price_minor?: number;
+  evening_night_surcharge_minor?: number;
+  weekend_surcharge_minor?: number;
+  cancellation_policy?: string | null;
   currency?: string;
 }
 
@@ -18,6 +23,10 @@ export interface InvoiceBasisInput {
   failedTrip?: boolean;
   onCall?: boolean;
   heavyTow?: boolean;
+  /** Evening/night (jour) pickup — surcharge from the price list applies. */
+  eveningNight?: boolean;
+  /** Weekend pickup — surcharge from the price list applies. */
+  weekend?: boolean;
   specialVehicleMinor?: number;
   extraEquipmentMinor?: number;
   otherCostsMinor?: number;
@@ -67,12 +76,23 @@ export function buildInvoiceBasis(input: InvoiceBasisInput): InvoiceBasisResult 
 
   if (input.failedTrip) push("failed_trip", "Failed trip / no-show", 1, priceList.failed_trip_minor);
   if (input.onCall) push("on_call_surcharge", "On-call surcharge", 1, priceList.on_call_surcharge_minor);
+  if (input.eveningNight)
+    push("evening_night_surcharge", "Evening/night surcharge", 1, priceList.evening_night_surcharge_minor ?? 0);
+  if (input.weekend) push("weekend_surcharge", "Weekend surcharge", 1, priceList.weekend_surcharge_minor ?? 0);
   if (input.heavyTow) push("heavy_towing", "Heavy towing", 1, priceList.heavy_tow_minor);
   if (input.specialVehicleMinor) push("special_vehicle", "Special vehicle", 1, input.specialVehicleMinor);
   if (input.extraEquipmentMinor) push("extra_equipment", "Extra equipment", 1, input.extraEquipmentMinor);
   if (input.otherCostsMinor) push("other", "Other costs", 1, input.otherCostsMinor);
 
-  const subtotal = lines.reduce((sum, l) => sum + l.total_minor, 0);
+  let subtotal = lines.reduce((sum, l) => sum + l.total_minor, 0);
+
+  // A configured minimum price raises the total but never lowers it.
+  const minimum = priceList.minimum_price_minor ?? 0;
+  if (minimum > subtotal) {
+    push("minimum_price_adjustment", "Minimum price", 1, minimum - subtotal);
+    subtotal = minimum;
+  }
+
   const vatRate = input.vatRate ?? 0.25;
   const vat = Math.round(subtotal * vatRate);
 
@@ -83,5 +103,61 @@ export function buildInvoiceBasis(input: InvoiceBasisInput): InvoiceBasisResult 
     vat_minor: vat,
     total_minor: subtotal + vat,
     currency: priceList.currency ?? "SEK",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Private/direct towing price estimation
+// ---------------------------------------------------------------------------
+
+export interface PrivatePriceFactors {
+  evening_night: boolean;
+  weekend: boolean;
+  distance_km: number | null;
+}
+
+export interface PrivatePriceEstimate extends InvoiceBasisResult {
+  factors: PrivatePriceFactors;
+}
+
+/** Swedish local time drives evening/weekend surcharges regardless of server TZ. */
+export function swedishTimeFactors(when: Date): { eveningNight: boolean; weekend: boolean } {
+  const formatter = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Stockholm",
+    hour: "2-digit",
+    hour12: false,
+    weekday: "short",
+  });
+  const parts = formatter.formatToParts(when);
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "12");
+  const weekday = parts.find((p) => p.type === "weekday")?.value ?? "";
+  const weekend = weekday.startsWith("lör") || weekday.startsWith("sön");
+  const eveningNight = hour < 7 || hour >= 18;
+  return { eveningNight, weekend };
+}
+
+/**
+ * Estimate what a private/direct tow will cost with a given price list.
+ * Used for the customer's price preview AND for the immutable snapshot taken
+ * when a driver accepts, so both always agree on the calculation.
+ */
+export function estimatePrivateTowPrice(input: {
+  priceList: PriceList;
+  distanceKm: number | null;
+  when?: Date;
+  heavyTow?: boolean;
+}): PrivatePriceEstimate {
+  const { eveningNight, weekend } = swedishTimeFactors(input.when ?? new Date());
+  const basis = buildInvoiceBasis({
+    payerType: "customer_private",
+    priceList: input.priceList,
+    distanceKm: input.distanceKm ?? 0,
+    eveningNight,
+    weekend,
+    heavyTow: input.heavyTow ?? false,
+  });
+  return {
+    ...basis,
+    factors: { evening_night: eveningNight, weekend, distance_km: input.distanceKm },
   };
 }

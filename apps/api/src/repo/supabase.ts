@@ -13,6 +13,7 @@ import type {
   EtaSnapshotRecord,
   IncidentRecord,
   OfferRecord,
+  PriceListRecord,
   RoleContext,
   RoleContextTenant,
   TenantRecord,
@@ -228,6 +229,42 @@ export class SupabaseRepo implements ApiRepo {
     const { data, error } = await this.table("tow_jobs").insert(row as never).select("*").single();
     if (error) throw new Error(error.message);
     return data as TowJobRecord;
+  }
+
+  async getActivePriceList(towCompanyId: string): Promise<PriceListRecord | null> {
+    const { data } = await this.table("tow_price_lists")
+      .select(
+        "start_fee_minor, per_km_minor, per_waiting_minute_minor, failed_trip_minor, on_call_surcharge_minor, heavy_tow_minor, minimum_price_minor, evening_night_surcharge_minor, weekend_surcharge_minor, cancellation_policy, currency",
+      )
+      .eq("tow_company_id", towCompanyId)
+      .eq("active", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return (data as PriceListRecord | null) ?? null;
+  }
+
+  async setTowJobPriceSnapshot(jobId: string, snapshot: Record<string, unknown>): Promise<void> {
+    await this.table("tow_jobs")
+      .update({ price_snapshot: snapshot } as never)
+      .eq("id", jobId)
+      .is("price_snapshot", null);
+  }
+
+  async getIncidentCoordinates(incidentId: string): Promise<{
+    pickup: Coordinate | null;
+    destination: Coordinate | null;
+  }> {
+    const { data } = await this.table("incident_locations")
+      .select("kind, lat, lng, created_at")
+      .eq("incident_id", incidentId)
+      .order("created_at", { ascending: false });
+    const rows = (data as Array<{ kind: string; lat: number | null; lng: number | null }> | null) ?? [];
+    const coord = (kind: string): Coordinate | null => {
+      const row = rows.find((r) => r.kind === kind && r.lat != null && r.lng != null);
+      return row ? { lat: Number(row.lat), lng: Number(row.lng) } : null;
+    };
+    return { pickup: coord("pickup"), destination: coord("destination") };
   }
   async getTowJob(tenantId: string, id: string): Promise<TowJobRecord | null> {
     const { data } = await this.table("tow_jobs")
