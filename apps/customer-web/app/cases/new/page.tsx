@@ -58,6 +58,7 @@ function NewCaseInner() {
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<PricePreview | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [consent, setConsent] = useState(false);
   // One key per form mount: double clicks and retries never create two cases.
   const [idempotencyKey] = useState(() =>
     typeof globalThis.crypto?.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
@@ -151,6 +152,10 @@ function NewCaseInner() {
       setStatus("Koppla detta fordon till ett försäkringsbolag först, eller välj privat bärgning.");
       return;
     }
+    if (!consent) {
+      setStatus("Godkänn hur dina uppgifter delas för att fortsätta.");
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/customer/cases", {
@@ -169,6 +174,7 @@ function NewCaseInner() {
           address: address || null,
           destination: !isDamage ? destination || null : null,
           mode: effectiveMode,
+          consent: true,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -395,6 +401,21 @@ function NewCaseInner() {
             ) : null}
           </div>
         ) : null}
+        <div className="status-card" style={{ marginTop: 16 }}>
+          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+              style={{ marginTop: 3 }}
+            />
+            <span style={{ fontSize: 14 }}>
+              {isDamage || mode === "insurance"
+                ? "Jag godkänner att uppgifter om ärendet, fordonet, min position och mina kontaktuppgifter delas med mitt försäkringsbolag och den bärgare som tar uppdraget."
+                : "Jag godkänner att den bärgare som accepterar uppdraget får mitt namn, telefonnummer, fordonets registreringsnummer, plats och destination."}
+            </span>
+          </label>
+        </div>
         <div style={{ marginTop: 16 }}>
           <button className="bigbtn" type="submit" disabled={busy}>{busy ? "Skapar ärende…" : "Skapa ärende"}</button>
         </div>

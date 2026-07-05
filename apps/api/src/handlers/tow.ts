@@ -21,6 +21,19 @@ import { enqueueWebhookEvent, escapeHtml, sendEmail } from "../services/notifica
 const acceptSchema = z.object({});
 const rejectSchema = z.object({ reason: z.string().optional() });
 
+const MAX_EVIDENCE_BYTES = 10 * 1024 * 1024; // 10 MB
+const EVIDENCE_EXTENSIONS: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+};
+const evidenceSchema = z.object({
+  content_type: z.enum(["image/jpeg", "image/png", "image/webp", "image/heic"]),
+  data_base64: z.string().min(1),
+  phase: z.enum(["before", "during", "after"]).optional(),
+});
+
 function requireAuthenticatedDriver(ctx: ApiContext): string {
   if (!ctx.driverId) throw forbidden("Authenticated driver token is required for this action");
   return ctx.driverId;
@@ -269,6 +282,53 @@ export async function acceptTowJob(
   acceptSchema.parse(body);
   const driverId = requireAuthenticatedDriver(ctx);
   return acceptJobForDriver(ctx, id, driverId);
+}
+
+/**
+ * Driver photo upload for an assigned job. The file lands in the tow-evidence
+ * bucket under the job's path; type and size are validated before upload.
+ */
+export async function uploadTowJobEvidence(
+  ctx: ApiContext,
+  id: string,
+  body: unknown,
+): Promise<RouteResult> {
+  const input = evidenceSchema.parse(body);
+  const driverId = requireAuthenticatedDriver(ctx);
+  const job = await loadJobForContext(ctx, id);
+  if (!job.driver_id) throw forbidden("Photos can only be added after the job is assigned");
+  assertAssignedDriver(job.driver_id, driverId);
+
+  const bytes = Buffer.from(input.data_base64, "base64");
+  if (bytes.length === 0) throw badRequest("Empty file");
+  if (bytes.length > MAX_EVIDENCE_BYTES) {
+    throw new AppError("bad_request", "File too large (max 10 MB)", {
+      user_message: "Bilden är för stor. Max 10 MB per bild.",
+    });
+  }
+
+  const ext = EVIDENCE_EXTENSIONS[input.content_type];
+  const path = `${job.id}/${crypto.randomUUID()}.${ext}`;
+  await ctx.repo.uploadTowEvidenceObject(path, bytes, input.content_type);
+  const row = await ctx.repo.createTowJobEvidence({
+    tenant_id: job.tenant_id,
+    tow_job_id: job.id,
+    driver_id: driverId,
+    storage_path: path,
+    content_type: input.content_type,
+    phase: input.phase ?? "during",
+  });
+
+  await ctx.repo.recordAudit({
+    tenant_id: job.tenant_id,
+    action: "create",
+    entity_type: "tow_job_evidence",
+    entity_id: row.id,
+    fields: ["storage_path", "content_type", "phase"],
+    metadata: { tow_job_id: job.id, driver_id: driverId, size_bytes: bytes.length },
+  });
+
+  return { status: 201, body: { evidence_id: row.id } };
 }
 
 export async function rejectTowJob(

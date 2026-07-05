@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCustomer, jsonError, replayIfIdempotent, storeIdempotentResponse } from "../_lib";
+import { recordConsent, type ConsentKind } from "../_consent";
 
 const TOWING_TYPES = new Set(["towing", "roadside_assistance"]);
 
@@ -26,6 +27,11 @@ export async function POST(request: Request) {
 
   // "private" = direct/marketplace towing without an insurance policy.
   const mode = String(body.mode ?? "") === "private" ? "private" : "insurance";
+
+  // Explicit data-sharing consent is required before a case is created.
+  if (body.consent !== true) {
+    return jsonError(400, "Du behöver godkänna hur dina uppgifter delas innan ärendet kan skapas.");
+  }
 
   const { data: vehicle } = await db
     .from("vehicles" as never)
@@ -132,6 +138,26 @@ export async function POST(request: Request) {
     actor_user_id: user.id,
     reason: "Skapat av kund",
   } as never);
+
+  // Versioned consent trail: what data sharing the customer accepted, with
+  // text hash + version. BankID (when required) is the verification on top.
+  const consentKinds: ConsentKind[] =
+    mode === "private"
+      ? ["share_with_tow_partner"]
+      : type === "damage_claim"
+        ? ["claim_submission", "share_with_insurer"]
+        : ["share_with_insurer", "share_with_tow_partner"];
+  for (const kind of consentKinds) {
+    await recordConsent(db, {
+      tenantId,
+      userId: user.id,
+      kind,
+      incidentId,
+      vehicleId,
+      request,
+      metadata: { case_type: type, mode },
+    });
+  }
 
   if (coords?.lat && coords?.lng) {
     await db.from("incident_locations" as never).insert({

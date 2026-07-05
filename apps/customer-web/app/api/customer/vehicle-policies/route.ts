@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCustomer, jsonError } from "../_lib";
+import { recordConsent } from "../_consent";
 
 export async function POST(request: Request) {
   const session = await requireCustomer(request);
@@ -10,6 +11,9 @@ export async function POST(request: Request) {
   const insuranceCompanyId = String(body.insurance_company_id ?? "");
   const policyNumber = body.policy_number ? String(body.policy_number) : null;
   if (!vehicleId || !insuranceCompanyId) return jsonError(400, "Fordon och försäkringsbolag krävs.");
+  if (body.consent !== true) {
+    return jsonError(400, "Du behöver godkänna kopplingen till försäkringsbolaget först.");
+  }
 
   const { data: vehicle } = await db
     .from("vehicles" as never)
@@ -49,6 +53,15 @@ export async function POST(request: Request) {
     insurance_company_id: insuranceCompanyId,
     status: "pending_bankid",
   } as never, { onConflict: "customer_user_id,tenant_id,insurance_company_id" } as never);
+
+  await recordConsent(db, {
+    tenantId,
+    userId: user.id,
+    kind: "vehicle_insurance_link",
+    vehicleId,
+    vehiclePolicyId: (policy as { id: string }).id,
+    request,
+  });
 
   await db.from("audit_logs" as never).insert({
     tenant_id: tenantId,

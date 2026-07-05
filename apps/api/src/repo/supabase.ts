@@ -251,6 +251,22 @@ export class SupabaseRepo implements ApiRepo {
       .is("price_snapshot", null);
   }
 
+  async uploadTowEvidenceObject(path: string, bytes: Uint8Array, contentType: string): Promise<void> {
+    const { error } = await this.db.storage
+      .from("tow-evidence")
+      .upload(path, bytes, { contentType, upsert: false });
+    if (error) throw new Error(error.message);
+  }
+
+  async createTowJobEvidence(row: Record<string, unknown>): Promise<{ id: string }> {
+    const { data, error } = await this.table("tow_job_evidence")
+      .insert(row as never)
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    return data as { id: string };
+  }
+
   async getIncidentCoordinates(incidentId: string): Promise<{
     pickup: Coordinate | null;
     destination: Coordinate | null;

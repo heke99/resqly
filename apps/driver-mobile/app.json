@@ -12,7 +12,9 @@
       "infoPlist": {
         "UIBackgroundModes": ["location", "fetch"],
         "NSLocationWhenInUseUsageDescription": "Din position används för att skicka rätt bärgningsuppdrag till dig och visa kunden när du är framme.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Din position delas medan du är i tjänst så att kunden ser din beräknade ankomsttid, även när appen är i bakgrunden."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Din position delas medan du är i tjänst så att kunden ser din beräknade ankomsttid, även när appen är i bakgrunden.",
+        "NSCameraUsageDescription": "Kameran används för att fotografera fordonet före och efter bärgning.",
+        "NSPhotoLibraryUsageDescription": "Bildbiblioteket används för att välja foton på fordonet till uppdraget."
       }
     },
     "android": {
@@ -36,7 +38,14 @@
         }
       ],
       "expo-notifications",
-      "expo-task-manager"
+      "expo-task-manager",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Bildbiblioteket används för att välja foton på fordonet till uppdraget.",
+          "cameraPermission": "Kameran används för att fotografera fordonet före och efter bärgning."
+        }
+      ]
     ]
   }
 }

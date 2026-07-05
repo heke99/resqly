@@ -146,6 +146,16 @@ export class MemoryRepo implements ApiRepo {
       this.towJobs.set(jobId, { ...job, price_snapshot: snapshot });
     }
   }
+  towEvidenceObjects: Array<{ path: string; contentType: string; size: number }> = [];
+  towJobEvidence: Array<Record<string, unknown>> = [];
+  async uploadTowEvidenceObject(path: string, bytes: Uint8Array, contentType: string): Promise<void> {
+    this.towEvidenceObjects.push({ path, contentType, size: bytes.length });
+  }
+  async createTowJobEvidence(row: Record<string, unknown>): Promise<{ id: string }> {
+    const id = newId();
+    this.towJobEvidence.push({ id, ...row });
+    return { id };
+  }
   async getIncidentCoordinates(incidentId: string): Promise<{
     pickup: { lat: number; lng: number } | null;
     destination: { lat: number; lng: number } | null;

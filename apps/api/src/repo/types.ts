@@ -247,6 +247,9 @@ export interface ApiRepo {
     pickup: Coordinate | null;
     destination: Coordinate | null;
   }>;
+  /** Store a driver photo in the tow-evidence bucket (server-side upload). */
+  uploadTowEvidenceObject(path: string, bytes: Uint8Array, contentType: string): Promise<void>;
+  createTowJobEvidence(row: Record<string, unknown>): Promise<{ id: string }>;
   getTowJob(tenantId: string, id: string): Promise<TowJobRecord | null>;
   /** Lookup by id only — callers MUST verify driver/tenant authorization. */
   getTowJobById(id: string): Promise<TowJobRecord | null>;

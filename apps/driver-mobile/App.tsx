@@ -6,6 +6,7 @@ import { problemTypeLabel, towStatusLabel } from "@resqly/ui";
 import { getSupabase, apiPost, apiGet } from "./src/supabase";
 import { getExpoPushToken, devicePlatform, listenForOfferPushes } from "./src/push";
 import { startBackgroundLocation, stopBackgroundLocation } from "./src/location-task";
+import { takePhoto, pickPhotoFromLibrary } from "./src/photo";
 import { palette } from "./src/theme";
 
 type Screen = "loading" | "login" | "denied" | "offers" | "detail" | "account";
@@ -433,6 +434,8 @@ function JobDetail({ offer, jobId, onBack }: { offer: Offer | null; jobId: strin
   const [notes, setNotes] = useState("");
   const [failedTrip, setFailedTrip] = useState(false);
   const [damages, setDamages] = useState("");
+  const [photoCount, setPhotoCount] = useState(0);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   const loadShare = useCallback(async () => {
     if (!supabase) return;
@@ -493,6 +496,32 @@ function JobDetail({ offer, jobId, onBack }: { offer: Offer | null; jobId: strin
       setMessage(null);
     } else {
       setMessage(res.error ?? "Statusen kunde inte uppdateras. Försök igen.");
+    }
+  }
+
+  async function uploadPhoto(source: "camera" | "library") {
+    if (photoBusy) return;
+    setPhotoBusy(true);
+    setMessage(null);
+    try {
+      const photo = source === "camera" ? await takePhoto() : await pickPhotoFromLibrary();
+      if (!photo) {
+        setMessage("Ingen bild vald, eller så saknas kamerabehörighet.");
+        return;
+      }
+      const res = await apiPost(`/api/v1/tow/jobs/${jobId}/evidence`, {
+        content_type: photo.contentType,
+        data_base64: photo.base64,
+        phase: "during",
+      });
+      if (res.ok) {
+        setPhotoCount((n) => n + 1);
+        setMessage("Bilden är uppladdad.");
+      } else {
+        setMessage(res.error ?? "Bilden kunde inte laddas upp. Försök igen.");
+      }
+    } finally {
+      setPhotoBusy(false);
     }
   }
 
@@ -588,6 +617,26 @@ function JobDetail({ offer, jobId, onBack }: { offer: Offer | null; jobId: strin
               <Text style={[styles.bigbtnText, { color: palette.primary }]}>{b.label}</Text>
             </Pressable>
           ))}
+          <View style={styles.card}>
+            <Text style={{ fontWeight: "700" }}>Foton {photoCount > 0 ? `(${photoCount} uppladdade)` : ""}</Text>
+            <Text style={styles.muted}>Ta bilder på fordonet före och efter lastning.</Text>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <Pressable
+                style={[styles.bigbtn, { flex: 1 }, photoBusy ? styles.disabled : null]}
+                onPress={() => uploadPhoto("camera")}
+                disabled={photoBusy}
+              >
+                <Text style={styles.bigbtnText}>{photoBusy ? "Vänta…" : "Ta foto"}</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.bigbtn, styles.secondary, { flex: 1 }, photoBusy ? styles.disabled : null]}
+                onPress={() => uploadPhoto("library")}
+                disabled={photoBusy}
+              >
+                <Text style={[styles.bigbtnText, { color: palette.primary }]}>Välj bild</Text>
+              </Pressable>
+            </View>
+          </View>
           {!showReport ? (
             <Pressable style={styles.bigbtn} onPress={() => setShowReport(true)}>
               <Text style={styles.bigbtnText}>Slutför och skicka rapport</Text>

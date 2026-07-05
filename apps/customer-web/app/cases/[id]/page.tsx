@@ -34,6 +34,13 @@ interface PriceSnapshot {
   factors?: { distance_km?: number | null };
 }
 
+interface EvidenceItem {
+  id: string;
+  content_type: string;
+  created_at: string;
+  url: string | null;
+}
+
 const CANCELLABLE = new Set([
   "draft",
   "awaiting_bankid",
@@ -69,6 +76,8 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [locations, setLocations] = useState<CaseLocation[]>([]);
   const [priceSnapshot, setPriceSnapshot] = useState<PriceSnapshot | null>(null);
+  const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
 
@@ -114,11 +123,45 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
           setTimeline(json.entries ?? []);
           setLocations(json.locations ?? []);
         }
+        const evRes = await fetch(`/api/customer/cases/${id}/evidence`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (evRes.ok) {
+          const evJson = (await evRes.json()) as { evidence?: EvidenceItem[] };
+          setEvidence(evJson.evidence ?? []);
+        }
       } catch {
         // Timeline is progressive enhancement — the page still works without it.
       }
     }
   }, [supabase, id]);
+
+  async function uploadPhoto(file: File) {
+    if (uploading) return;
+    const token = await accessToken();
+    if (!token) return;
+    setUploading(true);
+    setMessage(null);
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      const res = await fetch(`/api/customer/cases/${id}/evidence`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) setMessage(json.error ?? "Uppladdningen misslyckades. Försök igen.");
+      else {
+        setMessage("Bilden är uppladdad.");
+        await load();
+      }
+    } catch {
+      setMessage("Något gick fel. Kontrollera din uppkoppling och försök igen.");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   useEffect(() => {
     void load();
@@ -304,6 +347,42 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
           <p className="vehicle-meta">Statusen på ärendet uppdateras automatiskt på den här sidan.</p>
         </div>
       )}
+
+      <div className="status-card" style={{ marginTop: 12 }}>
+        <strong>Bilder och dokument</strong>
+        <p className="vehicle-meta">Foton på fordonet och skadan hjälper bärgaren och försäkringsbolaget.</p>
+        {evidence.length > 0 ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+            {evidence.map((e) =>
+              e.url && e.content_type.startsWith("image/") ? (
+                <a key={e.id} href={e.url} target="_blank" rel="noreferrer">
+                  <img src={e.url} alt="Uppladdad bild" style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 8 }} />
+                </a>
+              ) : e.url ? (
+                <a key={e.id} href={e.url} target="_blank" rel="noreferrer" className="badge">
+                  Dokument
+                </a>
+              ) : null,
+            )}
+          </div>
+        ) : null}
+        {!["closed", "cancelled"].includes(incident.status) ? (
+          <label className="bigbtn" style={{ display: "inline-block", marginTop: 10, cursor: "pointer" }}>
+            {uploading ? "Laddar upp…" : "Lägg till bild"}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"
+              style={{ display: "none" }}
+              disabled={uploading}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void uploadPhoto(file);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        ) : null}
+      </div>
 
       {incident.status !== "cancelled" && CANCELLABLE.has(incident.status) ? (
         <div style={{ marginTop: 16 }}>
