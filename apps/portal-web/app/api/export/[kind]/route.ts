@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { requirePortalTenant } from "../../../lib/auth";
+import { unstable_rethrow } from "next/navigation";
+import { requirePortalPermission } from "../../../lib/auth";
 import {
   getTowCompanyId,
   listCompanyJobs,
@@ -37,11 +38,26 @@ function csvResponse(filename: string, csv: string): NextResponse {
  *  - jobs     (both): tow jobs
  *  - invoices (tow): invoice basis
  */
+const EXPORT_PERMISSIONS = {
+  cases: "incidents.export",
+  jobs: "tow_jobs.read",
+  invoices: "billing.read",
+} as const;
+
 export async function GET(request: Request, { params }: { params: Promise<{ kind: string }> }) {
   const { kind } = await params;
   const url = new URL(request.url);
   const tenantParam = url.searchParams.get("tenant");
-  const { tenant } = await requirePortalTenant(tenantParam);
+  const permission = EXPORT_PERMISSIONS[kind as keyof typeof EXPORT_PERMISSIONS];
+  if (!permission) return NextResponse.json({ error: "Okänd export." }, { status: 404 });
+  let tenant;
+  try {
+    ({ tenant } = await requirePortalPermission(tenantParam, permission));
+  } catch (error) {
+    // Let Next's own redirect (unauthenticated -> /login) pass through.
+    unstable_rethrow(error);
+    return NextResponse.json({ error: "Du saknar behörighet för den här exporten." }, { status: 403 });
+  }
   const today = new Date().toISOString().slice(0, 10);
 
   if (kind === "cases") {

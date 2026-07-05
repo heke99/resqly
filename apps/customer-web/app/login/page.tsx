@@ -1,10 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useSupabase } from "../lib/supabase-client";
+import { SESSION_MARKER_COOKIE } from "../lib/session-marker";
 
-export default function LoginPage() {
+function safeNextPath(raw: string | null): string {
+  // Only same-origin relative paths are allowed as post-login destinations.
+  if (raw && raw.startsWith("/") && !raw.startsWith("//")) return raw;
+  return "/";
+}
+
+function LoginInner() {
   const supabase = useSupabase();
+  const params = useSearchParams();
+  const nextPath = safeNextPath(params.get("next"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"sign_in" | "sign_up">("sign_in");
@@ -46,8 +56,12 @@ export default function LoginPage() {
           email: userData.user.email ?? null,
         } as never);
       }
+      // Set the middleware marker before navigating so protected pages open
+      // directly (the layout session listener keeps it in sync afterwards).
+      const secure = window.location.protocol === "https:" ? "; secure" : "";
+      document.cookie = `${SESSION_MARKER_COOKIE}=1; path=/; max-age=${60 * 60 * 24 * 30}; samesite=lax${secure}`;
       setMessage(mode === "sign_up" ? "Kontot är skapat. Du kan nu använda tjänsten." : "Du är inloggad.");
-      window.location.href = "/";
+      window.location.href = nextPath;
     }
   }
 
@@ -78,5 +92,13 @@ export default function LoginPage() {
         </a>
       </p>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<p>Laddar…</p>}>
+      <LoginInner />
+    </Suspense>
   );
 }

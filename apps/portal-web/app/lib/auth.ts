@@ -2,6 +2,9 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getServiceClient } from "@resqly/web-kit/server";
 import type { AppSupabaseClient } from "@resqly/database";
+import type { AccessContext, PermissionKey } from "@resqly/types";
+import { loadAccessContext } from "@resqly/auth";
+import { assertCan } from "@resqly/rbac";
 import { PORTAL_AUTH_COOKIE, PORTAL_TENANT_COOKIE } from "./constants";
 
 type AuthUser = {
@@ -78,6 +81,25 @@ export async function requirePortalTenant(tenantId?: string | null): Promise<{ d
     tenants[0];
   if (!tenant) redirect("/login?error=no_tenant_access");
   return { db, userId, tenant };
+}
+
+/**
+ * Tenant membership + RBAC permission gate for privileged portal actions.
+ * Membership alone is never enough for mutations: the user's tenant roles
+ * (user_roles -> role_permissions) must grant the specific permission.
+ */
+export async function requirePortalPermission(
+  tenantId: string | null | undefined,
+  permission: PermissionKey,
+): Promise<{ db: AppSupabaseClient; userId: string; tenant: PortalTenant; access: AccessContext }> {
+  const { db, userId, tenant } = await requirePortalTenant(tenantId);
+  const access = await loadAccessContext(db, userId, tenant.id);
+  try {
+    assertCan(access, permission, tenant.id);
+  } catch {
+    throw new Error("Du saknar behörighet för den här åtgärden. Kontakta din administratör.");
+  }
+  return { db, userId, tenant, access };
 }
 
 /**

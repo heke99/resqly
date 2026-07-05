@@ -1,7 +1,18 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { requirePlatformAdmin } from "./auth";
+import { ADMIN_AUTH_COOKIE, ADMIN_REFRESH_COOKIE } from "./constants";
+
+/** Clear the HttpOnly session cookies and return to the login screen. */
+export async function logoutAdmin(): Promise<void> {
+  const store = await cookies();
+  store.delete(ADMIN_AUTH_COOKIE);
+  store.delete(ADMIN_REFRESH_COOKIE);
+  redirect("/login");
+}
 
 type TenantType =
   | "insurance_company"

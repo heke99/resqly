@@ -5,11 +5,13 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createHash, randomBytes } from "node:crypto";
 import { newApiKey, sha256Hex } from "@resqly/utils";
-import { requirePortalTenant } from "./auth";
-import { PORTAL_TENANT_COOKIE } from "./constants";
+import type { PermissionKey } from "@resqly/types";
+import { requirePortalTenant, requirePortalPermission } from "./auth";
+import { PORTAL_AUTH_COOKIE, PORTAL_REFRESH_COOKIE, PORTAL_TENANT_COOKIE } from "./constants";
 
-async function portalDb(tenantId?: string | null) {
-  return requirePortalTenant(tenantId);
+/** Every mutating action must name the RBAC permission it needs. */
+async function portalDb(tenantId: string | null | undefined, permission: PermissionKey) {
+  return requirePortalPermission(tenantId, permission);
 }
 
 /** Switch the active organization for users who belong to several. */
@@ -22,12 +24,27 @@ export async function switchTenant(formData: FormData): Promise<void> {
   redirect("/");
 }
 
+/** Clear the HttpOnly session cookies and return to the login screen. */
+export async function logoutPortal(): Promise<void> {
+  const store = await cookies();
+  store.delete(PORTAL_AUTH_COOKIE);
+  store.delete(PORTAL_REFRESH_COOKIE);
+  store.delete(PORTAL_TENANT_COOKIE);
+  redirect("/login");
+}
+
 function assertTenant(expected: string, actual: string) {
   if (expected !== actual) throw new Error("You do not have access to this tenant.");
 }
 
-async function setIncidentStatus(incidentId: string, tenantId: string, status: string, reason?: string) {
-  const { db: client, tenant, userId } = await portalDb(tenantId);
+async function setIncidentStatus(
+  incidentId: string,
+  tenantId: string,
+  status: string,
+  reason: string | undefined,
+  permission: PermissionKey,
+) {
+  const { db: client, tenant, userId } = await portalDb(tenantId, permission);
   const { data: current } = await client
     .from("incidents" as never)
     .select("status, tenant_id")
@@ -57,10 +74,22 @@ async function setIncidentStatus(incidentId: string, tenantId: string, status: s
 }
 
 export async function approveClaim(formData: FormData): Promise<void> {
-  await setIncidentStatus(String(formData.get("incident_id")), String(formData.get("tenant_id")), "in_progress", "approved by insurer");
+  await setIncidentStatus(
+    String(formData.get("incident_id")),
+    String(formData.get("tenant_id")),
+    "in_progress",
+    "approved by insurer",
+    "claims.approve",
+  );
 }
 export async function rejectClaim(formData: FormData): Promise<void> {
-  await setIncidentStatus(String(formData.get("incident_id")), String(formData.get("tenant_id")), "rejected", String(formData.get("reason") ?? ""));
+  await setIncidentStatus(
+    String(formData.get("incident_id")),
+    String(formData.get("tenant_id")),
+    "rejected",
+    String(formData.get("reason") ?? ""),
+    "claims.approve",
+  );
 }
 export async function requestMoreInfo(formData: FormData): Promise<void> {
   await setIncidentStatus(
@@ -68,12 +97,13 @@ export async function requestMoreInfo(formData: FormData): Promise<void> {
     String(formData.get("tenant_id")),
     "more_info_required",
     String(formData.get("reason") ?? ""),
+    "incidents.update",
   );
 }
 
 export async function updateSettings(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "white_label.manage");
   assertTenant(tenant.id, tenantId);
   const strategy = String(formData.get("default_dispatch_strategy") ?? "");
   const radius = Number(formData.get("max_dispatch_radius_km") ?? "");
@@ -109,7 +139,7 @@ interface AdminAuthError {
  */
 export async function createDriver(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "drivers.manage");
   assertTenant(tenant.id, tenantId);
   const { data: company } = await client
     .from("tow_companies" as never)
@@ -174,7 +204,7 @@ export async function createDriver(formData: FormData): Promise<void> {
 
 export async function createTowVehicle(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "vehicles.manage");
   assertTenant(tenant.id, tenantId);
   const { data: company } = await client
     .from("tow_companies" as never)
@@ -206,7 +236,7 @@ export async function createTowVehicle(formData: FormData): Promise<void> {
 
 export async function createWebhook(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "webhooks.manage");
   assertTenant(tenant.id, tenantId);
   const url = String(formData.get("url") ?? "");
   const events = String(formData.get("events") ?? "")
@@ -235,7 +265,7 @@ async function towCompanyIdFor(client: Awaited<ReturnType<typeof portalDb>>["db"
 
 export async function saveMarketplaceSettings(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "agreements.manage");
   assertTenant(tenant.id, tenantId);
   const companyId = await towCompanyIdFor(client, tenantId);
   const row = {
@@ -253,7 +283,7 @@ export async function saveMarketplaceSettings(formData: FormData): Promise<void>
 
 export async function saveAgreement(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "agreements.manage");
   assertTenant(tenant.id, tenantId);
   const companyId = await towCompanyIdFor(client, tenantId);
   const insurerTenantId = String(formData.get("insurance_tenant_id") ?? "");
@@ -274,7 +304,7 @@ export async function saveAgreement(formData: FormData): Promise<void> {
 
 export async function setDriverVehicle(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "drivers.manage");
   assertTenant(tenant.id, tenantId);
   const driverId = String(formData.get("driver_id") ?? "");
   const vehicleId = String(formData.get("vehicle_id") ?? "") || null;
@@ -290,7 +320,7 @@ export async function setDriverVehicle(formData: FormData): Promise<void> {
 /** Create an API key; the raw key is shown once (stored only as a hash). */
 export async function createApiKey(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant, userId } = await portalDb(tenantId);
+  const { db: client, tenant, userId } = await portalDb(tenantId, "api_keys.manage");
   assertTenant(tenant.id, tenantId);
   const name = String(formData.get("name") ?? "API client");
   const { key, last4 } = newApiKey("rk_live");
@@ -333,7 +363,7 @@ function sha256(value: string): string {
 
 export async function saveLegalVersion(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id") ?? "");
-  const { db: client, tenant, userId } = await portalDb(tenantId);
+  const { db: client, tenant, userId } = await portalDb(tenantId, "white_label.manage");
   assertTenant(tenant.id, tenantId);
   const kind = String(formData.get("kind") ?? "");
   const title = String(formData.get("title") ?? "").trim();
@@ -381,7 +411,7 @@ export async function saveLegalVersion(formData: FormData): Promise<void> {
 
 export async function saveFallbackRule(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id") ?? "");
-  const { db: client, tenant, userId } = await portalDb(tenantId);
+  const { db: client, tenant, userId } = await portalDb(tenantId, "white_label.manage");
   assertTenant(tenant.id, tenantId);
   const contactsRaw = nullableText(formData, "operational_contacts_json") ?? "[]";
   let contacts: unknown = [];
@@ -420,7 +450,7 @@ export async function saveFallbackRule(formData: FormData): Promise<void> {
 
 export async function saveVehiclePermission(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id") ?? "");
-  const { db: client, tenant, userId } = await portalDb(tenantId);
+  const { db: client, tenant, userId } = await portalDb(tenantId, "agreements.manage");
   assertTenant(tenant.id, tenantId);
   const agreementId = String(formData.get("agreement_id") ?? "");
   const towVehicleId = String(formData.get("tow_vehicle_id") ?? "");
