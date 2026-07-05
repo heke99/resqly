@@ -253,6 +253,18 @@ export async function orchestrateDispatch(
       incident_id: job.incident_id,
       reason: "no_eligible_driver",
     });
+    // Structured server log so operators can grep dispatch failures.
+    console.error(
+      JSON.stringify({
+        event: "dispatch.no_eligible_driver",
+        tow_job_id: job.id,
+        incident_id: job.incident_id,
+        tenant_id: input.tenantId,
+        payer_type: payerType,
+        candidates_seen: candidates.length,
+        radius_km: settings.max_dispatch_radius_km,
+      }),
+    );
   }
 
   await store.recordAudit({
@@ -318,6 +330,16 @@ async function sendOfferPushes(
         url: hooks.push?.url,
       });
       await store.markOfferPush(input.job.id, offer.driverId, res.ok ? "sent" : "failed", res.error ?? null);
+      if (!res.ok) {
+        console.error(
+          JSON.stringify({
+            event: "dispatch.offer_push_failed",
+            tow_job_id: input.job.id,
+            driver_id: offer.driverId,
+            error: res.error ?? "unknown",
+          }),
+        );
+      }
       await hooks.onEvent?.("tow.offer_sent", {
         tow_job_id: input.job.id,
         driver_id: offer.driverId,

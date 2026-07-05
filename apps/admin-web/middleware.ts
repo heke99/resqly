@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ADMIN_AUTH_COOKIE, ADMIN_REFRESH_COOKIE } from "./app/lib/constants";
 
-const PUBLIC_PREFIXES = ["/login", "/api/auth"];
+const PUBLIC_PREFIXES = ["/login", "/api/auth", "/api/health"];
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
