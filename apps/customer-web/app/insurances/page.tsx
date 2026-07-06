@@ -55,6 +55,7 @@ function InsurancesInner() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [consent, setConsent] = useState(false);
 
   const load = useCallback(async () => {
     if (!supabase) return;
@@ -145,6 +146,10 @@ function InsurancesInner() {
   async function connect(e: React.FormEvent) {
     e.preventDefault();
     if (!supabase || !vehicleId || !insurerId || busy) return;
+    if (!consent) {
+      setStatus("Godkänn kopplingen till försäkringsbolaget för att fortsätta.");
+      return;
+    }
     setBusy(true);
     try {
       const { data: session } = await supabase.auth.getSession();
@@ -157,7 +162,7 @@ function InsurancesInner() {
       const res = await fetch("/api/customer/vehicle-policies", {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ vehicle_id: vehicleId, insurance_company_id: insurerId, policy_number: policyNumber || null }),
+        body: JSON.stringify({ vehicle_id: vehicleId, insurance_company_id: insurerId, policy_number: policyNumber || null, consent: true }),
       });
       const json = await parseJson(res);
       if (!res.ok) throw new Error(typeof json.error === "string" ? json.error : "Kunde inte koppla försäkringen.");
@@ -212,6 +217,15 @@ function InsurancesInner() {
         </select>
         <label htmlFor="policy">Försäkrings-/kundnummer, om du har det</label>
         <input id="policy" value={policyNumber} onChange={(e) => setPolicyNumber(e.target.value)} placeholder="Valfritt" />
+        <div className="status-card" style={{ marginTop: 16 }}>
+          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
+            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} style={{ marginTop: 3 }} />
+            <span style={{ fontSize: 14 }}>
+              Jag godkänner att mitt fordon kopplas till valt försäkringsbolag, att kopplingen verifieras med BankID
+              och att försäkringsbolaget kan se fordonet och mina ärenden som rör det.
+            </span>
+          </label>
+        </div>
         <div style={{ marginTop: 16 }}>
           <button className="bigbtn" type="submit" disabled={busy}>{busy ? "Verifierar…" : "Koppla och verifiera med BankID"}</button>
         </div>

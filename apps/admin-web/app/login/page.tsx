@@ -1,38 +1,36 @@
 "use client";
 
 import { useState } from "react";
-import { createBrowserSupabase } from "@resqly/web-kit";
-import { ADMIN_AUTH_COOKIE } from "../lib/constants";
-
-function setSessionCookie(token: string, expiresIn?: number) {
-  const maxAge = expiresIn && Number.isFinite(expiresIn) ? expiresIn : 60 * 60 * 8;
-  const secure = window.location.protocol === "https:" ? "; secure" : "";
-  document.cookie = `${ADMIN_AUTH_COOKIE}=${encodeURIComponent(token)}; path=/; max-age=${maxAge}; samesite=lax${secure}`;
-}
 
 export default function AdminLoginPage() {
-  const supabase = createBrowserSupabase();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
-
-  if (!supabase) return <p>Inloggningen är inte tillgänglig just nu. Försök igen om en stund.</p>;
+  const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
+    setBusy(true);
     setMessage(null);
-    const { data, error } = await supabase!.auth.signInWithPassword({ email, password });
-    if (error) {
-      setMessage("Fel e-post eller lösenord. Försök igen.");
-      return;
+    try {
+      // Server-side sign-in: session tokens live only in HttpOnly cookies.
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setMessage(json.error ?? "Inloggningen misslyckades. Försök igen.");
+        return;
+      }
+      window.location.href = "/";
+    } catch {
+      setMessage("Kunde inte nå tjänsten. Kontrollera din uppkoppling.");
+    } finally {
+      setBusy(false);
     }
-    const token = data.session?.access_token;
-    if (!token) {
-      setMessage("Inloggningen lyckades men sessionen kunde inte startas. Försök igen.");
-      return;
-    }
-    setSessionCookie(token, data.session?.expires_in);
-    window.location.href = "/";
   }
 
   return (
@@ -44,7 +42,9 @@ export default function AdminLoginPage() {
         <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <label htmlFor="password">Lösenord</label>
         <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        <button type="submit" style={{ marginTop: 16, padding: "10px 16px" }}>Logga in</button>
+        <button type="submit" disabled={busy} style={{ marginTop: 16, padding: "10px 16px" }}>
+          {busy ? "Loggar in…" : "Logga in"}
+        </button>
       </form>
       {message ? <p style={{ marginTop: 16, color: "#B00020" }}>{message}</p> : null}
       <p style={{ marginTop: 16, opacity: 0.65 }}>

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@resqly/database": "workspace:*",
+    "@resqly/dispatch": "workspace:*",
     "@resqly/rbac": "workspace:*",
     "@resqly/types": "workspace:*",
     "@resqly/ui": "workspace:*",

@@ -64,7 +64,6 @@ export interface DispatchRequest {
   eligibleCompanyIds?: string[];
   /** Coverage gate: candidates farther than this are excluded. */
   maxDistanceMeters?: number;
-  allowMarketplaceFallback?: boolean;
   maxCandidates?: number;
   /**
    * Insurance jobs should normally notify every active contracted/approved tow

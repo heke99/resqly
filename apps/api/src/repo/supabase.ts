@@ -13,6 +13,7 @@ import type {
   EtaSnapshotRecord,
   IncidentRecord,
   OfferRecord,
+  PriceListRecord,
   RoleContext,
   RoleContextTenant,
   TenantRecord,
@@ -55,6 +56,15 @@ export class SupabaseRepo implements ApiRepo {
   }
   async recordAudit(row: Record<string, unknown>): Promise<void> {
     await this.table("audit_logs").insert(row as never);
+  }
+
+  async createManualReview(row: {
+    tenant_id: string;
+    incident_id: string | null;
+    tow_job_id: string;
+    reason: string;
+  }): Promise<void> {
+    await this.table("manual_reviews").insert({ ...row, status: "open" } as never);
   }
 
   async getTenant(id: string): Promise<TenantRecord | null> {
@@ -189,6 +199,13 @@ export class SupabaseRepo implements ApiRepo {
       .eq("incident_id", incidentId)
       .eq("kind", "pickup")
       .maybeSingle();
+    const { data: dest } = await this.table("incident_locations")
+      .select("address")
+      .eq("incident_id", incidentId)
+      .eq("kind", "destination")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
     const p = (profile as { full_name?: string; phone?: string; email?: string } | null) ?? {};
     const l = (loc as { lat: number; lng: number; address: string | null } | null) ?? {
       lat: 0,
@@ -203,7 +220,7 @@ export class SupabaseRepo implements ApiRepo {
       problem_summary: inc.problem_type ?? inc.description ?? "",
       pickup: { lat: l.lat, lng: l.lng },
       pickup_address: l.address,
-      destination_address: null,
+      destination_address: (dest as { address?: string | null } | null)?.address ?? null,
       customer_notes: inc.description,
     };
   }
@@ -212,6 +229,58 @@ export class SupabaseRepo implements ApiRepo {
     const { data, error } = await this.table("tow_jobs").insert(row as never).select("*").single();
     if (error) throw new Error(error.message);
     return data as TowJobRecord;
+  }
+
+  async getActivePriceList(towCompanyId: string): Promise<PriceListRecord | null> {
+    const { data } = await this.table("tow_price_lists")
+      .select(
+        "start_fee_minor, per_km_minor, per_waiting_minute_minor, failed_trip_minor, on_call_surcharge_minor, heavy_tow_minor, minimum_price_minor, evening_night_surcharge_minor, weekend_surcharge_minor, cancellation_policy, currency",
+      )
+      .eq("tow_company_id", towCompanyId)
+      .eq("active", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return (data as PriceListRecord | null) ?? null;
+  }
+
+  async setTowJobPriceSnapshot(jobId: string, snapshot: Record<string, unknown>): Promise<void> {
+    await this.table("tow_jobs")
+      .update({ price_snapshot: snapshot } as never)
+      .eq("id", jobId)
+      .is("price_snapshot", null);
+  }
+
+  async uploadTowEvidenceObject(path: string, bytes: Uint8Array, contentType: string): Promise<void> {
+    const { error } = await this.db.storage
+      .from("tow-evidence")
+      .upload(path, bytes, { contentType, upsert: false });
+    if (error) throw new Error(error.message);
+  }
+
+  async createTowJobEvidence(row: Record<string, unknown>): Promise<{ id: string }> {
+    const { data, error } = await this.table("tow_job_evidence")
+      .insert(row as never)
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    return data as { id: string };
+  }
+
+  async getIncidentCoordinates(incidentId: string): Promise<{
+    pickup: Coordinate | null;
+    destination: Coordinate | null;
+  }> {
+    const { data } = await this.table("incident_locations")
+      .select("kind, lat, lng, created_at")
+      .eq("incident_id", incidentId)
+      .order("created_at", { ascending: false });
+    const rows = (data as Array<{ kind: string; lat: number | null; lng: number | null }> | null) ?? [];
+    const coord = (kind: string): Coordinate | null => {
+      const row = rows.find((r) => r.kind === kind && r.lat != null && r.lng != null);
+      return row ? { lat: Number(row.lat), lng: Number(row.lng) } : null;
+    };
+    return { pickup: coord("pickup"), destination: coord("destination") };
   }
   async getTowJob(tenantId: string, id: string): Promise<TowJobRecord | null> {
     const { data } = await this.table("tow_jobs")
@@ -438,13 +507,16 @@ export class SupabaseRepo implements ApiRepo {
     return result;
   }
 
-  async listDriverJobs(driverId: string): Promise<TowJobRecord[]> {
+  async listDriverJobs(driverId: string, opts?: { history?: boolean }): Promise<TowJobRecord[]> {
+    const statuses = opts?.history
+      ? ["completed", "invoiced", "closed", "cancelled", "failed"]
+      : ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"];
     const { data } = await this.table("tow_jobs")
       .select("*")
       .eq("driver_id", driverId)
-      .in("status", ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"] as never)
+      .in("status", statuses as never)
       .order("created_at", { ascending: false })
-      .limit(20);
+      .limit(opts?.history ? 50 : 20);
     return (data as TowJobRecord[] | null) ?? [];
   }
 
@@ -463,7 +535,18 @@ export class SupabaseRepo implements ApiRepo {
   }
 
   async recordNotificationDelivery(row: Record<string, unknown>): Promise<void> {
+    // A dedupe-key conflict means the notification was already recorded —
+    // silently skip so retries stay idempotent.
     await this.table("notification_deliveries").insert(row as never);
+  }
+
+  async hasNotificationDelivery(dedupeKey: string): Promise<boolean> {
+    const { data } = await this.table("notification_deliveries")
+      .select("id")
+      .eq("dedupe_key", dedupeKey)
+      .limit(1)
+      .maybeSingle();
+    return Boolean(data);
   }
 
   async enqueueWebhookEvent(tenantId: string, event: string, payload: Record<string, unknown>): Promise<void> {

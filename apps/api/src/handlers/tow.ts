@@ -12,14 +12,27 @@ import {
   SHAREABLE_CUSTOMER_FIELDS,
 } from "@resqly/tow";
 import { buildCustomerShareAudit } from "@resqly/audit";
-import { buildInvoiceBasis, type PriceList } from "@resqly/billing";
-import { MapsClient, buildEtaSnapshot } from "@resqly/maps";
+import { buildInvoiceBasis, estimatePrivateTowPrice, type PriceList } from "@resqly/billing";
+import { MapsClient, buildEtaSnapshot, haversineMeters } from "@resqly/maps";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
 import { enqueueWebhookEvent, escapeHtml, sendEmail } from "../services/notifications";
 
 const acceptSchema = z.object({});
 const rejectSchema = z.object({ reason: z.string().optional() });
+
+const MAX_EVIDENCE_BYTES = 10 * 1024 * 1024; // 10 MB
+const EVIDENCE_EXTENSIONS: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+};
+const evidenceSchema = z.object({
+  content_type: z.enum(["image/jpeg", "image/png", "image/webp", "image/heic"]),
+  data_base64: z.string().min(1),
+  phase: z.enum(["before", "during", "after"]).optional(),
+});
 
 function requireAuthenticatedDriver(ctx: ApiContext): string {
   if (!ctx.driverId) throw forbidden("Authenticated driver token is required for this action");
@@ -133,6 +146,12 @@ export async function acceptJobForDriver(
     };
   }
 
+  // Freeze the accepted price terms for private jobs (the customer's price
+  // must never change because the company edits its price list afterwards).
+  if (job.payer_type === "customer_private" && result.towCompanyId) {
+    await snapshotAcceptedPrice(ctx, jobId, job, result.towCompanyId);
+  }
+
   // ---- The critical step: share customer data ONLY now, after accept. ----
   const contact = await ctx.repo.getCustomerContact(job.incident_id);
   if (!contact) throw new AppError("internal_error", "Customer contact unavailable");
@@ -175,6 +194,7 @@ export async function acceptJobForDriver(
     html: `<p>En bärgare har accepterat ditt ärende.</p><p>Fordon: ${escapeHtml(contact.registration_number)}</p>`,
     incidentId: job.incident_id,
     towJobId: jobId,
+    dedupeKey: `email:driver_accepted:${jobId}`,
   });
 
   return {
@@ -188,6 +208,73 @@ export async function acceptJobForDriver(
   };
 }
 
+interface PriceSnapshot {
+  tow_company_id: string;
+  price_list: PriceList;
+  estimate: {
+    lines: unknown[];
+    subtotal_minor: number;
+    vat_minor: number;
+    total_minor: number;
+    currency: string;
+  };
+  factors: { evening_night: boolean; weekend: boolean; distance_km: number | null };
+  computed_at: string;
+}
+
+/**
+ * Best-effort price snapshot at accept time. Uses the accepting company's
+ * active price list plus the case's pickup/destination distance (haversine
+ * with road factor when route data is unavailable). Never blocks accept.
+ */
+async function snapshotAcceptedPrice(
+  ctx: ApiContext,
+  jobId: string,
+  job: { incident_id: string; tenant_id: string; price_snapshot?: Record<string, unknown> | null },
+  towCompanyId: string,
+): Promise<void> {
+  try {
+    if (job.price_snapshot) return;
+    const priceList = await ctx.repo.getActivePriceList(towCompanyId);
+    if (!priceList) return;
+    const coords = await ctx.repo.getIncidentCoordinates(job.incident_id);
+    const distanceKm =
+      coords.pickup && coords.destination
+        ? Math.round((haversineMeters(coords.pickup, coords.destination) * 1.3) / 100) / 10
+        : null;
+    const estimate = estimatePrivateTowPrice({ priceList, distanceKm });
+    const snapshot: PriceSnapshot = {
+      tow_company_id: towCompanyId,
+      price_list: priceList,
+      estimate: {
+        lines: estimate.lines,
+        subtotal_minor: estimate.subtotal_minor,
+        vat_minor: estimate.vat_minor,
+        total_minor: estimate.total_minor,
+        currency: estimate.currency,
+      },
+      factors: estimate.factors,
+      computed_at: new Date().toISOString(),
+    };
+    await ctx.repo.setTowJobPriceSnapshot(jobId, snapshot as unknown as Record<string, unknown>);
+    await ctx.repo.recordAudit({
+      tenant_id: job.tenant_id,
+      action: "update",
+      entity_type: "tow_job",
+      entity_id: jobId,
+      fields: ["price_snapshot"],
+      metadata: {
+        total_minor: estimate.total_minor,
+        currency: estimate.currency,
+        distance_km: distanceKm,
+        tow_company_id: towCompanyId,
+      },
+    });
+  } catch {
+    // Pricing snapshot is best-effort; accept must never fail because of it.
+  }
+}
+
 export async function acceptTowJob(
   ctx: ApiContext,
   id: string,
@@ -196,6 +283,53 @@ export async function acceptTowJob(
   acceptSchema.parse(body);
   const driverId = requireAuthenticatedDriver(ctx);
   return acceptJobForDriver(ctx, id, driverId);
+}
+
+/**
+ * Driver photo upload for an assigned job. The file lands in the tow-evidence
+ * bucket under the job's path; type and size are validated before upload.
+ */
+export async function uploadTowJobEvidence(
+  ctx: ApiContext,
+  id: string,
+  body: unknown,
+): Promise<RouteResult> {
+  const input = evidenceSchema.parse(body);
+  const driverId = requireAuthenticatedDriver(ctx);
+  const job = await loadJobForContext(ctx, id);
+  if (!job.driver_id) throw forbidden("Photos can only be added after the job is assigned");
+  assertAssignedDriver(job.driver_id, driverId);
+
+  const bytes = Buffer.from(input.data_base64, "base64");
+  if (bytes.length === 0) throw badRequest("Empty file");
+  if (bytes.length > MAX_EVIDENCE_BYTES) {
+    throw new AppError("bad_request", "File too large (max 10 MB)", {
+      user_message: "Bilden är för stor. Max 10 MB per bild.",
+    });
+  }
+
+  const ext = EVIDENCE_EXTENSIONS[input.content_type];
+  const path = `${job.id}/${crypto.randomUUID()}.${ext}`;
+  await ctx.repo.uploadTowEvidenceObject(path, bytes, input.content_type);
+  const row = await ctx.repo.createTowJobEvidence({
+    tenant_id: job.tenant_id,
+    tow_job_id: job.id,
+    driver_id: driverId,
+    storage_path: path,
+    content_type: input.content_type,
+    phase: input.phase ?? "during",
+  });
+
+  await ctx.repo.recordAudit({
+    tenant_id: job.tenant_id,
+    action: "create",
+    entity_type: "tow_job_evidence",
+    entity_id: row.id,
+    fields: ["storage_path", "content_type", "phase"],
+    metadata: { tow_job_id: job.id, driver_id: driverId, size_bytes: bytes.length },
+  });
+
+  return { status: 201, body: { evidence_id: row.id } };
 }
 
 export async function rejectTowJob(
@@ -331,9 +465,22 @@ export async function completeTowJob(
   });
   await ctx.repo.createCompletionReport(report);
 
+  // The invoice basis uses the price terms frozen at accept time when
+  // available (private jobs), otherwise the company's current price list.
+  const snapshot = (job.price_snapshot ?? null) as {
+    price_list?: PriceList;
+    factors?: { evening_night?: boolean; weekend?: boolean; distance_km?: number | null };
+  } | null;
+  const priceList =
+    snapshot?.price_list ??
+    (job.tow_company_id ? await ctx.repo.getActivePriceList(job.tow_company_id) : null) ??
+    DEFAULT_PRICE_LIST;
   const invoice = buildInvoiceBasis({
     payerType: job.payer_type === "customer_private" ? "customer_private" : "insurance_company",
-    priceList: DEFAULT_PRICE_LIST,
+    priceList,
+    distanceKm: snapshot?.factors?.distance_km ?? undefined,
+    eveningNight: snapshot?.factors?.evening_night ?? false,
+    weekend: snapshot?.factors?.weekend ?? false,
     waitingMinutes: input.waiting_minutes,
     failedTrip: input.failed_trip,
   });
@@ -368,9 +515,10 @@ export async function completeTowJob(
   await sendEmail(ctx, {
     to: contact?.email,
     subject: "Bärgningsärendet är avslutat",
-    html: `<p>Ditt bärgningsärende är avslutat.</p><p>Status: invoiced</p>`,
+    html: `<p>Ditt bärgningsärende är avslutat.</p><p>Tack för att du använde tjänsten.</p>`,
     incidentId: job.incident_id,
     towJobId: id,
+    dedupeKey: `email:tow_completed:${id}`,
   });
 
   return {

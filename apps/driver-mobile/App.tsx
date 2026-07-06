@@ -6,6 +6,7 @@ import { problemTypeLabel, towStatusLabel } from "@resqly/ui";
 import { getSupabase, apiPost, apiGet } from "./src/supabase";
 import { getExpoPushToken, devicePlatform, listenForOfferPushes } from "./src/push";
 import { startBackgroundLocation, stopBackgroundLocation } from "./src/location-task";
+import { takePhoto, pickPhotoFromLibrary } from "./src/photo";
 import { palette } from "./src/theme";
 
 type Screen = "loading" | "login" | "denied" | "offers" | "detail" | "account";
@@ -218,13 +219,24 @@ function AccessDenied({ onBack }: { onBack: () => void }) {
   );
 }
 
+interface HistoryJob {
+  id: string;
+  status: string;
+  payer_type: string;
+  created_at?: string;
+}
+
 function Account({ driver, onSignedOut }: { driver: RoleContext["driver"]; onSignedOut: () => void }) {
   const supabase = getSupabase();
   const [email, setEmail] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryJob[] | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
     void supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
+    void apiGet<{ jobs: HistoryJob[] }>("/api/v1/drivers/me/jobs?history=1").then((res) =>
+      setHistory(res?.jobs ?? []),
+    );
   }, [supabase]);
 
   async function signOut() {
@@ -246,6 +258,25 @@ function Account({ driver, onSignedOut }: { driver: RoleContext["driver"]; onSig
         <Text style={{ fontWeight: "700" }}>Förarprofil</Text>
         <Text>{statusLabel}</Text>
         <Text style={styles.muted}>Kunduppgifter visas först efter att du accepterat ett uppdrag. Personnummer visas aldrig.</Text>
+      </View>
+      <View style={styles.card}>
+        <Text style={{ fontWeight: "700" }}>Slutförda uppdrag</Text>
+        {history === null ? (
+          <Text style={styles.muted}>Laddar…</Text>
+        ) : history.length === 0 ? (
+          <Text style={styles.muted}>Inga slutförda uppdrag ännu.</Text>
+        ) : (
+          history.slice(0, 20).map((job) => (
+            <View key={job.id} style={{ paddingVertical: 6, borderTopWidth: 1, borderTopColor: "#eee" }}>
+              <Text style={{ fontWeight: "600" }}>
+                {towStatusLabel(job.status as never)} • {job.payer_type === "customer_private" ? "Privat" : "Försäkring"}
+              </Text>
+              <Text style={styles.muted}>
+                {job.created_at ? new Date(job.created_at).toLocaleString("sv-SE") : job.id.slice(0, 8).toUpperCase()}
+              </Text>
+            </View>
+          ))
+        )}
       </View>
       <Pressable style={styles.bigbtn} onPress={signOut}>
         <Text style={styles.bigbtnText}>Logga ut</Text>
@@ -433,6 +464,8 @@ function JobDetail({ offer, jobId, onBack }: { offer: Offer | null; jobId: strin
   const [notes, setNotes] = useState("");
   const [failedTrip, setFailedTrip] = useState(false);
   const [damages, setDamages] = useState("");
+  const [photoCount, setPhotoCount] = useState(0);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   const loadShare = useCallback(async () => {
     if (!supabase) return;
@@ -493,6 +526,32 @@ function JobDetail({ offer, jobId, onBack }: { offer: Offer | null; jobId: strin
       setMessage(null);
     } else {
       setMessage(res.error ?? "Statusen kunde inte uppdateras. Försök igen.");
+    }
+  }
+
+  async function uploadPhoto(source: "camera" | "library") {
+    if (photoBusy) return;
+    setPhotoBusy(true);
+    setMessage(null);
+    try {
+      const photo = source === "camera" ? await takePhoto() : await pickPhotoFromLibrary();
+      if (!photo) {
+        setMessage("Ingen bild vald, eller så saknas kamerabehörighet.");
+        return;
+      }
+      const res = await apiPost(`/api/v1/tow/jobs/${jobId}/evidence`, {
+        content_type: photo.contentType,
+        data_base64: photo.base64,
+        phase: "during",
+      });
+      if (res.ok) {
+        setPhotoCount((n) => n + 1);
+        setMessage("Bilden är uppladdad.");
+      } else {
+        setMessage(res.error ?? "Bilden kunde inte laddas upp. Försök igen.");
+      }
+    } finally {
+      setPhotoBusy(false);
     }
   }
 
@@ -588,6 +647,26 @@ function JobDetail({ offer, jobId, onBack }: { offer: Offer | null; jobId: strin
               <Text style={[styles.bigbtnText, { color: palette.primary }]}>{b.label}</Text>
             </Pressable>
           ))}
+          <View style={styles.card}>
+            <Text style={{ fontWeight: "700" }}>Foton {photoCount > 0 ? `(${photoCount} uppladdade)` : ""}</Text>
+            <Text style={styles.muted}>Ta bilder på fordonet före och efter lastning.</Text>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <Pressable
+                style={[styles.bigbtn, { flex: 1 }, photoBusy ? styles.disabled : null]}
+                onPress={() => uploadPhoto("camera")}
+                disabled={photoBusy}
+              >
+                <Text style={styles.bigbtnText}>{photoBusy ? "Vänta…" : "Ta foto"}</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.bigbtn, styles.secondary, { flex: 1 }, photoBusy ? styles.disabled : null]}
+                onPress={() => uploadPhoto("library")}
+                disabled={photoBusy}
+              >
+                <Text style={[styles.bigbtnText, { color: palette.primary }]}>Välj bild</Text>
+              </Pressable>
+            </View>
+          </View>
           {!showReport ? (
             <Pressable style={styles.bigbtn} onPress={() => setShowReport(true)}>
               <Text style={styles.bigbtnText}>Slutför och skicka rapport</Text>

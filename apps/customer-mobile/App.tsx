@@ -385,6 +385,7 @@ function Insurance({ authed, palette, onDone }: { authed: boolean | null; palett
   const [insurerId, setInsurerId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [consent, setConsent] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -415,12 +416,16 @@ function Insurance({ authed, palette, onDone }: { authed: boolean | null; palett
       setMessage("Välj försäkringsbolag.");
       return;
     }
+    if (!consent) {
+      setMessage("Godkänn kopplingen till försäkringsbolaget för att fortsätta.");
+      return;
+    }
     setBusy(true);
     setMessage("Skapar försäkringskoppling…");
     try {
       const res = await customerApi<{ policy_id?: string; requires_bankid?: boolean; status?: string }>(
         "/api/customer/vehicle-policies",
-        { body: { vehicle_id: vehicleId, insurance_company_id: insurerId } },
+        { body: { vehicle_id: vehicleId, insurance_company_id: insurerId, consent: true } },
       );
       if (!res.ok) {
         setMessage(res.error);
@@ -494,6 +499,15 @@ function Insurance({ authed, palette, onDone }: { authed: boolean | null; palett
           </Pressable>
         ))}
       </View>
+      <Pressable style={styles.consentRow} onPress={() => setConsent(!consent)}>
+        <View style={[styles.checkbox, { borderColor: palette.primary }, consent ? { backgroundColor: palette.primary } : null]}>
+          {consent ? <Text style={{ color: palette.onPrimary, fontWeight: "700" }}>✓</Text> : null}
+        </View>
+        <Text style={[styles.muted, { flex: 1 }]}>
+          Jag godkänner att mitt fordon kopplas till valt försäkringsbolag, att kopplingen verifieras med BankID och
+          att försäkringsbolaget kan se fordonet och mina ärenden som rör det.
+        </Text>
+      </Pressable>
       <Pressable style={[styles.bigbtn, { backgroundColor: palette.primary }, busy ? styles.disabled : null]} onPress={connect} disabled={busy}>
         <Text style={[styles.bigbtnText, { color: palette.onPrimary }]}>{busy ? "Vänta…" : "Koppla och verifiera med BankID"}</Text>
       </Pressable>
@@ -516,12 +530,14 @@ function NewCase({
   const [vehicleId, setVehicleId] = useState<string | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [address, setAddress] = useState("");
+  const [destination, setDestination] = useState("");
   const [gpsDenied, setGpsDenied] = useState(false);
   const [problem, setProblem] = useState<string>(TOW_PROBLEMS[0]!);
   const [mode, setMode] = useState<"insurance" | "private">("insurance");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [created, setCreated] = useState<{ id: string; caseNumber: string; requiresBankid: boolean; towStatus?: string } | null>(null);
+  const [consent, setConsent] = useState(false);
   const idempotencyKey = useMemo(() => newIdempotencyKey(), []);
 
   useEffect(() => {
@@ -564,6 +580,10 @@ function NewCase({
       setStatus("Välj vilket fordon ärendet gäller.");
       return;
     }
+    if (!consent) {
+      setStatus("Godkänn hur dina uppgifter delas för att fortsätta.");
+      return;
+    }
     setBusy(true);
     setStatus(null);
     const res = await customerApi<{ incident_id?: string; case_number?: string; requires_bankid?: boolean }>(
@@ -576,7 +596,9 @@ function NewCase({
           subtype: problem,
           coords,
           address: address || null,
+          destination: destination || null,
           mode,
+          consent: true,
         },
       },
     );
@@ -734,6 +756,23 @@ function NewCase({
           <TextInput style={styles.input} value={address} onChangeText={setAddress} placeholder="Gatuadress, ort" />
         </>
       ) : null}
+      <Text style={styles.label}>Vart ska fordonet? (valfritt)</Text>
+      <TextInput
+        style={styles.input}
+        value={destination}
+        onChangeText={setDestination}
+        placeholder="T.ex. verkstad eller hemadress"
+      />
+      <Pressable style={styles.consentRow} onPress={() => setConsent(!consent)}>
+        <View style={[styles.checkbox, { borderColor: palette.primary }, consent ? { backgroundColor: palette.primary } : null]}>
+          {consent ? <Text style={{ color: palette.onPrimary, fontWeight: "700" }}>✓</Text> : null}
+        </View>
+        <Text style={[styles.muted, { flex: 1 }]}>
+          {mode === "insurance"
+            ? "Jag godkänner att uppgifter om ärendet, fordonet, min position och mina kontaktuppgifter delas med mitt försäkringsbolag och den bärgare som tar uppdraget."
+            : "Jag godkänner att den bärgare som accepterar uppdraget får mitt namn, telefonnummer, fordonets registreringsnummer, plats och destination."}
+        </Text>
+      </Pressable>
       <Pressable
         style={[styles.bigbtn, { backgroundColor: palette.primary, marginTop: 12 }, busy ? styles.disabled : null]}
         onPress={submit}
@@ -907,4 +946,14 @@ const styles = StyleSheet.create({
   navItem: { fontWeight: "600" },
   pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   pill: { borderWidth: 1, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14 },
+  consentRow: { flexDirection: "row", gap: 10, alignItems: "flex-start", marginTop: 14 },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderWidth: 2,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 8,
+  },
 });

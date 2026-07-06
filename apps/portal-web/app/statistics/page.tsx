@@ -3,6 +3,7 @@ import { getActiveTenant } from "../lib/tenant";
 import {
   countBy,
   getInsuranceDashboardStats,
+  getTenantSettings,
   getTowCompanyDashboardStats,
   getDriverPerformance,
   listCompanyJobs,
@@ -89,13 +90,20 @@ export default async function StatistikPage({
     );
   }
 
-  const [stats, incidentsAll, jobsAll] = await Promise.all([
+  const [stats, incidentsAll, jobsAll, settings] = await Promise.all([
     getInsuranceDashboardStats(tenant.id),
     listIncidents(tenant.id),
     listInsuranceTowJobs(tenant.id),
+    getTenantSettings(tenant.id),
   ]);
   const incidents = dateFilter(incidentsAll, from, to);
   const jobs = dateFilter(jobsAll, from, to);
+  // Value estimate from tenant-configurable assumptions (settings page).
+  const minutesPerCase = num(settings?.stats_minutes_saved_per_case) || 45;
+  const hourlyCostMinor = num(settings?.stats_admin_hourly_cost_minor) || 45000;
+  const totalCases = num(stats?.total_cases);
+  const minutesSaved = totalCases * minutesPerCase;
+  const costSavedMinor = Math.round((minutesSaved / 60) * hourlyCostMinor);
   return (
     <div>
       <PageHeader title="Statistik" subtitle="Ärenden, bärgning och kostnadsanalys" />
@@ -106,10 +114,18 @@ export default async function StatistikPage({
         <StatCard label="Avbrutna" value={num(stats?.cancelled_cases)} />
         <StatCard label="Skadeärenden" value={num(stats?.damage_claims)} />
         <StatCard label="Riskerar tidsgräns" value={num(stats?.sla_risk)} />
+        <StatCard label="Snitt svarstid (till accept)" value={formatSeconds(stats?.avg_response_seconds)} />
         <StatCard label="Snitt ankomsttid" value={formatSeconds(stats?.avg_eta_seconds)} />
         <StatCard label="Snitt handläggningstid" value={formatSeconds(stats?.avg_resolution_seconds)} />
+        <StatCard label="Snittkostnad per uppdrag" value={formatMoneyMinor(stats?.avg_cost_minor)} />
         <StatCard label="Kostnad (period)" value={formatMoneyMinor(stats?.total_cost_minor)} />
+        <StatCard label="Uppskattad sparad handläggartid" value={`${Math.round(minutesSaved / 60)} h`} />
+        <StatCard label="Uppskattad sparad kostnad" value={formatMoneyMinor(costSavedMinor)} />
       </KpiGrid>
+      <p style={{ opacity: 0.6, fontSize: 13, marginTop: 8 }}>
+        Besparingen beräknas som {minutesPerCase} min sparad handläggartid per ärende ×{" "}
+        {formatMoneyMinor(hourlyCostMinor)}/timme. Antagandena ändras under Inställningar.
+      </p>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 24 }}>
         <Card>
           <h3 style={{ marginTop: 0 }}>Ärenden per status</h3>

@@ -15,6 +15,54 @@ interface Incident {
   bankid_verified: boolean;
 }
 
+interface TimelineEntry {
+  at: string;
+  kind: "incident" | "tow";
+  to_status: string;
+  reason: string | null;
+}
+
+interface CaseLocation {
+  kind: string;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+}
+
+interface PriceSnapshot {
+  estimate?: { total_minor?: number; currency?: string };
+  factors?: { distance_km?: number | null };
+}
+
+interface EvidenceItem {
+  id: string;
+  content_type: string;
+  created_at: string;
+  url: string | null;
+}
+
+const CANCELLABLE = new Set([
+  "draft",
+  "awaiting_bankid",
+  "bankid_verified",
+  "signed",
+  "submitted",
+  "received",
+  "more_info_required",
+]);
+
+function timelineLabel(entry: TimelineEntry): string {
+  return entry.kind === "tow" ? towStatusLabel(entry.to_status as TowJobStatus) : incidentStatusLabel(entry.to_status);
+}
+
+function formatTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
+  } catch {
+    return iso.slice(0, 16).replace("T", " ");
+  }
+}
+
 export default function CaseDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const supabase = useSupabase();
@@ -25,6 +73,13 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [locations, setLocations] = useState<CaseLocation[]>([]);
+  const [priceSnapshot, setPriceSnapshot] = useState<PriceSnapshot | null>(null);
+  const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [showCancel, setShowCancel] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
 
   const load = useCallback(async () => {
     if (!supabase) return;
@@ -36,14 +91,15 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
     setLoaded(true);
     const { data: job } = await supabase
       .from("tow_jobs")
-      .select("id, status")
+      .select("id, status, price_snapshot")
       .eq("incident_id", id)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    const jobRow = job as { id: string; status: TowJobStatus } | null;
+    const jobRow = job as { id: string; status: TowJobStatus; price_snapshot?: PriceSnapshot | null } | null;
     if (jobRow) {
       setTowStatus(jobRow.status);
+      setPriceSnapshot(jobRow.price_snapshot ?? null);
       const { data: eta } = await supabase
         .from("tow_job_eta_snapshots")
         .select("eta_seconds")
@@ -54,7 +110,58 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
       const etaRow = eta as { eta_seconds: number } | null;
       if (etaRow) setEtaSeconds(etaRow.eta_seconds);
     }
+    // Merged timeline (incident + tow events) via the customer API.
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess.session?.access_token;
+    if (token) {
+      try {
+        const res = await fetch(`/api/customer/cases/${id}/timeline`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const json = (await res.json()) as { entries?: TimelineEntry[]; locations?: CaseLocation[] };
+          setTimeline(json.entries ?? []);
+          setLocations(json.locations ?? []);
+        }
+        const evRes = await fetch(`/api/customer/cases/${id}/evidence`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (evRes.ok) {
+          const evJson = (await evRes.json()) as { evidence?: EvidenceItem[] };
+          setEvidence(evJson.evidence ?? []);
+        }
+      } catch {
+        // Timeline is progressive enhancement — the page still works without it.
+      }
+    }
   }, [supabase, id]);
+
+  async function uploadPhoto(file: File) {
+    if (uploading) return;
+    const token = await accessToken();
+    if (!token) return;
+    setUploading(true);
+    setMessage(null);
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      const res = await fetch(`/api/customer/cases/${id}/evidence`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) setMessage(json.error ?? "Uppladdningen misslyckades. Försök igen.");
+      else {
+        setMessage("Bilden är uppladdad.");
+        await load();
+      }
+    } catch {
+      setMessage("Något gick fel. Kontrollera din uppkoppling och försök igen.");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   useEffect(() => {
     void load();
@@ -131,6 +238,32 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
     }
   }
 
+  async function cancelCase() {
+    if (busy) return;
+    if (!cancelReason.trim()) { setMessage("Ange varför du vill avbryta ärendet."); return; }
+    const token = await accessToken();
+    if (!token) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/customer/cases/${id}/cancel`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ reason: cancelReason.trim() }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) setMessage(json.error ?? "Ärendet kunde inte avbrytas. Kontakta supporten.");
+      else {
+        setMessage("Ärendet är avbrutet.");
+        setShowCancel(false);
+        await load();
+      }
+    } catch {
+      setMessage("Något gick fel. Kontrollera din uppkoppling och försök igen.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!supabase) return <p>Tjänsten är inte tillgänglig just nu. Försök igen om en stund.</p>;
   if (authed === false) return <p>Du behöver <a href="/login">logga in</a>.</p>;
   if (!incident && !loaded) return <p>Laddar ärende…</p>;
@@ -170,6 +303,12 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
           <strong>{towStatusLabel(towStatus)}</strong>
           <p style={{ margin: "6px 0 0" }}>{whatHappensNext(towStatus)}</p>
           {etaSeconds != null ? <p style={{ margin: "6px 0 0" }}>ETA: {formatEta(etaSeconds)}</p> : null}
+          {priceSnapshot?.estimate?.total_minor != null ? (
+            <p style={{ margin: "6px 0 0" }}>
+              Överenskommet pris: <strong>{(priceSnapshot.estimate.total_minor / 100).toLocaleString("sv-SE")} {priceSnapshot.estimate.currency ?? "SEK"}</strong>
+              <span style={{ opacity: 0.65, fontSize: 13 }}> (låst när bärgaren accepterade — väntetid och extra arbete kan tillkomma)</span>
+            </p>
+          ) : null}
         </div>
       ) : incident.type === "damage_claim" ? (
         <p style={{ opacity: 0.7 }}>Skadeärendet är synligt i försäkringsbolagets portal efter BankID-verifiering.</p>
@@ -177,10 +316,111 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
         <p style={{ opacity: 0.7 }}>{whatHappensNext("matching")}</p>
       )}
 
+      {locations.length > 0 ? (
+        <div className="status-card" style={{ marginTop: 12 }}>
+          <strong>Platser</strong>
+          {locations.map((loc, i) => (
+            <p key={i} className="vehicle-meta" style={{ margin: "4px 0 0" }}>
+              {loc.kind === "destination" ? "Destination: " : "Upphämtning: "}
+              {loc.address ?? (loc.lat != null && loc.lng != null ? `${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}` : "—")}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      {timeline.length > 0 ? (
+        <div className="status-card" style={{ marginTop: 12 }}>
+          <strong>Händelser</strong>
+          <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0" }}>
+            {timeline.map((entry, i) => (
+              <li key={i} style={{ padding: "6px 0", borderTop: i > 0 ? "1px solid rgba(0,0,0,0.06)" : "none" }}>
+                <span style={{ fontWeight: 600 }}>{timelineLabel(entry)}</span>
+                <span style={{ opacity: 0.6, marginLeft: 8, fontSize: 13 }}>{formatTime(entry.at)}</span>
+                {entry.reason ? <div style={{ opacity: 0.7, fontSize: 13 }}>{entry.reason}</div> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div className="status-card" style={{ marginTop: 12 }}>
+          <strong>Vad händer nu?</strong>
+          <p className="vehicle-meta">Statusen på ärendet uppdateras automatiskt på den här sidan.</p>
+        </div>
+      )}
+
       <div className="status-card" style={{ marginTop: 12 }}>
-        <strong>Vad händer nu?</strong>
-        <p className="vehicle-meta">Statusen på ärendet uppdateras automatiskt på den här sidan.</p>
+        <strong>Bilder och dokument</strong>
+        <p className="vehicle-meta">Foton på fordonet och skadan hjälper bärgaren och försäkringsbolaget.</p>
+        {evidence.length > 0 ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+            {evidence.map((e) =>
+              e.url && e.content_type.startsWith("image/") ? (
+                <a key={e.id} href={e.url} target="_blank" rel="noreferrer">
+                  <img src={e.url} alt="Uppladdad bild" style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 8 }} />
+                </a>
+              ) : e.url ? (
+                <a key={e.id} href={e.url} target="_blank" rel="noreferrer" className="badge">
+                  Dokument
+                </a>
+              ) : null,
+            )}
+          </div>
+        ) : null}
+        {!["closed", "cancelled"].includes(incident.status) ? (
+          <label className="bigbtn" style={{ display: "inline-block", marginTop: 10, cursor: "pointer" }}>
+            {uploading ? "Laddar upp…" : "Lägg till bild"}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"
+              style={{ display: "none" }}
+              disabled={uploading}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void uploadPhoto(file);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        ) : null}
       </div>
+
+      {incident.status !== "cancelled" && CANCELLABLE.has(incident.status) ? (
+        <div style={{ marginTop: 16 }}>
+          {showCancel ? (
+            <div className="status-card">
+              <strong>Avbryt ärendet</strong>
+              <label htmlFor="cancel-reason" className="vehicle-meta" style={{ display: "block", marginTop: 6 }}>
+                Varför vill du avbryta?
+              </label>
+              <input
+                id="cancel-reason"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="T.ex. hjälpen behövs inte längre"
+              />
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button className="bigbtn" onClick={cancelCase} disabled={busy}>
+                  {busy ? "Avbryter…" : "Bekräfta avbryt"}
+                </button>
+                <button className="bigbtn" style={{ opacity: 0.7 }} onClick={() => setShowCancel(false)} disabled={busy}>
+                  Ångra
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowCancel(true)}
+              style={{ background: "transparent", border: "none", color: "#B00020", cursor: "pointer", padding: 0 }}
+            >
+              Behöver du avbryta ärendet?
+            </button>
+          )}
+        </div>
+      ) : null}
+
+      <p style={{ marginTop: 16 }}>
+        <a href="/support">Behöver du hjälp? Kontakta supporten</a>
+      </p>
       {message ? <p>{message}</p> : null}
     </div>
   );

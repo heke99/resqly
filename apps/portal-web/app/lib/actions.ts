@@ -5,11 +5,13 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createHash, randomBytes } from "node:crypto";
 import { newApiKey, sha256Hex } from "@resqly/utils";
-import { requirePortalTenant } from "./auth";
-import { PORTAL_TENANT_COOKIE } from "./constants";
+import type { PermissionKey } from "@resqly/types";
+import { requirePortalTenant, requirePortalPermission } from "./auth";
+import { PORTAL_AUTH_COOKIE, PORTAL_REFRESH_COOKIE, PORTAL_TENANT_COOKIE } from "./constants";
 
-async function portalDb(tenantId?: string | null) {
-  return requirePortalTenant(tenantId);
+/** Every mutating action must name the RBAC permission it needs. */
+async function portalDb(tenantId: string | null | undefined, permission: PermissionKey) {
+  return requirePortalPermission(tenantId, permission);
 }
 
 /** Switch the active organization for users who belong to several. */
@@ -22,12 +24,27 @@ export async function switchTenant(formData: FormData): Promise<void> {
   redirect("/");
 }
 
-function assertTenant(expected: string, actual: string) {
-  if (expected !== actual) throw new Error("You do not have access to this tenant.");
+/** Clear the HttpOnly session cookies and return to the login screen. */
+export async function logoutPortal(): Promise<void> {
+  const store = await cookies();
+  store.delete(PORTAL_AUTH_COOKIE);
+  store.delete(PORTAL_REFRESH_COOKIE);
+  store.delete(PORTAL_TENANT_COOKIE);
+  redirect("/login");
 }
 
-async function setIncidentStatus(incidentId: string, tenantId: string, status: string, reason?: string) {
-  const { db: client, tenant, userId } = await portalDb(tenantId);
+function assertTenant(expected: string, actual: string) {
+  if (expected !== actual) throw new Error("Du har inte åtkomst till den här organisationen.");
+}
+
+async function setIncidentStatus(
+  incidentId: string,
+  tenantId: string,
+  status: string,
+  reason: string | undefined,
+  permission: PermissionKey,
+) {
+  const { db: client, tenant, userId } = await portalDb(tenantId, permission);
   const { data: current } = await client
     .from("incidents" as never)
     .select("status, tenant_id")
@@ -35,7 +52,7 @@ async function setIncidentStatus(incidentId: string, tenantId: string, status: s
     .maybeSingle();
   const from = (current as { status?: string } | null)?.status ?? null;
   const currentTenantId = (current as { tenant_id?: string } | null)?.tenant_id ?? null;
-  if (!currentTenantId) throw new Error("Case not found.");
+  if (!currentTenantId) throw new Error("Ärendet hittades inte.");
   assertTenant(tenant.id, currentTenantId);
   await client.from("incidents" as never).update({ status } as never).eq("id", incidentId).eq("tenant_id", tenant.id);
   await client.from("incident_status_events" as never).insert({
@@ -57,10 +74,22 @@ async function setIncidentStatus(incidentId: string, tenantId: string, status: s
 }
 
 export async function approveClaim(formData: FormData): Promise<void> {
-  await setIncidentStatus(String(formData.get("incident_id")), String(formData.get("tenant_id")), "in_progress", "approved by insurer");
+  await setIncidentStatus(
+    String(formData.get("incident_id")),
+    String(formData.get("tenant_id")),
+    "in_progress",
+    "approved by insurer",
+    "claims.approve",
+  );
 }
 export async function rejectClaim(formData: FormData): Promise<void> {
-  await setIncidentStatus(String(formData.get("incident_id")), String(formData.get("tenant_id")), "rejected", String(formData.get("reason") ?? ""));
+  await setIncidentStatus(
+    String(formData.get("incident_id")),
+    String(formData.get("tenant_id")),
+    "rejected",
+    String(formData.get("reason") ?? ""),
+    "claims.approve",
+  );
 }
 export async function requestMoreInfo(formData: FormData): Promise<void> {
   await setIncidentStatus(
@@ -68,18 +97,24 @@ export async function requestMoreInfo(formData: FormData): Promise<void> {
     String(formData.get("tenant_id")),
     "more_info_required",
     String(formData.get("reason") ?? ""),
+    "incidents.update",
   );
 }
 
 export async function updateSettings(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "white_label.manage");
   assertTenant(tenant.id, tenantId);
   const strategy = String(formData.get("default_dispatch_strategy") ?? "");
   const radius = Number(formData.get("max_dispatch_radius_km") ?? "");
   const patch: Record<string, unknown> = {};
   if (strategy) patch.default_dispatch_strategy = strategy;
   if (!Number.isNaN(radius) && radius > 0) patch.max_dispatch_radius_km = radius;
+  // Value dashboard assumptions (insurance tenants).
+  const minutesSaved = Number(formData.get("stats_minutes_saved_per_case") ?? "");
+  if (Number.isFinite(minutesSaved) && minutesSaved >= 0) patch.stats_minutes_saved_per_case = Math.round(minutesSaved);
+  const hourlyCost = Number(formData.get("stats_admin_hourly_cost_sek") ?? "");
+  if (Number.isFinite(hourlyCost) && hourlyCost >= 0) patch.stats_admin_hourly_cost_minor = Math.round(hourlyCost * 100);
   if (Object.keys(patch).length) {
     await client.from("tenant_settings" as never).update(patch as never).eq("tenant_id", tenantId);
   }
@@ -109,7 +144,7 @@ interface AdminAuthError {
  */
 export async function createDriver(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "drivers.manage");
   assertTenant(tenant.id, tenantId);
   const { data: company } = await client
     .from("tow_companies" as never)
@@ -174,7 +209,7 @@ export async function createDriver(formData: FormData): Promise<void> {
 
 export async function createTowVehicle(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "vehicles.manage");
   assertTenant(tenant.id, tenantId);
   const { data: company } = await client
     .from("tow_companies" as never)
@@ -182,7 +217,7 @@ export async function createTowVehicle(formData: FormData): Promise<void> {
     .eq("tenant_id", tenantId)
     .maybeSingle();
   const companyId = (company as { id?: string } | null)?.id;
-  if (!companyId) throw new Error("This tenant is not a tow company.");
+  if (!companyId) throw new Error("Organisationen är inte ett bärgningsbolag.");
   const { data: vehicle } = await client
     .from("tow_vehicles" as never)
     .insert({
@@ -206,7 +241,7 @@ export async function createTowVehicle(formData: FormData): Promise<void> {
 
 export async function createWebhook(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "webhooks.manage");
   assertTenant(tenant.id, tenantId);
   const url = String(formData.get("url") ?? "");
   const events = String(formData.get("events") ?? "")
@@ -229,13 +264,13 @@ async function towCompanyIdFor(client: Awaited<ReturnType<typeof portalDb>>["db"
     .eq("tenant_id", tenantId)
     .maybeSingle();
   const companyId = (company as { id?: string } | null)?.id;
-  if (!companyId) throw new Error("This tenant is not a tow company.");
+  if (!companyId) throw new Error("Organisationen är inte ett bärgningsbolag.");
   return companyId;
 }
 
 export async function saveMarketplaceSettings(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "agreements.manage");
   assertTenant(tenant.id, tenantId);
   const companyId = await towCompanyIdFor(client, tenantId);
   const row = {
@@ -251,13 +286,69 @@ export async function saveMarketplaceSettings(formData: FormData): Promise<void>
   revalidatePath("/marketplace");
 }
 
+function sekToMinor(formData: FormData, key: string): number {
+  const value = Number(formData.get(key) ?? "0");
+  return Number.isFinite(value) && value > 0 ? Math.round(value * 100) : 0;
+}
+
+/**
+ * Save the company's private-towing price list. A new active row replaces the
+ * old one (history is kept for audit); running jobs are unaffected because
+ * their price terms were snapshotted at accept time.
+ */
+export async function savePriceList(formData: FormData): Promise<void> {
+  const tenantId = String(formData.get("tenant_id"));
+  const { db: client, tenant, userId } = await portalDb(tenantId, "billing.manage");
+  assertTenant(tenant.id, tenantId);
+  const companyId = await towCompanyIdFor(client, tenantId);
+
+  const row = {
+    tenant_id: tenantId,
+    tow_company_id: companyId,
+    name: "Fri bärgning",
+    start_fee_minor: sekToMinor(formData, "start_fee_sek"),
+    per_km_minor: sekToMinor(formData, "per_km_sek"),
+    per_waiting_minute_minor: sekToMinor(formData, "per_waiting_minute_sek"),
+    failed_trip_minor: sekToMinor(formData, "failed_trip_sek"),
+    on_call_surcharge_minor: sekToMinor(formData, "on_call_sek"),
+    heavy_tow_minor: sekToMinor(formData, "heavy_tow_sek"),
+    minimum_price_minor: sekToMinor(formData, "minimum_price_sek"),
+    evening_night_surcharge_minor: sekToMinor(formData, "evening_night_sek"),
+    weekend_surcharge_minor: sekToMinor(formData, "weekend_sek"),
+    cancellation_policy: nullableText(formData, "cancellation_policy"),
+    currency: "SEK",
+    active: true,
+  };
+
+  await client
+    .from("tow_price_lists" as never)
+    .update({ active: false } as never)
+    .eq("tow_company_id", companyId)
+    .eq("active", true);
+  await client.from("tow_price_lists" as never).insert(row as never);
+  await client.from("audit_logs" as never).insert({
+    tenant_id: tenantId,
+    actor_user_id: userId,
+    action: "update",
+    entity_type: "tow_price_list",
+    entity_id: companyId,
+    fields: ["start_fee_minor", "per_km_minor", "minimum_price_minor", "surcharges", "cancellation_policy"],
+    metadata: {
+      start_fee_minor: row.start_fee_minor,
+      per_km_minor: row.per_km_minor,
+      minimum_price_minor: row.minimum_price_minor,
+    },
+  } as never);
+  revalidatePath("/pricing");
+}
+
 export async function saveAgreement(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "agreements.manage");
   assertTenant(tenant.id, tenantId);
   const companyId = await towCompanyIdFor(client, tenantId);
   const insurerTenantId = String(formData.get("insurance_tenant_id") ?? "");
-  if (!insurerTenantId) throw new Error("Select an insurance company.");
+  if (!insurerTenantId) throw new Error("Välj ett försäkringsbolag.");
   const row = {
     tow_company_id: companyId,
     insurance_tenant_id: insurerTenantId,
@@ -274,11 +365,11 @@ export async function saveAgreement(formData: FormData): Promise<void> {
 
 export async function setDriverVehicle(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId);
+  const { db: client, tenant } = await portalDb(tenantId, "drivers.manage");
   assertTenant(tenant.id, tenantId);
   const driverId = String(formData.get("driver_id") ?? "");
   const vehicleId = String(formData.get("vehicle_id") ?? "") || null;
-  if (!driverId) throw new Error("Driver is required.");
+  if (!driverId) throw new Error("Välj en förare.");
   await client
     .from("tow_drivers" as never)
     .update({ current_vehicle_id: vehicleId } as never)
@@ -290,7 +381,7 @@ export async function setDriverVehicle(formData: FormData): Promise<void> {
 /** Create an API key; the raw key is shown once (stored only as a hash). */
 export async function createApiKey(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant, userId } = await portalDb(tenantId);
+  const { db: client, tenant, userId } = await portalDb(tenantId, "api_keys.manage");
   assertTenant(tenant.id, tenantId);
   const name = String(formData.get("name") ?? "API client");
   const { key, last4 } = newApiKey("rk_live");
@@ -333,14 +424,14 @@ function sha256(value: string): string {
 
 export async function saveLegalVersion(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id") ?? "");
-  const { db: client, tenant, userId } = await portalDb(tenantId);
+  const { db: client, tenant, userId } = await portalDb(tenantId, "white_label.manage");
   assertTenant(tenant.id, tenantId);
   const kind = String(formData.get("kind") ?? "");
   const title = String(formData.get("title") ?? "").trim();
   const body = String(formData.get("body") ?? "").trim();
   const version = numberInput(formData, "version", 1);
   const status = String(formData.get("status") ?? "draft");
-  if (!kind || !title || !body) throw new Error("Kind, title and body are required.");
+  if (!kind || !title || !body) throw new Error("Typ, rubrik och text krävs.");
 
   if (status === "active") {
     await client
@@ -381,14 +472,14 @@ export async function saveLegalVersion(formData: FormData): Promise<void> {
 
 export async function saveFallbackRule(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id") ?? "");
-  const { db: client, tenant, userId } = await portalDb(tenantId);
+  const { db: client, tenant, userId } = await portalDb(tenantId, "white_label.manage");
   assertTenant(tenant.id, tenantId);
   const contactsRaw = nullableText(formData, "operational_contacts_json") ?? "[]";
   let contacts: unknown = [];
   try {
     contacts = JSON.parse(contactsRaw);
   } catch {
-    throw new Error("Operational contacts must be valid JSON.");
+    throw new Error("Driftkontakter måste vara giltig JSON.");
   }
   await client.from("tenant_notification_fallback_rules" as never).upsert(
     {
@@ -420,12 +511,12 @@ export async function saveFallbackRule(formData: FormData): Promise<void> {
 
 export async function saveVehiclePermission(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id") ?? "");
-  const { db: client, tenant, userId } = await portalDb(tenantId);
+  const { db: client, tenant, userId } = await portalDb(tenantId, "agreements.manage");
   assertTenant(tenant.id, tenantId);
   const agreementId = String(formData.get("agreement_id") ?? "");
   const towVehicleId = String(formData.get("tow_vehicle_id") ?? "");
   const status = String(formData.get("status") ?? "active");
-  if (!agreementId || !towVehicleId) throw new Error("Agreement and tow vehicle are required.");
+  if (!agreementId || !towVehicleId) throw new Error("Avtal och bärgningsbil krävs.");
 
   const { data: agreement } = await client
     .from("tow_company_insurance_agreements" as never)
@@ -433,7 +524,7 @@ export async function saveVehiclePermission(formData: FormData): Promise<void> {
     .eq("id", agreementId)
     .maybeSingle();
   if ((agreement as { insurance_tenant_id?: string } | null)?.insurance_tenant_id !== tenant.id) {
-    throw new Error("Agreement does not belong to this insurer tenant.");
+    throw new Error("Avtalet tillhör inte den här försäkringsorganisationen.");
   }
 
   await client.from("tow_vehicle_insurance_permissions" as never).upsert(

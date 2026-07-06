@@ -2,7 +2,7 @@
 -- Run against a database with the migrations applied and pgtap installed:
 --   psql "$DATABASE_URL" -f tests/rls_assumptions.sql
 begin;
-select plan(19);
+select plan(21);
 
 -- RBAC helper functions exist.
 select has_function('public', 'has_permission', ARRAY['uuid', 'text']);
@@ -110,6 +110,27 @@ select ok(
             and tablename = 'tow_jobs'
             and indexname = 'uq_tow_jobs_active_incident'),
   'tow_jobs has a unique live-job-per-incident index'
+);
+
+-- 0021: driver-location RPC is server-side only.
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.tow_drivers_within_radius(double precision, double precision, double precision, integer)',
+    'EXECUTE'
+  ),
+  'authenticated cannot execute tow_drivers_within_radius'
+);
+
+-- 0021: insurance company read policy no longer uses USING (true).
+select ok(
+  exists (select 1 from pg_policies
+          where schemaname = 'public'
+            and tablename = 'insurance_companies'
+            and policyname = 'insurance_companies_read'
+            and qual is not null
+            and qual <> 'true'),
+  'insurance_companies_read is scoped (not USING (true))'
 );
 
 select * from finish();

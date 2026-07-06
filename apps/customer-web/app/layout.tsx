@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { ThemeRoot } from "@resqly/web-kit";
 import { getActiveTheme } from "./lib/theme";
+import { SessionMarker } from "./lib/session-marker";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -35,6 +36,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     <html lang="sv">
       <body>
         <ThemeRoot tokens={theme.tokens}>
+          <SessionMarker />
           <header className="app-header">
             <a href={withPartner("/")} className="brand-lockup">
               {theme.logoUrl ? <img src={theme.logoUrl} alt="" className="brand-logo" /> : <span className="brand-mark" />}

@@ -2,12 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { createBrowserSupabase } from "@resqly/web-kit";
-import { PORTAL_AUTH_COOKIE } from "../lib/constants";
 
-function setSessionCookie(token: string, expiresIn?: number) {
-  const maxAge = expiresIn && Number.isFinite(expiresIn) ? expiresIn : 60 * 60 * 8;
-  const secure = window.location.protocol === "https:" ? "; secure" : "";
-  document.cookie = `${PORTAL_AUTH_COOKIE}=${encodeURIComponent(token)}; path=/; max-age=${maxAge}; samesite=lax${secure}`;
+interface SessionLike {
+  access_token: string;
+  refresh_token?: string | null;
+  expires_in?: number;
+}
+
+/** Store the invite/recovery session server-side as HttpOnly cookies. */
+async function storeSessionCookies(session: SessionLike): Promise<void> {
+  await fetch("/api/auth/session", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token ?? null,
+      expires_in: session.expires_in ?? null,
+    }),
+  }).catch(() => undefined);
 }
 
 export default function SetPasswordPage() {
@@ -27,7 +39,7 @@ export default function SetPasswordPage() {
       const session = data.session;
       setHasSession(Boolean(session));
       if (session?.access_token) {
-        setSessionCookie(session.access_token, session.expires_in);
+        await storeSessionCookies(session);
         setMessage("Välj ett lösenord för ditt portalkonto.");
       } else {
         setMessage("Inbjudningslänken saknas eller har gått ut. Be din administratör skicka en ny inbjudan, eller begär en lösenordslänk från inloggningssidan.");
@@ -36,7 +48,7 @@ export default function SetPasswordPage() {
     load();
     const { data } = supabase?.auth.onAuthStateChange((_event, session) => {
       if (session?.access_token) {
-        setSessionCookie(session.access_token, session.expires_in);
+        void storeSessionCookies(session);
         setHasSession(true);
         setMessage("Välj ett lösenord för ditt portalkonto.");
       }
@@ -69,7 +81,7 @@ export default function SetPasswordPage() {
     }
     const { data: sessionData } = await supabase!.auth.getSession();
     if (sessionData.session?.access_token) {
-      setSessionCookie(sessionData.session.access_token, sessionData.session.expires_in);
+      await storeSessionCookies(sessionData.session);
     }
     setMessage(`Lösenordet är sparat för ${data.user?.email ?? "ditt konto"}. Du skickas vidare…`);
     window.setTimeout(() => {

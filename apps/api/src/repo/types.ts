@@ -57,6 +57,22 @@ export interface TowJobRecord {
   status: TowJobStatus;
   payer_type: string;
   priority: string;
+  /** Immutable price terms captured when a driver accepted (private jobs). */
+  price_snapshot?: Record<string, unknown> | null;
+}
+
+export interface PriceListRecord {
+  start_fee_minor: number;
+  per_km_minor: number;
+  per_waiting_minute_minor: number;
+  failed_trip_minor: number;
+  on_call_surcharge_minor: number;
+  heavy_tow_minor: number;
+  minimum_price_minor: number;
+  evening_night_surcharge_minor: number;
+  weekend_surcharge_minor: number;
+  cancellation_policy: string | null;
+  currency: string;
 }
 
 export interface CustomerContact {
@@ -184,6 +200,13 @@ export interface ApiRepo {
     status_code: number;
   }): Promise<void>;
   recordAudit(row: Record<string, unknown>): Promise<void>;
+  /** Operational escalation queue shown to admins when dispatch cannot proceed. */
+  createManualReview(row: {
+    tenant_id: string;
+    incident_id: string | null;
+    tow_job_id: string;
+    reason: string;
+  }): Promise<void>;
 
   getTenant(tenantId: string): Promise<TenantRecord | null>;
   getTenantSettings(tenantId: string): Promise<TenantSettingsRecord>;
@@ -215,6 +238,18 @@ export interface ApiRepo {
   getCustomerContact(incidentId: string): Promise<CustomerContact | null>;
 
   createTowJob(row: Record<string, unknown>): Promise<TowJobRecord>;
+  /** Active price list for a tow company (private marketplace pricing). */
+  getActivePriceList(towCompanyId: string): Promise<PriceListRecord | null>;
+  /** Freeze the accepted price terms on the job. Never overwrites. */
+  setTowJobPriceSnapshot(jobId: string, snapshot: Record<string, unknown>): Promise<void>;
+  /** Pickup + destination coordinates for a case, when known. */
+  getIncidentCoordinates(incidentId: string): Promise<{
+    pickup: Coordinate | null;
+    destination: Coordinate | null;
+  }>;
+  /** Store a driver photo in the tow-evidence bucket (server-side upload). */
+  uploadTowEvidenceObject(path: string, bytes: Uint8Array, contentType: string): Promise<void>;
+  createTowJobEvidence(row: Record<string, unknown>): Promise<{ id: string }>;
   getTowJob(tenantId: string, id: string): Promise<TowJobRecord | null>;
   /** Lookup by id only — callers MUST verify driver/tenant authorization. */
   getTowJobById(id: string): Promise<TowJobRecord | null>;
@@ -258,11 +293,13 @@ export interface ApiRepo {
     }>
   >;
   /** Jobs currently assigned to the driver (accepted through transporting). */
-  listDriverJobs(driverId: string): Promise<TowJobRecord[]>;
+  listDriverJobs(driverId: string, opts?: { history?: boolean }): Promise<TowJobRecord[]>;
   listDriverDevices(driverId: string): Promise<DriverDeviceRecord[]>;
   markOfferPush(jobId: string, driverId: string, status: string, error?: string | null): Promise<void>;
 
   recordNotificationDelivery(row: Record<string, unknown>): Promise<void>;
+  /** True when a notification with this dedupe key was already recorded. */
+  hasNotificationDelivery(dedupeKey: string): Promise<boolean>;
   enqueueWebhookEvent(tenantId: string, event: string, payload: Record<string, unknown>): Promise<void>;
   recordUsageEvent(tenantId: string, kind: string, quantity?: number): Promise<void>;
 

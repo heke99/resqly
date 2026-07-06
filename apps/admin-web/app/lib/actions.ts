@@ -1,7 +1,23 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+import {
+  createSupabaseDispatchStore,
+  loadDispatchSettings,
+  orchestrateDispatch,
+} from "@resqly/dispatch";
 import { requirePlatformAdmin } from "./auth";
+import { ADMIN_AUTH_COOKIE, ADMIN_REFRESH_COOKIE } from "./constants";
+
+/** Clear the HttpOnly session cookies and return to the login screen. */
+export async function logoutAdmin(): Promise<void> {
+  const store = await cookies();
+  store.delete(ADMIN_AUTH_COOKIE);
+  store.delete(ADMIN_REFRESH_COOKIE);
+  redirect("/login");
+}
 
 type TenantType =
   | "insurance_company"
@@ -490,6 +506,194 @@ export async function resolveManualReview(formData: FormData): Promise<void> {
     metadata: { status: "resolved" },
   } as never);
   revalidatePath("/operations");
+}
+
+/**
+ * Support tool: re-dispatch a stuck/failed tow job. Cancels remaining pending
+ * offers and runs the shared dispatch orchestrator again from the case's
+ * pickup location. Only allowed while no driver is assigned.
+ */
+export async function adminRedispatchJob(formData: FormData): Promise<void> {
+  const { db, user } = await requirePlatformAdmin();
+  const jobId = text(formData, "tow_job_id");
+  if (!jobId) throw new Error("Uppdrags-id krävs.");
+
+  const { data: job } = await db
+    .from("tow_jobs" as never)
+    .select("id, tenant_id, incident_id, status, driver_id, payer_type, priority")
+    .eq("id", jobId)
+    .maybeSingle();
+  const j = job as {
+    id: string;
+    tenant_id: string;
+    incident_id: string;
+    status: string;
+    driver_id: string | null;
+    payer_type: string;
+    priority: string;
+  } | null;
+  if (!j) throw new Error("Uppdraget hittades inte.");
+  if (j.driver_id) throw new Error("Uppdraget har redan en förare. Avbryt uppdraget först om det ska omfördelas.");
+  if (["completed", "invoiced", "closed", "cancelled"].includes(j.status)) {
+    throw new Error("Uppdraget är avslutat och kan inte skickas ut igen.");
+  }
+
+  const { data: loc } = await db
+    .from("incident_locations" as never)
+    .select("lat, lng")
+    .eq("incident_id", j.incident_id)
+    .eq("kind", "pickup")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const pickup = loc as { lat: number | null; lng: number | null } | null;
+  if (!pickup || pickup.lat == null || pickup.lng == null) {
+    throw new Error("Ärendet saknar upphämtningsposition — bekräfta adressen med kunden först.");
+  }
+
+  await db
+    .from("tow_job_offers" as never)
+    .update({ status: "cancelled" } as never)
+    .eq("tow_job_id", j.id)
+    .eq("status", "pending");
+
+  const { data: incident } = await db
+    .from("incidents" as never)
+    .select("problem_type, case_number")
+    .eq("id", j.incident_id)
+    .maybeSingle();
+  const inc = incident as { problem_type: string | null; case_number: string | null } | null;
+
+  const settings = await loadDispatchSettings(db, j.tenant_id);
+  const outcome = await orchestrateDispatch(
+    createSupabaseDispatchStore(db),
+    {
+      tenantId: j.tenant_id,
+      job: { id: j.id, incident_id: j.incident_id, status: j.status },
+      pickup: { lat: Number(pickup.lat), lng: Number(pickup.lng) },
+      payerType: j.payer_type === "customer_private" ? "customer_private" : "insurance_company",
+      priority: (["normal", "high", "urgent"].includes(j.priority) ? j.priority : "normal") as "normal" | "high" | "urgent",
+      problemType: inc?.problem_type ?? null,
+      caseNumber: inc?.case_number ?? null,
+      actorUserId: user.id,
+      settings,
+    },
+    { push: { enabled: process.env.EXPO_PUSH_ENABLED !== "false" } },
+  );
+
+  await db.from("audit_logs" as never).insert({
+    tenant_id: j.tenant_id,
+    actor_user_id: user.id,
+    action: "dispatch",
+    entity_type: "tow_job",
+    entity_id: j.id,
+    fields: ["status"],
+    metadata: { manual_redispatch: true, outcome: outcome.status, offers: outcome.offeredDrivers.length },
+  } as never);
+  revalidatePath(`/cases/${j.incident_id}`);
+  revalidatePath("/operations");
+}
+
+/** Support tool: cancel a case (and its live tow job) with a mandatory reason. */
+export async function adminCancelCase(formData: FormData): Promise<void> {
+  const { db, user } = await requirePlatformAdmin();
+  const incidentId = text(formData, "incident_id");
+  const reason = text(formData, "reason");
+  if (!incidentId) throw new Error("Ärende-id krävs.");
+  if (!reason) throw new Error("Ange en anledning till att ärendet avbryts.");
+
+  const { data: incident } = await db
+    .from("incidents" as never)
+    .select("id, tenant_id, status")
+    .eq("id", incidentId)
+    .maybeSingle();
+  const inc = incident as { id: string; tenant_id: string; status: string } | null;
+  if (!inc) throw new Error("Ärendet hittades inte.");
+  if (["closed", "cancelled"].includes(inc.status)) throw new Error("Ärendet är redan avslutat.");
+
+  const { data: jobs } = await db
+    .from("tow_jobs" as never)
+    .select("id, status")
+    .eq("incident_id", inc.id)
+    .not("status", "in", "(cancelled,failed,closed)" as never);
+  for (const job of (jobs as Array<{ id: string; status: string }> | null) ?? []) {
+    await db.from("tow_job_offers" as never).update({ status: "cancelled" } as never).eq("tow_job_id", job.id).eq("status", "pending");
+    await db.from("tow_jobs" as never).update({ status: "cancelled" } as never).eq("id", job.id);
+    await db.from("tow_job_status_events" as never).insert({
+      tow_job_id: job.id,
+      from_status: job.status,
+      to_status: "cancelled",
+      actor_user_id: user.id,
+      reason: `avbruten av plattformsansvarig: ${reason}`,
+    } as never);
+  }
+
+  await db.from("incidents" as never).update({ status: "cancelled" } as never).eq("id", inc.id);
+  await db.from("incident_status_events" as never).insert({
+    incident_id: inc.id,
+    from_status: inc.status,
+    to_status: "cancelled",
+    actor_user_id: user.id,
+    reason,
+  } as never);
+  await db.from("audit_logs" as never).insert({
+    tenant_id: inc.tenant_id,
+    actor_user_id: user.id,
+    action: "status_change",
+    entity_type: "incident",
+    entity_id: inc.id,
+    fields: ["status"],
+    metadata: { from: inc.status, to: "cancelled", manual_override: true, reason },
+  } as never);
+  revalidatePath(`/cases/${inc.id}`);
+}
+
+/** Support tool: mark a stuck job as completed manually (with reason). */
+export async function adminCompleteJob(formData: FormData): Promise<void> {
+  const { db, user } = await requirePlatformAdmin();
+  const jobId = text(formData, "tow_job_id");
+  const reason = text(formData, "reason");
+  if (!jobId) throw new Error("Uppdrags-id krävs.");
+  if (!reason) throw new Error("Ange en anledning till manuell slutförning.");
+
+  const { data: job } = await db
+    .from("tow_jobs" as never)
+    .select("id, tenant_id, incident_id, status")
+    .eq("id", jobId)
+    .maybeSingle();
+  const j = job as { id: string; tenant_id: string; incident_id: string; status: string } | null;
+  if (!j) throw new Error("Uppdraget hittades inte.");
+  if (["completed", "invoiced", "closed", "cancelled"].includes(j.status)) {
+    throw new Error("Uppdraget är redan avslutat.");
+  }
+
+  await db.from("tow_job_offers" as never).update({ status: "cancelled" } as never).eq("tow_job_id", j.id).eq("status", "pending");
+  await db.from("tow_jobs" as never).update({ status: "completed" } as never).eq("id", j.id);
+  await db.from("tow_job_status_events" as never).insert({
+    tow_job_id: j.id,
+    from_status: j.status,
+    to_status: "completed",
+    actor_user_id: user.id,
+    reason: `manuellt slutförd av plattformsansvarig: ${reason}`,
+  } as never);
+  await db.from("incidents" as never).update({ status: "completed" } as never).eq("id", j.incident_id);
+  await db.from("incident_status_events" as never).insert({
+    incident_id: j.incident_id,
+    from_status: null,
+    to_status: "completed",
+    actor_user_id: user.id,
+    reason: `bärgningen slutförd manuellt: ${reason}`,
+  } as never);
+  await db.from("audit_logs" as never).insert({
+    tenant_id: j.tenant_id,
+    actor_user_id: user.id,
+    action: "status_change",
+    entity_type: "tow_job",
+    entity_id: j.id,
+    fields: ["status"],
+    metadata: { from: j.status, to: "completed", manual_override: true, reason },
+  } as never);
+  revalidatePath(`/cases/${j.incident_id}`);
 }
 
 /** Superadmin: create the deterministic staging demo constellation. Do not run this in production. */

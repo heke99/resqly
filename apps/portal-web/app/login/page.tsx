@@ -3,13 +3,6 @@
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createBrowserSupabase } from "@resqly/web-kit";
-import { PORTAL_AUTH_COOKIE } from "../lib/constants";
-
-function setSessionCookie(token: string, expiresIn?: number) {
-  const maxAge = expiresIn && Number.isFinite(expiresIn) ? expiresIn : 60 * 60 * 8;
-  const secure = window.location.protocol === "https:" ? "; secure" : "";
-  document.cookie = `${PORTAL_AUTH_COOKIE}=${encodeURIComponent(token)}; path=/; max-age=${maxAge}; samesite=lax${secure}`;
-}
 
 function portalBaseUrl(): string {
   return (process.env.NEXT_PUBLIC_PORTAL_WEB_URL ?? window.location.origin).replace(/\/$/, "");
@@ -46,19 +39,24 @@ function PortalLoginInner() {
     if (busy) return;
     setBusy(true);
     setMessage(null);
-    const { data, error } = await supabase!.auth.signInWithPassword({ email, password });
-    setBusy(false);
-    if (error) {
-      setMessage(friendlyAuthError(error.message));
-      return;
+    try {
+      // Server-side sign-in: session tokens live only in HttpOnly cookies.
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setMessage(json.error ?? "Inloggningen misslyckades. Kontrollera uppgifterna och försök igen.");
+        return;
+      }
+      window.location.href = "/";
+    } catch {
+      setMessage("Kunde inte nå tjänsten. Kontrollera din uppkoppling.");
+    } finally {
+      setBusy(false);
     }
-    const token = data.session?.access_token;
-    if (!token) {
-      setMessage("Inloggningen lyckades men sessionen kunde inte startas. Försök igen.");
-      return;
-    }
-    setSessionCookie(token, data.session?.expires_in);
-    window.location.href = "/";
   }
 
   async function sendPasswordLink() {

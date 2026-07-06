@@ -11,7 +11,10 @@
   },
   "dependencies": {
     "@resqly/bankid": "workspace:*",
+    "@resqly/billing": "workspace:*",
     "@resqly/database": "workspace:*",
+    "@resqly/dispatch": "workspace:*",
+    "@resqly/maps": "workspace:*",
     "@resqly/types": "workspace:*",
     "@resqly/ui": "workspace:*",
     "@resqly/utils": "workspace:*",

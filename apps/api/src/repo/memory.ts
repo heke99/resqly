@@ -12,6 +12,7 @@ import type {
   EtaSnapshotRecord,
   IncidentRecord,
   OfferRecord,
+  PriceListRecord,
   RoleContext,
   TenantRecord,
   TenantSettingsRecord,
@@ -124,6 +125,48 @@ export class MemoryRepo implements ApiRepo {
   }
   async recordAudit(row: Record<string, unknown>) {
     this.auditLogs.push(row);
+  }
+  manualReviews: Array<Record<string, unknown>> = [];
+  async createManualReview(row: {
+    tenant_id: string;
+    incident_id: string | null;
+    tow_job_id: string;
+    reason: string;
+  }) {
+    this.manualReviews.push({ ...row, status: "open" });
+  }
+
+  priceLists = new Map<string, PriceListRecord>(); // keyed by tow company id
+  async getActivePriceList(towCompanyId: string): Promise<PriceListRecord | null> {
+    return this.priceLists.get(towCompanyId) ?? null;
+  }
+  async setTowJobPriceSnapshot(jobId: string, snapshot: Record<string, unknown>): Promise<void> {
+    const job = this.towJobs.get(jobId);
+    if (job && !job.price_snapshot) {
+      this.towJobs.set(jobId, { ...job, price_snapshot: snapshot });
+    }
+  }
+  towEvidenceObjects: Array<{ path: string; contentType: string; size: number }> = [];
+  towJobEvidence: Array<Record<string, unknown>> = [];
+  async uploadTowEvidenceObject(path: string, bytes: Uint8Array, contentType: string): Promise<void> {
+    this.towEvidenceObjects.push({ path, contentType, size: bytes.length });
+  }
+  async createTowJobEvidence(row: Record<string, unknown>): Promise<{ id: string }> {
+    const id = newId();
+    this.towJobEvidence.push({ id, ...row });
+    return { id };
+  }
+  async getIncidentCoordinates(incidentId: string): Promise<{
+    pickup: { lat: number; lng: number } | null;
+    destination: { lat: number; lng: number } | null;
+  }> {
+    const coord = (kind: string) => {
+      const row = [...this.incidentLocations]
+        .reverse()
+        .find((l) => l.incident_id === incidentId && l.kind === kind && l.lat != null && l.lng != null);
+      return row ? { lat: row.lat, lng: row.lng } : null;
+    };
+    return { pickup: coord("pickup"), destination: coord("destination") };
   }
   async getTenant(id: string) {
     return this.tenants.get(id) ?? null;
@@ -378,10 +421,12 @@ export class MemoryRepo implements ApiRepo {
         };
       });
   }
-  async listDriverJobs(driverId: string): Promise<TowJobRecord[]> {
-    const active = ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"];
+  async listDriverJobs(driverId: string, opts?: { history?: boolean }): Promise<TowJobRecord[]> {
+    const statuses = opts?.history
+      ? ["completed", "invoiced", "closed", "cancelled", "failed"]
+      : ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"];
     return [...this.towJobs.values()].filter(
-      (j) => j.driver_id === driverId && active.includes(j.status),
+      (j) => j.driver_id === driverId && statuses.includes(j.status),
     );
   }
   async listDriverDevices(driverId: string): Promise<DriverDeviceRecord[]> {
@@ -394,7 +439,13 @@ export class MemoryRepo implements ApiRepo {
     if (o) o.push_status = status;
   }
   async recordNotificationDelivery(row: Record<string, unknown>) {
+    if (row.dedupe_key && this.notificationDeliveries.some((d) => d.dedupe_key === row.dedupe_key)) {
+      return;
+    }
     this.notificationDeliveries.push(row);
+  }
+  async hasNotificationDelivery(dedupeKey: string): Promise<boolean> {
+    return this.notificationDeliveries.some((d) => d.dedupe_key === dedupeKey);
   }
   async enqueueWebhookEvent(tenantId: string, event: string, payload: Record<string, unknown>) {
     this.webhookDeliveries.push({ tenant_id: tenantId, event, payload, status: "pending" });

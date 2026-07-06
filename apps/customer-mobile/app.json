@@ -6,8 +6,24 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "ios": { "supportsTablet": true },
-    "android": { "package": "com.resqly.customer" },
-    "plugins": ["expo-location"]
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.resqly.customer",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Din position används för att bärgaren ska hitta ditt fordon. Du kan alltid ange adressen manuellt i stället."
+      }
+    },
+    "android": {
+      "package": "com.resqly.customer",
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Din position används för att bärgaren ska hitta ditt fordon. Du kan alltid ange adressen manuellt i stället."
+        }
+      ]
+    ]
   }
 }

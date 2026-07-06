@@ -149,3 +149,33 @@ describe("production hardening (0020)", () => {
     expect(sql).toContain("Saknar aktiv bärgningsbil");
   });
 });
+
+describe("security hardening (0021)", () => {
+  const sql = readFileSync(join(migrationsDir, "0021_security_hardening.sql"), "utf8");
+
+  it("locks the driver-location RPC away from client roles", () => {
+    expect(sql).toMatch(/revoke execute on function public\.tow_drivers_within_radius[\s\S]*?from authenticated/);
+    expect(sql).toMatch(/grant execute on function public\.tow_drivers_within_radius[\s\S]*?to service_role/);
+  });
+
+  it("narrows the insurance company list to active insurers", () => {
+    expect(sql).toContain("drop policy if exists insurance_companies_read");
+    expect(sql).toContain("active = true");
+  });
+
+  it("adds storage delete policies for evidence buckets", () => {
+    expect(sql).toContain('"incident_evidence_delete" on storage.objects for delete');
+    expect(sql).toContain('"tow_evidence_delete" on storage.objects for delete');
+    expect(sql).toContain('"tenant_assets_delete" on storage.objects for delete');
+  });
+});
+
+describe("notification idempotency (0024)", () => {
+  const sql = readFileSync(join(migrationsDir, "0024_notification_dedupe.sql"), "utf8");
+
+  it("enforces a unique dedupe key on notification deliveries", () => {
+    expect(sql).toContain("add column if not exists dedupe_key text");
+    expect(sql).toContain("uq_notification_deliveries_dedupe");
+    expect(sql).toContain("where dedupe_key is not null");
+  });
+});

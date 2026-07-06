@@ -71,6 +71,9 @@ export class App {
     r.post("/api/v1/tow/jobs/:id/complete", (ctx, a) =>
       tow.completeTowJob(ctx, a.params.id!, a.body),
     );
+    r.post("/api/v1/tow/jobs/:id/evidence", (ctx, a) =>
+      tow.uploadTowJobEvidence(ctx, a.params.id!, a.body),
+    );
     r.get("/api/v1/tow/jobs/:id/eta", (ctx, a) => tow.getTowJobEta(ctx, a.params.id!));
 
     r.post("/api/v1/eta/calculate", (ctx, a) => eta.calculateEta(ctx, a.body));
@@ -90,7 +93,7 @@ export class App {
     r.post("/api/v1/drivers/me/location", (ctx, a) => drivers.updateLocation(ctx, a.body));
     r.post("/api/v1/drivers/me/device", (ctx, a) => drivers.registerDevice(ctx, a.body));
     r.get("/api/v1/drivers/me/offers", (ctx) => drivers.listOffers(ctx));
-    r.get("/api/v1/drivers/me/jobs", (ctx) => drivers.listJobs(ctx));
+    r.get("/api/v1/drivers/me/jobs", (ctx, a) => drivers.listJobs(ctx, a.query));
     r.post("/api/v1/drivers/offers/:id/accept", (ctx, a) => drivers.acceptOffer(ctx, a.params.id!));
     r.post("/api/v1/drivers/offers/:id/reject", (ctx, a) => drivers.rejectOffer(ctx, a.params.id!, a.body));
 
@@ -180,7 +183,7 @@ export class App {
     const allowsUserToken =
       url.pathname === "/api/v1/me/role-context" ||
       url.pathname.startsWith("/api/v1/drivers/") ||
-      /^\/api\/v1\/tow\/jobs\/[^/]+(\/(accept|reject|status|location|complete|eta))?$/.test(url.pathname);
+      /^\/api\/v1\/tow\/jobs\/[^/]+(\/(accept|reject|status|location|complete|eta|evidence))?$/.test(url.pathname);
     if (allowsUserToken && userTokenFromAuth && this.config.driverAuth) {
       const userId = await this.config.driverAuth.getUserIdFromAccessToken(userTokenFromAuth);
       if (userId) {

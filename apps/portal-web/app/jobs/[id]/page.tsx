@@ -7,6 +7,7 @@ import {
   getTowJobCompletionReport,
   getTowJobInvoice,
   listTowJobEvents,
+  listTowJobLocations,
 } from "../../lib/data";
 import { NoTenant } from "../../lib/ui";
 
@@ -40,12 +41,21 @@ export default async function JobDetailPage({
     );
   }
 
-  const [events, report, invoice, driverName] = await Promise.all([
+  const [events, report, invoice, driverName, locations] = await Promise.all([
     listTowJobEvents(tenant.id, id),
     getTowJobCompletionReport(tenant.id, id),
     getTowJobInvoice(tenant.id, id),
     getDriverName(tenant.id, (job.driver_id as string | null) ?? null),
+    listTowJobLocations(tenant.id, (job.incident_id as string | null) ?? null),
   ]);
+  const pickup = locations.find((l) => l.kind === "pickup");
+  const destination = locations.find((l) => l.kind === "destination");
+  const locationText = (loc: Row | undefined) => {
+    if (!loc) return "—";
+    if (loc.address) return String(loc.address);
+    if (loc.lat != null && loc.lng != null) return `${Number(loc.lat).toFixed(4)}, ${Number(loc.lng).toFixed(4)}`;
+    return "—";
+  };
 
   const eventColumns: Column<Row>[] = [
     { key: "time", header: "Tid", render: (r) => formatTime(r.created_at) },
@@ -66,6 +76,8 @@ export default async function JobDetailPage({
           <p style={{ margin: "4px 0" }}>Status: <StatusChip status={String(job.status ?? "")} /></p>
           <p style={{ margin: "4px 0" }}>Prioritet: {String(job.priority ?? "normal") === "high" ? "Hög" : String(job.priority ?? "normal") === "urgent" ? "Akut" : "Normal"}</p>
           <p style={{ margin: "4px 0" }}>Förare: {driverName ?? "Inte tilldelad ännu"}</p>
+          <p style={{ margin: "4px 0" }}>Upphämtning: {locationText(pickup)}</p>
+          <p style={{ margin: "4px 0" }}>Destination: {destination ? locationText(destination) : "Ej angiven"}</p>
           <p style={{ margin: "4px 0" }}>Skapat: {formatTime(job.created_at)}</p>
           {job.sla_deadline ? <p style={{ margin: "4px 0" }}>Tidsgräns: {formatTime(job.sla_deadline)}</p> : null}
         </Card>

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireCustomer, jsonError, replayIfIdempotent, storeIdempotentResponse } from "../_lib";
+import { recordConsent, type ConsentKind } from "../_consent";
+import { sendCustomerEmail, escapeHtml } from "../_email";
 
 const TOWING_TYPES = new Set(["towing", "roadside_assistance"]);
 
@@ -19,11 +21,18 @@ export async function POST(request: Request) {
   const description = body.description ? String(body.description) : null;
   const coords = body.coords && typeof body.coords === "object" ? body.coords as { lat?: number; lng?: number } : null;
   const manualAddress = typeof body.address === "string" && body.address.trim() ? body.address.trim().slice(0, 300) : null;
+  const destinationAddress =
+    typeof body.destination === "string" && body.destination.trim() ? body.destination.trim().slice(0, 300) : null;
   if (!vehicleId) return jsonError(400, "Välj vilket fordon ärendet gäller.");
   if (!["towing", "roadside_assistance", "damage_claim"].includes(type)) return jsonError(400, "Ogiltig ärendetyp.");
 
   // "private" = direct/marketplace towing without an insurance policy.
   const mode = String(body.mode ?? "") === "private" ? "private" : "insurance";
+
+  // Explicit data-sharing consent is required before a case is created.
+  if (body.consent !== true) {
+    return jsonError(400, "Du behöver godkänna hur dina uppgifter delas innan ärendet kan skapas.");
+  }
 
   const { data: vehicle } = await db
     .from("vehicles" as never)
@@ -131,6 +140,26 @@ export async function POST(request: Request) {
     reason: "Skapat av kund",
   } as never);
 
+  // Versioned consent trail: what data sharing the customer accepted, with
+  // text hash + version. BankID (when required) is the verification on top.
+  const consentKinds: ConsentKind[] =
+    mode === "private"
+      ? ["share_with_tow_partner"]
+      : type === "damage_claim"
+        ? ["claim_submission", "share_with_insurer"]
+        : ["share_with_insurer", "share_with_tow_partner"];
+  for (const kind of consentKinds) {
+    await recordConsent(db, {
+      tenantId,
+      userId: user.id,
+      kind,
+      incidentId,
+      vehicleId,
+      request,
+      metadata: { case_type: type, mode },
+    });
+  }
+
   if (coords?.lat && coords?.lng) {
     await db.from("incident_locations" as never).insert({
       incident_id: incidentId,
@@ -156,6 +185,20 @@ export async function POST(request: Request) {
     }
   }
 
+  // Destination ("where should the vehicle go?") for towing cases. Stored
+  // even without coordinates so drivers always see the address; geocoded
+  // when the maps service is configured (used for private price estimates).
+  if (destinationAddress && TOWING_TYPES.has(type)) {
+    const geocodedDest = await tryGeocode(destinationAddress);
+    await db.from("incident_locations" as never).insert({
+      incident_id: incidentId,
+      kind: "destination",
+      lat: geocodedDest?.lat ?? null,
+      lng: geocodedDest?.lng ?? null,
+      address: destinationAddress,
+    } as never);
+  }
+
   await db.from("audit_logs" as never).insert({
     tenant_id: tenantId,
     actor_user_id: user.id,
@@ -165,6 +208,17 @@ export async function POST(request: Request) {
     fields: ["vehicle_id", "insurance_company_id", "case_number", "status"],
     metadata: { mode },
   } as never);
+
+  await sendCustomerEmail(db, {
+    tenantId,
+    to: user.email,
+    subject: `Vi har tagit emot ditt ärende ${caseNo}`,
+    html: requiresBankid
+      ? `<p>Ditt ärende <strong>${escapeHtml(String(caseNo))}</strong> är skapat.</p><p>Nästa steg: verifiera ärendet med BankID i appen så att det kan skickas vidare.</p>`
+      : `<p>Ditt ärende <strong>${escapeHtml(String(caseNo))}</strong> är skapat.</p><p>Du kan följa status i appen.</p>`,
+    incidentId,
+    dedupeKey: `email:case_created:${incidentId}`,
+  });
 
   const responseBody = { incident_id: incidentId, case_number: caseNo, status: initialStatus, requires_bankid: requiresBankid, mode };
   await storeIdempotentResponse(db, user.id, "case.create", idemKey, incidentId, responseBody);

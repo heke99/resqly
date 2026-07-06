@@ -10,6 +10,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@resqly/auth": "workspace:*",
     "@resqly/database": "workspace:*",
     "@resqly/rbac": "workspace:*",
     "@resqly/types": "workspace:*",
