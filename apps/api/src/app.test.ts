@@ -301,6 +301,17 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     await repo.createOffers([
       { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv1", tow_company_id: "tc1", rank: 0, expires_at: new Date(Date.now() - 1000).toISOString() },
     ]);
+    repo.seedContact("inc-exp", {
+      name: "Anna Andersson",
+      phone: "+46700000000",
+      email: null,
+      registration_number: "ABC123",
+      problem_summary: "Punktering",
+      pickup: { lat: 59.3293, lng: 18.0686 },
+      pickup_address: null,
+      destination_address: null,
+      customer_notes: null,
+    });
     const res = await env.app.handle({
       method: "POST",
       path: `/api/v1/tow/jobs/${job.id}/accept`,
@@ -311,6 +322,42 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     const error = (res.body as { error: { user_message?: string } }).error;
     expect(error.user_message).toBe("Erbjudandet har gått ut.");
     expect(repo.offers.find((o) => o.tow_job_id === job.id)?.status).toBe("expired");
+  });
+
+  it("never assigns a live offer when customer contact is incomplete", async () => {
+    const repo = env.repo;
+    const job = await repo.createTowJob({
+      tenant_id: "t-if",
+      incident_id: "inc-missing-contact",
+      status: "offered",
+      payer_type: "insurance_company",
+      priority: "normal",
+    });
+    await repo.createOffers([
+      {
+        tenant_id: "t-if",
+        tow_job_id: job.id,
+        driver_id: "drv1",
+        tow_company_id: "tc1",
+        rank: 0,
+        expires_at: new Date(Date.now() + 60_000).toISOString(),
+      },
+    ]);
+
+    const res = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/tow/jobs/${job.id}/accept`,
+      headers: driverAuth(),
+      body: {},
+    });
+
+    expect(res.status).toBe(409);
+    const error = (res.body as { error: { user_message?: string } }).error;
+    expect(error.user_message).toBe(
+      "Kundens kontaktuppgifter är inte kompletta. Be trafikledningen kontrollera ärendet.",
+    );
+    expect((await repo.getTowJob("t-if", job.id))?.driver_id).toBeNull();
+    expect(repo.offers.find((o) => o.tow_job_id === job.id)?.status).toBe("pending");
   });
 
   it("lists driver offers without customer PII (pre-accept minimization)", async () => {

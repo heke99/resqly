@@ -307,7 +307,12 @@ export class MemoryRepo implements ApiRepo {
     return this.contacts.get(incidentId) ?? null;
   }
   async createTowJob(row: Record<string, unknown>) {
-    const rec = { id: newId(), ...(row as object) } as TowJobRecord;
+    const rec = {
+      id: newId(),
+      tow_company_id: null,
+      driver_id: null,
+      ...(row as object),
+    } as TowJobRecord;
     this.towJobs.set(rec.id, rec);
     return rec;
   }
