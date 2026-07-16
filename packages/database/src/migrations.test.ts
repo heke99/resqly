@@ -153,9 +153,10 @@ describe("production hardening (0020)", () => {
 describe("security hardening (0021)", () => {
   const sql = readFileSync(join(migrationsDir, "0021_security_hardening.sql"), "utf8");
 
-  it("locks the driver-location RPC away from client roles", () => {
-    expect(sql).toMatch(/revoke execute on function public\.tow_drivers_within_radius[\s\S]*?from authenticated/);
-    expect(sql).toMatch(/grant execute on function public\.tow_drivers_within_radius[\s\S]*?to service_role/);
+  it("locks every driver-location RPC overload away from client roles", () => {
+    expect(sql).toContain("p.proname = 'tow_drivers_within_radius'");
+    expect(sql).toContain("'revoke execute on function %I.%I(%s) from authenticated'");
+    expect(sql).toContain("'grant execute on function %I.%I(%s) to service_role'");
   });
 
   it("narrows the insurance company list to active insurers", () => {
@@ -164,9 +165,10 @@ describe("security hardening (0021)", () => {
   });
 
   it("adds storage delete policies for evidence buckets", () => {
-    expect(sql).toContain('"incident_evidence_delete" on storage.objects for delete');
-    expect(sql).toContain('"tow_evidence_delete" on storage.objects for delete');
-    expect(sql).toContain('"tenant_assets_delete" on storage.objects for delete');
+    const compactSql = sql.replace(/\s+/g, " ");
+    expect(compactSql).toContain('create policy "incident_evidence_delete" on storage.objects for delete');
+    expect(compactSql).toContain('create policy "tow_evidence_delete" on storage.objects for delete');
+    expect(compactSql).toContain('create policy "tenant_assets_delete" on storage.objects for delete');
   });
 });
 

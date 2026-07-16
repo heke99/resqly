@@ -22,7 +22,7 @@ import {
 import { getSupabase } from "./src/supabase";
 import { customerApi, newIdempotencyKey, pollBankidSession } from "./src/api";
 import { DEFAULT_BRANDING, fetchBrandingForTenant, type Branding } from "./src/branding";
-import { normalizePhoneE164 } from "@resqly/utils";
+import { normalizePhoneE164 } from "@resqly/utils/phone";
 
 type Screen = "home" | "account" | "vehicles" | "insurance" | "newCase" | "cases" | "caseDetail";
 

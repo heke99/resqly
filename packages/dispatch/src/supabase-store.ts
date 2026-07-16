@@ -110,8 +110,7 @@ export function createSupabaseDispatchStore(db: AppSupabaseClient): DispatchStor
       const { data: existing, error: lookupError } = await db
         .from("manual_reviews" as never)
         .select("id")
-        .eq("incident_id", row.incident_id)
-        .eq("reason", row.reason)
+        .eq("tow_job_id", row.tow_job_id)
         .in("status", ["open", "in_progress"] as never)
         .limit(1)
         .maybeSingle();

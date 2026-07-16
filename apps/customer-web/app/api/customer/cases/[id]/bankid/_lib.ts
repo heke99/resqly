@@ -85,7 +85,7 @@ export async function completeCustomerBankidSession(input: {
     : null;
 
   let payload: Record<string, unknown>;
-  let incidentId: string | null = session.incident_id;
+  const incidentId: string | null = session.incident_id;
   if (!incidentId && vehiclePolicyId) {
     payload = signedPayloadFromSession;
   } else {
@@ -146,6 +146,6 @@ export async function completeCustomerBankidSession(input: {
     status: "complete",
     bankid_verified: true,
     vehicle_policy_verified: row?.flow === "vehicle_policy",
-    replay: !Boolean(row?.newly_processed),
+    replay: !row?.newly_processed,
   };
 }
