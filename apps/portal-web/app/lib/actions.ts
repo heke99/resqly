@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createHash, randomBytes } from "node:crypto";
-import { newApiKey, sha256Hex } from "@resqly/utils";
+import { newApiKey, normalizePhoneE164, sha256Hex, validatePublicHttpsUrl } from "@resqly/utils";
 import type { PermissionKey } from "@resqly/types";
 import { requirePortalTenant, requirePortalPermission } from "./auth";
 import { PORTAL_AUTH_COOKIE, PORTAL_REFRESH_COOKIE, PORTAL_TENANT_COOKIE } from "./constants";
@@ -35,6 +35,43 @@ export async function logoutPortal(): Promise<void> {
 
 function assertTenant(expected: string, actual: string) {
   if (expected !== actual) throw new Error("Du har inte åtkomst till den här organisationen.");
+}
+
+async function createOneTimeReveal(
+  client: Awaited<ReturnType<typeof portalDb>>["db"],
+  tenantId: string,
+  userId: string,
+  kind: "api_key" | "webhook_secret",
+  secret: string,
+): Promise<string> {
+  const token = randomBytes(32).toString("base64url");
+  const { error } = await client.from("one_time_secret_reveals" as never).insert({
+    tenant_id: tenantId,
+    token_hash: sha256Hex(token),
+    kind,
+    secret_value: secret,
+    created_by: userId,
+    expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+  } as never);
+  if (error) throw new Error(`Den tillfälliga hemligheten kunde inte skapas: ${error.message}`);
+  return token;
+}
+
+export async function consumeIntegrationReveal(
+  tenantId: string,
+  token: string,
+): Promise<{ kind: "api_key" | "webhook_secret"; secret: string } | null> {
+  const { db: client, tenant } = await requirePortalTenant(tenantId);
+  assertTenant(tenant.id, tenantId);
+  if (!token || token.length < 32) return null;
+  const { data, error } = await client.rpc("consume_one_time_secret" as never, {
+    p_tenant_id: tenantId,
+    p_token_hash: sha256Hex(token),
+  } as never);
+  if (error) throw new Error(`Hemligheten kunde inte hämtas: ${error.message}`);
+  const row = (Array.isArray(data) ? data[0] : data) as { reveal_kind?: string; reveal_secret?: string } | null;
+  if (!row?.reveal_secret || (row.reveal_kind !== "api_key" && row.reveal_kind !== "webhook_secret")) return null;
+  return { kind: row.reveal_kind, secret: row.reveal_secret };
 }
 
 async function setIncidentStatus(
@@ -146,20 +183,26 @@ export async function createDriver(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
   const { db: client, tenant } = await portalDb(tenantId, "drivers.manage");
   assertTenant(tenant.id, tenantId);
-  const { data: company } = await client
+  if (tenant.type !== "tow_company") throw new Error("Endast bärgningsbolag kan skapa förare.");
+
+  const { data: company, error: companyError } = await client
     .from("tow_companies" as never)
     .select("id")
     .eq("tenant_id", tenantId)
     .maybeSingle();
+  if (companyError) throw new Error(`Bärgningsbolaget kunde inte läsas: ${companyError.message}`);
   const companyId = (company as { id?: string } | null)?.id;
   if (!companyId) throw new Error("Organisationen är inte ett bärgningsbolag.");
 
   const fullName = String(formData.get("full_name") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim().toLowerCase() || null;
   const sendInvite = formData.get("send_invite") === "on";
+  const rawPhone = String(formData.get("phone") ?? "");
+  const phone = rawPhone ? normalizePhoneE164(rawPhone) : null;
   if (!fullName) throw new Error("Ange förarens namn.");
+  if (rawPhone && !phone) throw new Error("Ange ett giltigt telefonnummer.");
+  if (sendInvite && !email) throw new Error("E-post krävs när en inbjudan ska skickas.");
 
-  let userId: string | null = null;
   if (email && sendInvite) {
     const admin = client.auth.admin as unknown as {
       inviteUserByEmail(
@@ -167,44 +210,69 @@ export async function createDriver(formData: FormData): Promise<void> {
         options?: { redirectTo?: string; data?: Record<string, unknown> },
       ): Promise<{ data: { user: AdminAuthUser | null }; error: AdminAuthError | null }>;
       listUsers(options?: { page?: number; perPage?: number }): Promise<{ data: { users: AdminAuthUser[] }; error: AdminAuthError | null }>;
+      deleteUser(userId: string): Promise<{ error: AdminAuthError | null }>;
     };
-    const { data, error } = await admin.inviteUserByEmail(email, {
+    const portalBase = process.env.NEXT_PUBLIC_PORTAL_WEB_URL?.replace(/\/$/, "");
+    const redirectTo = process.env.DRIVER_INVITE_REDIRECT_URL ?? (portalBase ? `${portalBase}/set-password` : undefined);
+    if (!redirectTo && process.env.NODE_ENV === "production") {
+      throw new Error("DRIVER_INVITE_REDIRECT_URL eller NEXT_PUBLIC_PORTAL_WEB_URL saknas i produktionsmiljön.");
+    }
+
+    const invitation = await admin.inviteUserByEmail(email, {
+      redirectTo,
       data: { full_name: fullName, role: "tow_driver" },
     });
-    if (!error && data.user?.id) {
-      userId = data.user.id;
-    } else {
-      // Already-registered users keep their account; just link the profile.
-      const { data: listed } = await admin.listUsers({ page: 1, perPage: 1000 });
-      userId = listed.users.find((u) => u.email?.toLowerCase() === email)?.id ?? null;
+    let userId: string | null = invitation.data.user?.id ?? null;
+    let newlyInvited = !invitation.error && Boolean(userId);
+    if (!userId && (invitation.error?.message?.toLowerCase().includes("already") || invitation.error?.message?.toLowerCase().includes("registered"))) {
+      const { data: listed, error: listError } = await admin.listUsers({ page: 1, perPage: 1000 });
+      if (listError) throw new Error(`Föraren kunde inte hittas: ${listError.message ?? "okänt fel"}`);
+      userId = listed.users.find((user) => user.email?.toLowerCase() === email)?.id ?? null;
+      newlyInvited = false;
+      if (userId) {
+        const { data: existingMembership, error: membershipError } = await client
+          .from("tenant_users" as never)
+          .select("user_id")
+          .eq("tenant_id", tenantId)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (membershipError) throw new Error(`Befintligt konto kunde inte verifieras: ${membershipError.message}`);
+        if (!existingMembership) {
+          throw new Error("E-postadressen tillhör redan ett annat konto. Kontot måste först godkänna eller administrativt kopplas till bolaget.");
+        }
+      }
+    } else if (invitation.error) {
+      throw new Error(`Inbjudan kunde inte skickas: ${invitation.error.message ?? "okänt fel"}`);
     }
-    if (userId) {
-      await client.from("user_profiles" as never).upsert({ id: userId, email, full_name: fullName } as never);
-      await client.from("tenant_users" as never).upsert(
-        { tenant_id: tenantId, user_id: userId, status: "active" } as never,
-        { onConflict: "tenant_id,user_id" } as never,
-      );
-      await client.from("tow_company_users" as never).upsert(
-        { tenant_id: tenantId, tow_company_id: companyId, user_id: userId } as never,
-        { onConflict: "tow_company_id,user_id" } as never,
-      );
-      await client.from("user_roles" as never).upsert(
-        { tenant_id: tenantId, user_id: userId, role_key: "tow_driver" } as never,
-        { onConflict: "tenant_id,user_id,role_key" } as never,
-      );
+    if (!userId) throw new Error("Inbjudan skickades inte och inget användarkonto kunde länkas.");
+
+    const { error: provisionError } = await client.rpc("provision_tow_driver" as never, {
+      p_tenant_id: tenantId,
+      p_tow_company_id: companyId,
+      p_user_id: userId,
+      p_email: email,
+      p_full_name: fullName,
+      p_phone: phone,
+    } as never);
+    if (provisionError) {
+      if (newlyInvited) await admin.deleteUser(userId).catch(() => ({ error: null }));
+      throw new Error(`Förarkontot kunde inte kopplas till bolaget: ${provisionError.message}`);
     }
+  } else {
+    const { error } = await client.from("tow_drivers" as never).insert({
+      tenant_id: tenantId,
+      tow_company_id: companyId,
+      user_id: null,
+      full_name: fullName,
+      phone,
+      email,
+      duty_status: "off_duty",
+    } as never);
+    if (error) throw new Error(`Föraren kunde inte skapas: ${error.message}`);
   }
 
-  await client.from("tow_drivers" as never).insert({
-    tenant_id: tenantId,
-    tow_company_id: companyId,
-    user_id: userId,
-    full_name: fullName,
-    phone: String(formData.get("phone") ?? "") || null,
-    email,
-    duty_status: "off_duty",
-  } as never);
   revalidatePath("/drivers");
+  revalidatePath("/readiness");
 }
 
 export async function createTowVehicle(formData: FormData): Promise<void> {
@@ -241,20 +309,33 @@ export async function createTowVehicle(formData: FormData): Promise<void> {
 
 export async function createWebhook(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId, "webhooks.manage");
+  const { db: client, tenant, userId } = await portalDb(tenantId, "webhooks.manage");
   assertTenant(tenant.id, tenantId);
-  const url = String(formData.get("url") ?? "");
-  const events = String(formData.get("events") ?? "")
+  const url = validatePublicHttpsUrl(String(formData.get("url") ?? "")).toString();
+  const allowedEvents = new Set([
+    "incident.created", "incident.bankid_started", "incident.bankid_verified", "incident.signed", "incident.submitted",
+    "tow.created", "tow.requested", "tow.dispatch_started", "tow.offer_sent", "tow.offered", "tow.accepted",
+    "tow.driver_accepted", "tow.en_route", "tow.driver_en_route", "tow.arrived", "tow.driver_arrived",
+    "tow.manual_review", "tow.cancelled", "tow.failed", "tow.completed", "claim.created", "claim.received",
+    "claim.more_info_required", "billing.invoice_basis_created", "fraud.review_required",
+  ]);
+  const events = [...new Set(String(formData.get("events") ?? "")
     .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  await client.from("tenant_webhooks" as never).insert({
+    .map((event) => event.trim())
+    .filter(Boolean))];
+  if (events.length === 0) throw new Error("Välj minst en händelse.");
+  const invalid = events.filter((event) => !allowedEvents.has(event));
+  if (invalid.length) throw new Error(`Okända händelser: ${invalid.join(", ")}`);
+  const secret = randomBytes(32).toString("base64url");
+  const { error } = await client.from("tenant_webhooks" as never).insert({
     tenant_id: tenantId,
     url,
     events,
-    secret: randomBytes(32).toString("base64url"),
+    secret,
   } as never);
-  revalidatePath("/integrations");
+  if (error) throw new Error(`Integrationen kunde inte skapas: ${error.message}`);
+  const revealToken = await createOneTimeReveal(client, tenantId, userId, "webhook_secret", secret);
+  redirect(`/integrations?reveal=${encodeURIComponent(revealToken)}`);
 }
 
 async function towCompanyIdFor(client: Awaited<ReturnType<typeof portalDb>>["db"], tenantId: string): Promise<string> {
@@ -270,7 +351,7 @@ async function towCompanyIdFor(client: Awaited<ReturnType<typeof portalDb>>["db"
 
 export async function saveMarketplaceSettings(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId, "agreements.manage");
+  const { db: client, tenant } = await portalDb(tenantId, "white_label.manage");
   assertTenant(tenant.id, tenantId);
   const companyId = await towCompanyIdFor(client, tenantId);
   const row = {
@@ -344,22 +425,128 @@ export async function savePriceList(formData: FormData): Promise<void> {
 
 export async function saveAgreement(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId, "agreements.manage");
+  const { db: client, tenant, userId } = await portalDb(tenantId, "agreements.request");
   assertTenant(tenant.id, tenantId);
+  if (tenant.type !== "tow_company") throw new Error("Endast bärgningsbolag kan skicka avtalsförfrågningar.");
   const companyId = await towCompanyIdFor(client, tenantId);
   const insurerTenantId = String(formData.get("insurance_tenant_id") ?? "");
   if (!insurerTenantId) throw new Error("Välj ett försäkringsbolag.");
-  const row = {
-    tow_company_id: companyId,
-    insurance_tenant_id: insurerTenantId,
-    status: String(formData.get("status") ?? "active"),
-    priority: Number(formData.get("priority") ?? "100") || 100,
-    sla_minutes: Number(formData.get("sla_minutes") ?? "45") || 45,
-    pricing_model: String(formData.get("pricing_model") ?? "standard"),
+
+  const { data: insurer } = await client
+    .from("tenants" as never)
+    .select("id, type, status")
+    .eq("id", insurerTenantId)
+    .eq("type", "insurance_company")
+    .maybeSingle();
+  if (!insurer || (insurer as { status?: string }).status !== "active") {
+    throw new Error("Försäkringsbolaget är inte aktivt eller kunde inte hittas.");
+  }
+
+  const requestFields = {
+    priority: Math.max(1, Number(formData.get("priority") ?? "100") || 100),
+    sla_minutes: Math.max(1, Number(formData.get("sla_minutes") ?? "45") || 45),
+    pricing_model: String(formData.get("pricing_model") ?? "standard").trim() || "standard",
   };
-  await client
+  const { data: existing, error: existingError } = await client
     .from("tow_company_insurance_agreements" as never)
-    .upsert(row as never, { onConflict: "tow_company_id,insurance_tenant_id" } as never);
+    .select("id, status")
+    .eq("tow_company_id", companyId)
+    .eq("insurance_tenant_id", insurerTenantId)
+    .maybeSingle();
+  if (existingError) throw new Error(`Avtalsförfrågan kunde inte kontrolleras: ${existingError.message}`);
+
+  let agreementId: string;
+  let auditAction: "create" | "update" = "create";
+  if (existing) {
+    const current = existing as { id: string; status: string };
+    if (current.status !== "pending") {
+      throw new Error("Avtalet hanteras redan av försäkringsbolaget och kan inte skrivas över av bärgningsbolaget.");
+    }
+    const { error } = await client
+      .from("tow_company_insurance_agreements" as never)
+      .update({ ...requestFields, status: "pending", active_from: null, active_to: null } as never)
+      .eq("id", current.id)
+      .eq("status", "pending");
+    if (error) throw new Error(`Avtalsförfrågan kunde inte uppdateras: ${error.message}`);
+    agreementId = current.id;
+    auditAction = "update";
+  } else {
+    const { data: saved, error } = await client
+      .from("tow_company_insurance_agreements" as never)
+      .insert({
+        tow_company_id: companyId,
+        insurance_tenant_id: insurerTenantId,
+        status: "pending",
+        active_from: null,
+        ...requestFields,
+      } as never)
+      .select("id")
+      .single();
+    if (error) throw new Error(`Avtalsförfrågan kunde inte sparas: ${error.message}`);
+    agreementId = (saved as { id: string }).id;
+  }
+
+  await client.from("audit_logs" as never).insert({
+    tenant_id: tenantId,
+    actor_user_id: userId,
+    action: auditAction,
+    entity_type: "tow_company_insurance_agreement_request",
+    entity_id: agreementId,
+    fields: ["insurance_tenant_id", "status", "priority", "sla_minutes", "pricing_model"],
+    metadata: { status: "pending", insurance_tenant_id: insurerTenantId },
+  } as never);
+  revalidatePath("/agreements");
+  revalidatePath("/partners");
+}
+
+export async function updateAgreementStatus(formData: FormData): Promise<void> {
+  const tenantId = String(formData.get("tenant_id") ?? "");
+  const agreementId = String(formData.get("agreement_id") ?? "");
+  const nextStatus = String(formData.get("status") ?? "");
+  const allowed = new Set(["active", "suspended", "terminated"]);
+  if (!agreementId || !allowed.has(nextStatus)) throw new Error("Ogiltig avtalsändring.");
+
+  const { db: client, tenant, userId } = await portalDb(tenantId, "agreements.manage");
+  assertTenant(tenant.id, tenantId);
+  if (tenant.type !== "insurance_company" && tenant.type !== "platform_internal") {
+    throw new Error("Endast försäkringsbolaget eller plattformsadministratören får godkänna avtal.");
+  }
+
+  const { data: current, error: currentError } = await client
+    .from("tow_company_insurance_agreements" as never)
+    .select("id, insurance_tenant_id, status, active_from")
+    .eq("id", agreementId)
+    .maybeSingle();
+  if (currentError) throw new Error(`Avtalet kunde inte läsas: ${currentError.message}`);
+  const agreement = current as { id: string; insurance_tenant_id: string; status: string; active_from: string | null } | null;
+  if (!agreement) throw new Error("Avtalet hittades inte.");
+  if (tenant.type === "insurance_company" && agreement.insurance_tenant_id !== tenantId) {
+    throw new Error("Avtalet tillhör inte den här försäkringsorganisationen.");
+  }
+
+  const now = new Date().toISOString();
+  const patch = nextStatus === "active"
+    ? { status: nextStatus, active_from: agreement.active_from ?? now, active_to: null }
+    : nextStatus === "terminated"
+      ? { status: nextStatus, active_to: now }
+      : { status: nextStatus };
+  const { error } = await client
+    .from("tow_company_insurance_agreements" as never)
+    .update(patch as never)
+    .eq("id", agreementId);
+  if (error) throw new Error(`Avtalsstatus kunde inte ändras: ${error.message}`);
+
+  await client.from("audit_logs" as never).insert({
+    tenant_id: agreement.insurance_tenant_id,
+    actor_user_id: userId,
+    action: "status_change",
+    entity_type: "tow_company_insurance_agreement",
+    entity_id: agreementId,
+    fields: ["status", "active_from", "active_to"],
+    metadata: { from: agreement.status, to: nextStatus },
+  } as never);
+  revalidatePath("/partners");
+  revalidatePath("/readiness");
   revalidatePath("/agreements");
 }
 
@@ -400,7 +587,8 @@ export async function createApiKey(formData: FormData): Promise<void> {
     fields: ["name", "key_last4"],
     metadata: { key_last4: last4, raw_key_shown_once: true },
   } as never);
-  redirect(`/integrations?new_key=${encodeURIComponent(key)}`);
+  const revealToken = await createOneTimeReveal(client, tenantId, userId, "api_key", key);
+  redirect(`/integrations?reveal=${encodeURIComponent(revealToken)}`);
 }
 
 
@@ -513,25 +701,48 @@ export async function saveVehiclePermission(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id") ?? "");
   const { db: client, tenant, userId } = await portalDb(tenantId, "agreements.manage");
   assertTenant(tenant.id, tenantId);
+  if (tenant.type !== "insurance_company" && tenant.type !== "platform_internal") {
+    throw new Error("Endast försäkringsbolaget får godkänna bärgningsbilar för sitt avtal.");
+  }
   const agreementId = String(formData.get("agreement_id") ?? "");
   const towVehicleId = String(formData.get("tow_vehicle_id") ?? "");
   const status = String(formData.get("status") ?? "active");
-  if (!agreementId || !towVehicleId) throw new Error("Avtal och bärgningsbil krävs.");
+  const allowedStatuses = new Set(["active", "pending", "suspended", "terminated"]);
+  if (!agreementId || !towVehicleId || !allowedStatuses.has(status)) throw new Error("Avtal, bärgningsbil och giltig status krävs.");
 
-  const { data: agreement } = await client
-    .from("tow_company_insurance_agreements" as never)
-    .select("id, insurance_tenant_id")
-    .eq("id", agreementId)
-    .maybeSingle();
-  if ((agreement as { insurance_tenant_id?: string } | null)?.insurance_tenant_id !== tenant.id) {
+  const [{ data: agreement }, { data: vehicle }] = await Promise.all([
+    client
+      .from("tow_company_insurance_agreements" as never)
+      .select("id, insurance_tenant_id, tow_company_id, status")
+      .eq("id", agreementId)
+      .maybeSingle(),
+    client
+      .from("tow_vehicles" as never)
+      .select("id, tow_company_id")
+      .eq("id", towVehicleId)
+      .maybeSingle(),
+  ]);
+  const agreementRow = agreement as { insurance_tenant_id?: string; tow_company_id?: string; status?: string } | null;
+  const vehicleRow = vehicle as { tow_company_id?: string } | null;
+  if (!agreementRow) throw new Error("Avtalet kunde inte hittas.");
+  if (tenant.type === "insurance_company" && agreementRow.insurance_tenant_id !== tenant.id) {
     throw new Error("Avtalet tillhör inte den här försäkringsorganisationen.");
   }
+  if (!vehicleRow || vehicleRow.tow_company_id !== agreementRow.tow_company_id) {
+    throw new Error("Bärgningsbilen tillhör inte bärgningsbolaget i avtalet.");
+  }
+  if (status === "active" && agreementRow.status !== "active") {
+    throw new Error("Avtalet måste vara aktivt innan en bärgningsbil kan godkännas.");
+  }
 
+  const now = new Date().toISOString();
   await client.from("tow_vehicle_insurance_permissions" as never).upsert(
     {
       insurance_agreement_id: agreementId,
       tow_vehicle_id: towVehicleId,
       status,
+      active_from: status === "active" ? now : null,
+      active_to: status === "terminated" ? now : null,
       notes: nullableText(formData, "notes"),
     } as never,
     { onConflict: "insurance_agreement_id,tow_vehicle_id" } as never,
@@ -542,7 +753,7 @@ export async function saveVehiclePermission(formData: FormData): Promise<void> {
     action: "upsert",
     entity_type: "tow_vehicle_insurance_permission",
     entity_id: towVehicleId,
-    fields: ["status", "notes"],
+    fields: ["status", "active_from", "active_to", "notes"],
     metadata: { agreement_id: agreementId, status },
   } as never);
   revalidatePath("/partners");

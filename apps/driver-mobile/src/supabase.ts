@@ -77,3 +77,32 @@ export async function apiGet<T>(path: string): Promise<T | null> {
     return null;
   }
 }
+
+
+export async function uploadSignedEvidence(params: {
+  path: string;
+  token: string;
+  uri: string;
+  contentType: string;
+}): Promise<{ ok: boolean; sizeBytes: number; error: string | null }> {
+  const supabase = getSupabase();
+  if (!supabase) return { ok: false, sizeBytes: 0, error: "Appen saknar lagringsanslutning." };
+  try {
+    const local = await fetch(params.uri);
+    if (!local.ok) return { ok: false, sizeBytes: 0, error: "Bilden kunde inte läsas från telefonen." };
+    const bytes = await local.arrayBuffer();
+    if (bytes.byteLength <= 0 || bytes.byteLength > 10 * 1024 * 1024) {
+      return { ok: false, sizeBytes: bytes.byteLength, error: "Bilden måste vara mindre än 10 MB." };
+    }
+    const { error } = await supabase.storage
+      .from("tow-evidence")
+      .uploadToSignedUrl(params.path, params.token, bytes, { contentType: params.contentType });
+    return {
+      ok: !error,
+      sizeBytes: bytes.byteLength,
+      error: error ? "Bilden kunde inte skickas. Försök igen." : null,
+    };
+  } catch {
+    return { ok: false, sizeBytes: 0, error: "Bilden kunde inte skickas. Kontrollera uppkopplingen." };
+  }
+}

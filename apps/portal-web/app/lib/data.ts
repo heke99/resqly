@@ -220,6 +220,25 @@ export async function getInsurancePartnerPerformance(tenantId: string): Promise<
   return (data as Row[] | null) ?? [];
 }
 
+export async function listInsurerAgreements(tenantId: string): Promise<Row[]> {
+  const { db } = await requirePortalTenant(tenantId);
+  const { data: agreements, error } = await db
+    .from("tow_company_insurance_agreements" as never)
+    .select("*")
+    .eq("insurance_tenant_id", tenantId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  const rows = (agreements as Row[] | null) ?? [];
+  const companyIds = [...new Set(rows.map((row) => String(row.tow_company_id ?? "")).filter(Boolean))];
+  if (companyIds.length === 0) return rows;
+  const { data: companies } = await db
+    .from("tow_companies" as never)
+    .select("id, name")
+    .in("id", companyIds);
+  const names = new Map(((companies as Array<{ id: string; name: string }> | null) ?? []).map((row) => [row.id, row.name]));
+  return rows.map((row) => ({ ...row, tow_company_name: names.get(String(row.tow_company_id)) ?? "Okänt bärgningsbolag" }));
+}
+
 export async function listInsuranceTenants(tenantId: string): Promise<Array<{ id: string; name: string }>> {
   const { db } = await requirePortalTenant(tenantId);
   const { data } = await db

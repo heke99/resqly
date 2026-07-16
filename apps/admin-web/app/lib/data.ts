@@ -346,3 +346,99 @@ export async function listAgreementVehicleMatrixAll(): Promise<Array<Record<stri
     .order("tow_company_name", { ascending: true });
   return (data as Array<Record<string, unknown>> | null) ?? [];
 }
+
+export interface WorkerReadinessRow {
+  worker_name: string;
+  instance_id: string;
+  status: string;
+  last_started_at: string | null;
+  last_succeeded_at: string | null;
+  last_failed_at: string | null;
+  last_error: string | null;
+  updated_at: string;
+  stale: boolean;
+}
+
+export interface PlatformRuntimeReadiness {
+  databaseReachable: boolean;
+  workers: WorkerReadinessRow[];
+  pendingWebhooks: number;
+  failedWebhooks: number;
+  oldestPendingWebhookAt: string | null;
+  pendingNotifications: number;
+  failedNotifications: number;
+  oldestPendingNotificationAt: string | null;
+  ready: boolean;
+  blockers: string[];
+}
+
+/** Runtime health based on persisted worker heartbeats and queue backlog. */
+export async function getPlatformRuntimeReadiness(): Promise<PlatformRuntimeReadiness> {
+  const { db } = await requirePlatformAdmin();
+  const now = Date.now();
+  const staleAfterMs = 2 * 60 * 1000;
+
+  const [heartbeats, pendingWebhooks, failedWebhooks, oldestWebhook, pendingNotifications, failedNotifications, oldestNotification] =
+    await Promise.all([
+      db.from("worker_heartbeats" as never).select("*").order("worker_name", { ascending: true }),
+      db.from("webhook_deliveries" as never).select("id", { count: "exact", head: true }).in("status", ["pending", "delivering"] as never),
+      db.from("webhook_deliveries" as never).select("id", { count: "exact", head: true }).in("status", ["failed", "exhausted"] as never),
+      db.from("webhook_deliveries" as never).select("created_at").in("status", ["pending", "delivering"] as never).order("created_at", { ascending: true }).limit(1).maybeSingle(),
+      db.from("operational_notification_queue" as never).select("id", { count: "exact", head: true }).eq("status", "pending"),
+      db.from("operational_notification_queue" as never).select("id", { count: "exact", head: true }).eq("status", "failed"),
+      db.from("operational_notification_queue" as never).select("created_at").eq("status", "pending").order("created_at", { ascending: true }).limit(1).maybeSingle(),
+    ]);
+
+  const errors = [
+    heartbeats.error,
+    pendingWebhooks.error,
+    failedWebhooks.error,
+    oldestWebhook.error,
+    pendingNotifications.error,
+    failedNotifications.error,
+    oldestNotification.error,
+  ].filter(Boolean);
+  if (errors.length) {
+    throw new Error(`Kunde inte läsa driftstatus: ${errors.map((error) => error?.message).join("; ")}`);
+  }
+
+  const workers = ((heartbeats.data as Array<Omit<WorkerReadinessRow, "stale">> | null) ?? []).map((row) => {
+    const lastSuccess = row.last_succeeded_at ? Date.parse(row.last_succeeded_at) : 0;
+    return {
+      ...row,
+      stale: !lastSuccess || now - lastSuccess > staleAfterMs,
+    };
+  });
+
+  const blockers: string[] = [];
+  if (workers.length === 0) blockers.push("Ingen worker-heartbeat har registrerats");
+  for (const worker of workers) {
+    if (worker.status !== "running") blockers.push(`${worker.worker_name} har status ${worker.status}`);
+    if (worker.stale) blockers.push(`${worker.worker_name} har inte lyckats de senaste två minuterna`);
+  }
+  if ((failedWebhooks.count ?? 0) > 0) blockers.push(`${failedWebhooks.count} webhook-leveranser har fallerat`);
+  if ((failedNotifications.count ?? 0) > 0) blockers.push(`${failedNotifications.count} notifieringar har fallerat`);
+
+  const queueStaleAfterMs = 5 * 60 * 1000;
+  const oldestWebhookAt = (oldestWebhook.data as { created_at?: string } | null)?.created_at ?? null;
+  const oldestNotificationAt = (oldestNotification.data as { created_at?: string } | null)?.created_at ?? null;
+  if (oldestWebhookAt && now - Date.parse(oldestWebhookAt) > queueStaleAfterMs) {
+    blockers.push("Minst en webhook har väntat längre än fem minuter");
+  }
+  if (oldestNotificationAt && now - Date.parse(oldestNotificationAt) > queueStaleAfterMs) {
+    blockers.push("Minst en notifiering har väntat längre än fem minuter");
+  }
+
+  return {
+    databaseReachable: true,
+    workers,
+    pendingWebhooks: pendingWebhooks.count ?? 0,
+    failedWebhooks: failedWebhooks.count ?? 0,
+    oldestPendingWebhookAt: oldestWebhookAt,
+    pendingNotifications: pendingNotifications.count ?? 0,
+    failedNotifications: failedNotifications.count ?? 0,
+    oldestPendingNotificationAt: oldestNotificationAt,
+    ready: blockers.length === 0,
+    blockers,
+  };
+}

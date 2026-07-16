@@ -5,7 +5,7 @@ import {
   createIncidentInputSchema,
   requestTowInputSchema,
 } from "@resqly/types";
-import { AppError, notFound, sha256Hex } from "@resqly/utils";
+import { AppError, normalizePhoneE164, notFound, sha256Hex } from "@resqly/utils";
 import { buildIncidentRow, determineRequiresBankid } from "@resqly/insurance";
 import {
   buildSignatureRecord,
@@ -316,12 +316,19 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
     throw new AppError("conflict", "BankID verification is required before requesting a tow");
   }
 
+  const contact = await ctx.repo.getCustomerContact(incident.id);
+  const normalizedPhone = normalizePhoneE164(contact?.phone ?? "");
+  if (!contact || contact.name.trim().length < 2 || !normalizedPhone) {
+    throw new AppError(
+      "conflict",
+      "Customer full name and a valid mobile number are required before dispatch",
+    );
+  }
+
   return withIdempotency(
     ctx,
     `tow.request:${incident.id}`,
     async () => {
-      // Make sure the pickup location is stored on the incident so the
-      // customer share, ETA snapshots and the driver app get real coordinates.
       await ctx.repo.upsertIncidentLocation({
         incident_id: incident.id,
         kind: "pickup",
@@ -330,33 +337,97 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
         address: null,
       });
 
-      const job = await ctx.repo.createTowJob({
-        tenant_id: ctx.tenantId,
-        incident_id: incident.id,
-        status: "created",
-        payer_type: input.payer_type,
-        priority: input.priority,
-      });
-      await enqueueWebhookEvent(ctx, "tow.requested", {
-        incident_id: incident.id,
-        case_number: incident.case_number,
-        tow_job_id: job.id,
-        priority: input.priority,
-        payer_type: input.payer_type,
-      });
+      let job = await ctx.repo.getActiveTowJobForIncident(ctx.tenantId, incident.id);
+      let created = false;
 
-      const outcome = await runDispatchForJob(ctx, {
-        job,
-        pickup: input.pickup,
-        payerType: input.payer_type,
-        priority: input.priority,
-        strategy: input.dispatch_strategy,
-        problemType: incident.problem_type,
-      });
+      if (job && !["created", "matching"].includes(job.status)) {
+        return {
+          status: 200,
+          body: {
+            tow_job_id: job.id,
+            status: job.status,
+            offered_drivers: [],
+            requires_manual_review: job.status === "manual_review",
+            strategy: input.dispatch_strategy ?? null,
+            replay: true,
+          },
+        };
+      }
 
-      const contact = await ctx.repo.getCustomerContact(incident.id);
+      if (!job) {
+        try {
+          job = await ctx.repo.createTowJob({
+            tenant_id: ctx.tenantId,
+            incident_id: incident.id,
+            status: "created",
+            payer_type: input.payer_type,
+            priority: input.priority,
+          });
+          created = true;
+        } catch (error) {
+          // The partial unique index may have been won by a concurrent request.
+          job = await ctx.repo.getActiveTowJobForIncident(ctx.tenantId, incident.id);
+          if (!job) throw error;
+        }
+      }
+
+      if (created) {
+        await enqueueWebhookEvent(ctx, "tow.requested", {
+          incident_id: incident.id,
+          case_number: incident.case_number,
+          tow_job_id: job.id,
+          priority: input.priority,
+          payer_type: input.payer_type,
+        });
+      }
+
+      const claim = await ctx.repo.claimTowDispatch(job.id);
+      if (!claim.claimed) {
+        return {
+          status: 202,
+          body: {
+            tow_job_id: job.id,
+            status: claim.status,
+            dispatch_in_progress: ["created", "matching"].includes(claim.status),
+            replay: true,
+          },
+        };
+      }
+
+      let outcome;
+      try {
+        outcome = await runDispatchForJob(ctx, {
+          job,
+          pickup: input.pickup,
+          payerType: job.payer_type as "insurance_company" | "customer_private",
+          priority: input.priority,
+          strategy: input.dispatch_strategy,
+          problemType: incident.problem_type,
+        });
+        await ctx.repo.recordDispatchAttempt(job.id, null);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const attempt = await ctx.repo.recordDispatchAttempt(job.id, message);
+        if (attempt.status === "manual_review") {
+          return {
+            status: 202,
+            body: {
+              tow_job_id: job.id,
+              status: "manual_review",
+              offered_drivers: [],
+              requires_manual_review: true,
+              strategy: input.dispatch_strategy ?? null,
+            },
+          };
+        }
+        throw new AppError("dependency_unavailable", "Dispatch failed and will be retried", {
+          tow_job_id: job.id,
+          attempts: attempt.attempts,
+        });
+      }
+
       await sendEmail(ctx, {
-        to: contact?.email,
+        to: contact.email,
         subject: `Bärgningsärende ${incident.case_number ?? job.id} är mottaget`,
         html: `<p>Vi har tagit emot ditt bärgningsärende.</p><p>Status: ${escapeHtml(outcome.status)}</p>`,
         incidentId: incident.id,
@@ -365,13 +436,14 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
       });
 
       return {
-        status: 201,
+        status: created ? 201 : 200,
         body: {
           tow_job_id: job.id,
           status: outcome.status,
           offered_drivers: outcome.offeredDrivers,
           requires_manual_review: outcome.requiresManualReview,
           strategy: outcome.strategy,
+          resumed: !created,
         },
       };
     },
@@ -452,70 +524,83 @@ async function handleBankidResult(
   result: BankidCollectResult,
   fromWebhook = false,
 ): Promise<Record<string, unknown>> {
-  await ctx.repo.updateBankidSession(session.id, {
-    status: result.status,
-    hint_code: result.hintCode ?? null,
-    completed_at: result.status === "complete" ? result.completedAt ?? new Date().toISOString() : null,
-    webhook_received_at: fromWebhook ? new Date().toISOString() : undefined,
-    raw_status: result.raw ?? result,
+  if (result.status !== "complete" || !result.completionData) {
+    await ctx.repo.updateBankidSession(session.id, {
+      status: result.status,
+      hint_code: result.hintCode ?? null,
+      webhook_received_at: fromWebhook ? new Date().toISOString() : undefined,
+      raw_status: result.raw ?? result,
+    });
+    return {
+      session_id: session.tic_session_id ?? result.sessionId,
+      status: result.status,
+      hint_code: result.hintCode ?? null,
+      message: result.message ?? null,
+      bankid_verified: false,
+    };
+  }
+
+  const incident = session.incident_id && session.tenant_id
+    ? await ctx.repo.getIncident(session.tenant_id, session.incident_id)
+    : null;
+  const userId = session.user_id ?? incident?.customer_user_id;
+  if (!userId) throw new AppError("internal_error", "BankID session is not linked to a user");
+
+  const signedPayload = signedPayloadForIncident(
+    incident ?? ({ id: session.incident_id, case_number: null } as IncidentRecord),
+    session.purpose,
+  );
+  const signature = buildSignatureRecord({
+    tenantId: session.tenant_id ?? ctx.tenantId,
+    userId,
+    incidentId: session.incident_id,
+    orderRef: result.orderRef,
+    environment: ctx.config.bankid.env,
+    pepper: ctx.config.encryptionKey,
+    signedPayload,
+    completion: result.completionData,
+    ip: ctx.ip,
   });
 
-  if (result.status === "complete" && result.completionData && session.status !== "complete") {
-    const incident = session.incident_id && session.tenant_id
-      ? await ctx.repo.getIncident(session.tenant_id, session.incident_id)
-      : null;
-    const userId = session.user_id ?? incident?.customer_user_id;
-    if (!userId) throw new AppError("internal_error", "BankID session is not linked to a user");
-    const signedPayload = signedPayloadForIncident(
-      incident ?? ({ id: session.incident_id, case_number: null } as IncidentRecord),
-      session.purpose,
-    );
-    const signature = buildSignatureRecord({
-      tenantId: session.tenant_id ?? ctx.tenantId,
-      userId,
-      incidentId: session.incident_id,
-      orderRef: result.orderRef,
-      environment: ctx.config.bankid.env,
-      pepper: ctx.config.encryptionKey,
-      signedPayload,
-      completion: result.completionData,
-      ip: ctx.ip,
-    });
-    const saved = await ctx.repo.recordBankidSignature({
+  const completed = await ctx.repo.completeBankidSession({
+    sessionId: session.id,
+    signature: {
       ...signature,
       tic_session_id: session.tic_session_id ?? result.sessionId,
+    },
+    businessPayload: signedPayload,
+    result: {
+      status: result.status,
+      hintCode: result.hintCode ?? null,
+      completedAt: result.completedAt ?? new Date().toISOString(),
+      sessionId: result.sessionId,
+      orderRef: result.orderRef,
+      raw: result.raw ?? result,
+    },
+    fromWebhook,
+  });
+
+  // Side effects are emitted only by the caller that won the database lock.
+  if (completed.newlyProcessed && incident) {
+    // The incident.bankid_verified webhook outbox row is inserted inside the
+    // complete_bankid_session transaction shared by customer web and API.
+    const contact = await ctx.repo.getCustomerContact(incident.id);
+    await sendEmail(ctx, {
+      to: contact?.email,
+      subject: `BankID klart för ärende ${incident.case_number ?? incident.id}`,
+      html: `<p>Din BankID-verifiering är klar.</p><p>Ärende: ${escapeHtml(incident.case_number ?? incident.id)}</p>`,
+      incidentId: incident.id,
+      dedupeKey: `email:bankid_verified:${incident.id}`,
     });
-    if (session.incident_id) await ctx.repo.setIncidentBankidVerified(session.incident_id);
-    await ctx.repo.recordAudit({
-      tenant_id: session.tenant_id ?? ctx.tenantId,
-      action: "sign",
-      entity_type: "bankid_signature",
-      entity_id: saved.id,
-      fields: ["tic_session_id", "signed_payload_hash"],
-    });
-    await enqueueWebhookEvent(ctx, "incident.bankid_verified", {
-      incident_id: session.incident_id,
-      case_number: incident?.case_number ?? null,
-      session_id: session.tic_session_id ?? result.sessionId,
-    });
-    if (incident) {
-      const contact = await ctx.repo.getCustomerContact(incident.id);
-      await sendEmail(ctx, {
-        to: contact?.email,
-        subject: `BankID klart för ärende ${incident.case_number ?? incident.id}`,
-        html: `<p>Din BankID-verifiering är klar.</p><p>Ärende: ${escapeHtml(incident.case_number ?? incident.id)}</p>`,
-        incidentId: incident.id,
-        dedupeKey: `email:bankid_verified:${incident.id}`,
-      });
-    }
   }
 
   return {
     session_id: session.tic_session_id ?? result.sessionId,
-    status: result.status,
-    hint_code: result.hintCode ?? null,
+    status: "complete",
+    hint_code: null,
     message: result.message ?? null,
-    bankid_verified: result.status === "complete",
+    bankid_verified: true,
+    replay: !completed.newlyProcessed,
   };
 }
 

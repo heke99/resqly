@@ -1,21 +1,53 @@
 import { NextResponse } from "next/server";
+import type { AppSupabaseClient } from "@resqly/database";
 import {
   createSupabaseDispatchStore,
   loadDispatchSettings,
   orchestrateDispatch,
 } from "@resqly/dispatch";
-import { requireCustomer, jsonError, replayIfIdempotent, storeIdempotentResponse } from "../../../_lib";
+import {
+  getCompleteCustomerProfile,
+  requireCustomer,
+  jsonError,
+  replayIfIdempotent,
+  storeIdempotentResponse,
+} from "../../../_lib";
 import { sendCustomerEmail } from "../../../_email";
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function pickLocation(body: Record<string, unknown>, existing: { lat?: number | null; lng?: number | null } | null) {
-  const pickup = body.pickup && typeof body.pickup === "object" ? body.pickup as { lat?: unknown; lng?: unknown } : null;
+function pickLocation(
+  body: Record<string, unknown>,
+  existing: { lat?: number | null; lng?: number | null } | null,
+) {
+  const pickup = body.pickup && typeof body.pickup === "object"
+    ? body.pickup as { lat?: unknown; lng?: unknown }
+    : null;
   const lat = Number(pickup?.lat ?? existing?.lat);
   const lng = Number(pickup?.lng ?? existing?.lng);
   return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+
+async function recordDispatchAttempt(
+  db: AppSupabaseClient,
+  jobId: string,
+  errorMessage: string | null,
+): Promise<{ attempts: number; status: string }> {
+  const { data, error } = await db.rpc("record_tow_dispatch_attempt" as never, {
+    p_job: jobId,
+    p_error: errorMessage,
+  } as never);
+  if (error) throw new Error(error.message);
+  const row = (Array.isArray(data) ? data[0] : data) as {
+    attempts?: number;
+    job_status?: string;
+  } | null;
+  return {
+    attempts: Number(row?.attempts ?? 0),
+    status: row?.job_status ?? "created",
+  };
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -24,7 +56,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { db, user } = session;
   const { id } = await params;
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  const priority = ["normal", "high", "urgent"].includes(String(body.priority)) ? String(body.priority) : "normal";
+  const priority = ["normal", "high", "urgent"].includes(String(body.priority))
+    ? String(body.priority)
+    : "normal";
+
+  const profile = await getCompleteCustomerProfile(db, user.id);
+  if (!profile) {
+    return jsonError(409, "Fyll i fullständigt namn och ett giltigt mobilnummer i din profil innan du begär bärgning.");
+  }
 
   const { data: incident } = await db
     .from("incidents" as never)
@@ -48,35 +87,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return jsonError(409, "BankID-verifiering krävs innan bärgning kan begäras.");
   }
 
-  const { key: idemKey, replay } = await replayIfIdempotent(db, user.id, `tow.request:${inc.id}`, request);
+  const { key: idemKey, replay } = await replayIfIdempotent(
+    db,
+    user.id,
+    `tow.request:${inc.id}`,
+    request,
+  );
   if (replay) return replay;
 
-  const { data: existing } = await db
-    .from("tow_jobs" as never)
-    .select("id, status")
-    .eq("tenant_id", inc.tenant_id)
-    .eq("incident_id", inc.id)
-    .not("status", "in", "(cancelled,failed,closed)" as never)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (existing) {
-    return NextResponse.json({
-      tow_job_id: (existing as { id: string }).id,
-      status: (existing as { status: string }).status,
-    });
-  }
-
-  // Persist a client-supplied pickup so the driver share/ETA get real coords.
-  const bodyPickup = body.pickup && typeof body.pickup === "object" ? (body.pickup as { lat?: unknown; lng?: unknown }) : null;
+  // Persist a client-supplied pickup so the shared dispatch/driver share use
+  // the exact same coordinates across web, mobile and partner API.
+  const bodyPickup = body.pickup && typeof body.pickup === "object"
+    ? body.pickup as { lat?: unknown; lng?: unknown }
+    : null;
   if (Number.isFinite(Number(bodyPickup?.lat)) && Number.isFinite(Number(bodyPickup?.lng))) {
-    await db.from("incident_locations" as never).delete().eq("incident_id", inc.id).eq("kind", "pickup");
-    await db.from("incident_locations" as never).insert({
+    const { error } = await db.from("incident_locations" as never).upsert({
       incident_id: inc.id,
       kind: "pickup",
       lat: Number(bodyPickup!.lat),
       lng: Number(bodyPickup!.lng),
-    } as never);
+      address: stringOrNull(body.address),
+    } as never, { onConflict: "incident_id,kind" } as never);
+    if (error) return jsonError(503, "Upphämtningsplatsen kunde inte sparas. Försök igen.");
   }
 
   const { data: locRow } = await db
@@ -89,130 +121,215 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .maybeSingle();
   const location = pickLocation(body, locRow as { lat?: number | null; lng?: number | null } | null);
 
-  // No usable coordinates (GPS denied and address could not be located):
-  // never dead-end the customer — the case goes to manual help where a
-  // handler confirms the pickup address, instead of failing with an error.
+  const { data: existingRow } = await db
+    .from("tow_jobs" as never)
+    .select("id, status, payer_type, priority")
+    .eq("tenant_id", inc.tenant_id)
+    .eq("incident_id", inc.id)
+    .not("status", "in", "(cancelled,failed,closed)" as never)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  let job = existingRow as {
+    id: string;
+    status: string;
+    payer_type: "insurance_company" | "customer_private";
+    priority: string;
+  } | null;
+
+  if (job && !["created", "matching"].includes(job.status)) {
+    const existingBody = {
+      tow_job_id: job.id,
+      status: job.status,
+      offered_drivers: [],
+      contract_only: job.payer_type === "insurance_company",
+      replay: true,
+    };
+    await storeIdempotentResponse(db, user.id, `tow.request:${inc.id}`, idemKey, job.id, existingBody);
+    return NextResponse.json(existingBody, { status: 200 });
+  }
+
+  const payerType = inc.insurance_company_id ? "insurance_company" : "customer_private";
+  let created = false;
+
   if (!location) {
+    if (!job) {
+      const { data: manualJob, error: manualErr } = await db
+        .from("tow_jobs" as never)
+        .insert({
+          tenant_id: inc.tenant_id,
+          incident_id: inc.id,
+          status: "manual_review",
+          payer_type: payerType,
+          priority,
+        } as never)
+        .select("id, status, payer_type, priority")
+        .single();
+      if (manualErr) return jsonError(503, "Bärgningen kunde inte skickas just nu. Försök igen eller kontakta support.");
+      job = manualJob as typeof job;
+    } else {
+      await db.from("tow_jobs" as never).update({ status: "manual_review" } as never).eq("id", job.id);
+      job.status = "manual_review";
+    }
+
     const manualAddress = stringOrNull(body.address);
-    const { data: manualJob, error: manualErr } = await db
-      .from("tow_jobs" as never)
-      .insert({
-        tenant_id: inc.tenant_id,
-        incident_id: inc.id,
-        status: "manual_review",
-        payer_type: inc.insurance_company_id ? "insurance_company" : "customer_private",
-        priority,
-      } as never)
-      .select("id")
-      .single();
-    if (manualErr) return jsonError(503, "Bärgningen kunde inte skickas just nu. Försök igen eller kontakta support.");
-    const manualJobId = (manualJob as { id: string }).id;
     await db.from("tow_job_status_events" as never).insert({
-      tow_job_id: manualJobId,
+      tow_job_id: job!.id,
       from_status: null,
       to_status: "manual_review",
       actor_user_id: user.id,
       reason: "upphämtningsplats saknas; adress behöver bekräftas av handläggare",
     } as never);
-    await db.from("manual_reviews" as never).insert({
-      tenant_id: inc.tenant_id,
-      incident_id: inc.id,
-      tow_job_id: manualJobId,
-      reason: manualAddress
-        ? `Kunden angav adressen "${manualAddress}" men platsen kunde inte fastställas automatiskt.`
-        : "Kunden kunde inte dela sin position. Upphämtningsplats behöver bekräftas.",
-      status: "open",
-    } as never);
-    const manualBody = { tow_job_id: manualJobId, status: "manual_review", offered_drivers: [] };
-    await storeIdempotentResponse(db, user.id, `tow.request:${inc.id}`, idemKey, manualJobId, manualBody);
+    const { data: existingReview } = await db
+      .from("manual_reviews" as never)
+      .select("id")
+      .eq("tow_job_id", job!.id)
+      .in("status", ["open", "in_progress"])
+      .limit(1)
+      .maybeSingle();
+    if (!existingReview) {
+      const { error: reviewError } = await db.from("manual_reviews" as never).insert({
+        tenant_id: inc.tenant_id,
+        incident_id: inc.id,
+        tow_job_id: job!.id,
+        reason: manualAddress
+          ? `Kunden angav adressen "${manualAddress}" men platsen kunde inte fastställas automatiskt.`
+          : "Kunden kunde inte dela sin position. Upphämtningsplats behöver bekräftas.",
+        status: "open",
+      } as never);
+      if (reviewError && (reviewError as { code?: string }).code !== "23505") {
+        return jsonError(503, "Ärendet kunde inte skickas till manuell hantering.");
+      }
+    }
+
+    const manualBody = { tow_job_id: job!.id, status: "manual_review", offered_drivers: [] };
+    await storeIdempotentResponse(db, user.id, `tow.request:${inc.id}`, idemKey, job!.id, manualBody);
     return NextResponse.json(manualBody, { status: 201 });
   }
 
-  const payerType = inc.insurance_company_id ? "insurance_company" : "customer_private";
-
-  const { data: job, error: jobError } = await db
-    .from("tow_jobs" as never)
-    .insert({
-      tenant_id: inc.tenant_id,
-      incident_id: inc.id,
-      status: "created",
-      payer_type: payerType,
-      priority,
-    } as never)
-    .select("id, status")
-    .single();
-  if (jobError) {
-    // Unique live-job constraint: a concurrent duplicate request already
-    // created the job — return it instead of failing.
-    const { data: concurrent } = await db
+  if (!job) {
+    const { data: inserted, error: jobError } = await db
       .from("tow_jobs" as never)
-      .select("id, status")
-      .eq("incident_id", inc.id)
-      .not("status", "in", "(cancelled,failed,closed)" as never)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (concurrent) {
-      return NextResponse.json({
-        tow_job_id: (concurrent as { id: string }).id,
-        status: (concurrent as { status: string }).status,
-      });
-    }
-    return jsonError(503, "Bärgningen kunde inte skickas just nu. Försök igen om en stund.");
-  }
-  const jobId = (job as { id: string }).id;
+      .insert({
+        tenant_id: inc.tenant_id,
+        incident_id: inc.id,
+        status: "created",
+        payer_type: payerType,
+        priority,
+      } as never)
+      .select("id, status, payer_type, priority")
+      .single();
 
-  // All dispatch logic (eligibility, waves, offers, pushes, audit, manual
-  // review escalation) lives in the shared orchestrator — identical to the
-  // partner API's dispatch path.
-  const settings = await loadDispatchSettings(db, inc.tenant_id);
+    if (jobError) {
+      const { data: concurrent } = await db
+        .from("tow_jobs" as never)
+        .select("id, status, payer_type, priority")
+        .eq("tenant_id", inc.tenant_id)
+        .eq("incident_id", inc.id)
+        .not("status", "in", "(cancelled,failed,closed)" as never)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      job = concurrent as typeof job;
+      if (!job) return jsonError(503, "Bärgningen kunde inte skickas just nu. Försök igen om en stund.");
+      if (!["created", "matching"].includes(job.status)) {
+        return NextResponse.json({ tow_job_id: job.id, status: job.status }, { status: 200 });
+      }
+    } else {
+      job = inserted as typeof job;
+      created = true;
+    }
+  }
+
+  const { data: claimData, error: claimError } = await db.rpc("claim_tow_dispatch_job" as never, {
+    p_job: job!.id,
+    p_lease_seconds: 300,
+  } as never);
+  if (claimError) return jsonError(503, "Dispatch kunde inte låsas. Försök igen om en stund.");
+  const claimRow = (Array.isArray(claimData) ? claimData[0] : claimData) as {
+    claimed?: boolean;
+    job_status?: string;
+  } | null;
+  if (!claimRow?.claimed) {
+    const currentStatus = claimRow?.job_status ?? job!.status;
+    return NextResponse.json({
+      tow_job_id: job!.id,
+      status: currentStatus,
+      dispatch_in_progress: ["created", "matching"].includes(currentStatus),
+      replay: true,
+    }, { status: 202 });
+  }
+
   let outcome;
   try {
+    const settings = await loadDispatchSettings(db, inc.tenant_id);
     outcome = await orchestrateDispatch(
       createSupabaseDispatchStore(db),
       {
         tenantId: inc.tenant_id,
-        job: { id: jobId, incident_id: inc.id, status: "created" },
+        job: { id: job!.id, incident_id: inc.id, status: job!.status },
         pickup: location,
-        payerType,
+        payerType: job!.payer_type,
         priority: priority as "normal" | "high" | "urgent",
         problemType: inc.problem_type,
         caseNumber: inc.case_number,
         actorUserId: user.id,
         settings,
       },
-      {
-        push: { enabled: process.env.EXPO_PUSH_ENABLED !== "false" },
-      },
+      { push: { enabled: process.env.EXPO_PUSH_ENABLED !== "false" } },
     );
-  } catch {
-    return jsonError(503, "Bärgningen kunde inte skickas just nu. Försök igen om en stund.");
+    await recordDispatchAttempt(db, job!.id, null);
+  } catch (error) {
+    let attempt: { attempts: number; status: string };
+    try {
+      attempt = await recordDispatchAttempt(
+        db,
+        job!.id,
+        error instanceof Error ? error.message : String(error),
+      );
+    } catch {
+      return jsonError(503, "Dispatch misslyckades och driftlarmet kunde inte registreras. Kontakta support och försök inte skapa ett nytt ärende.");
+    }
+    if (attempt.status === "manual_review") {
+      const manualBody = {
+        tow_job_id: job!.id,
+        status: "manual_review",
+        offered_drivers: [],
+        requires_manual_review: true,
+      };
+      await storeIdempotentResponse(db, user.id, `tow.request:${inc.id}`, idemKey, job!.id, manualBody);
+      return NextResponse.json(manualBody, { status: 202 });
+    }
+    return jsonError(503, `Bärgningen kunde inte skickas just nu. Försök igen. Försök ${attempt.attempts}/3.`);
   }
 
   if (outcome.status === "offered") {
-    await db.from("incidents" as never).update({ status: "submitted" } as never).eq("id", inc.id).eq("customer_user_id", user.id);
+    await db.from("incidents" as never)
+      .update({ status: "submitted" } as never)
+      .eq("id", inc.id)
+      .eq("customer_user_id", user.id);
   }
 
   await sendCustomerEmail(db, {
     tenantId: inc.tenant_id,
-    to: user.email,
+    to: profile.email ?? user.email,
     subject: `Bärgning begärd för ärende ${inc.case_number ?? ""}`.trim(),
-    html:
-      outcome.status === "offered"
-        ? `<p>Vi söker nu en bärgare åt dig. Du får besked så snart någon accepterar uppdraget.</p>`
-        : `<p>Din förfrågan hanteras manuellt av en handläggare. Vi hör av oss så snart som möjligt.</p>`,
+    html: outcome.status === "offered"
+      ? "<p>Vi söker nu en bärgare åt dig. Du får besked så snart någon accepterar uppdraget.</p>"
+      : "<p>Din förfrågan hanteras manuellt av en handläggare. Vi hör av oss så snart som möjligt.</p>",
     incidentId: inc.id,
-    towJobId: jobId,
-    dedupeKey: `email:tow_requested:${jobId}`,
+    towJobId: job!.id,
+    dedupeKey: `email:tow_requested:${job!.id}`,
   });
 
   const okBody = {
-    tow_job_id: jobId,
+    tow_job_id: job!.id,
     status: outcome.status,
     offered_drivers: outcome.offeredDrivers,
     offered_tow_vehicles: outcome.offeredTowVehicles,
-    contract_only: payerType === "insurance_company",
+    contract_only: job!.payer_type === "insurance_company",
+    resumed: !created,
   };
-  await storeIdempotentResponse(db, user.id, `tow.request:${inc.id}`, idemKey, jobId, okBody);
-  return NextResponse.json(okBody, { status: 201 });
+  await storeIdempotentResponse(db, user.id, `tow.request:${inc.id}`, idemKey, job!.id, okBody);
+  return NextResponse.json(okBody, { status: created ? 201 : 200 });
 }

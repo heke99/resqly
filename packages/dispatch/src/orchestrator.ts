@@ -133,21 +133,25 @@ export async function orchestrateDispatch(
   const { job, pickup, payerType } = input;
   const isInsurance = payerType === "insurance_company";
 
-  await store.setJobStatus(job.id, "matching");
-  await store.addJobStatusEvent({
-    tow_job_id: job.id,
-    from_status: job.status ?? null,
-    to_status: "matching",
-    actor_user_id: input.actorUserId ?? null,
-    reason: isInsurance
-      ? "kunden begärde bärgning; avtalade bärgare matchas"
-      : "kunden begärde fri bärgning; marketplace matchas närmast först",
-  });
-  await hooks.onEvent?.("tow.dispatch_started", {
-    tow_job_id: job.id,
-    incident_id: job.incident_id,
-    pickup,
-  });
+  // A failed request may resume an already-created/matching job. Do not emit
+  // duplicate matching events when the same job is safely retried.
+  if (job.status !== "matching") {
+    await store.setJobStatus(job.id, "matching");
+    await store.addJobStatusEvent({
+      tow_job_id: job.id,
+      from_status: job.status ?? null,
+      to_status: "matching",
+      actor_user_id: input.actorUserId ?? null,
+      reason: isInsurance
+        ? "kunden begärde bärgning; avtalade bärgare matchas"
+        : "kunden begärde fri bärgning; marketplace matchas närmast först",
+    });
+    await hooks.onEvent?.("tow.dispatch_started", {
+      tow_job_id: job.id,
+      incident_id: job.incident_id,
+      pickup,
+    });
+  }
 
   const candidateLimit = isInsurance
     ? settings.max_insurance_broadcast_candidates

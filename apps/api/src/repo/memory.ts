@@ -48,6 +48,7 @@ const DEFAULT_SETTINGS: TenantSettingsRecord = {
 
 /** In-memory implementation used by tests. Mirrors the Supabase repo behaviour. */
 export class MemoryRepo implements ApiRepo {
+  private readonly dispatchClaims = new Set<string>();
   apiClients = new Map<string, ApiClientRecord>(); // keyed by key hash
   tenants = new Map<string, TenantRecord>();
   settings = new Map<string, TenantSettingsRecord>();
@@ -66,6 +67,8 @@ export class MemoryRepo implements ApiRepo {
   incidentLocations: Array<{ incident_id: string; kind: string; lat: number; lng: number; address: string | null }> = [];
   idempotencyRecords: Array<{ scope: string; action: string; key: string; resource_id: string | null; response: unknown }> = [];
   bankidSessions = new Map<string, BankidSessionRecord>();
+  bankidSignatures: Array<Record<string, unknown>> = [];
+  completedBankidSessions = new Set<string>();
   notificationDeliveries: Array<Record<string, unknown>> = [];
   webhookDeliveries: Array<Record<string, unknown>> = [];
   usageEvents: Array<Record<string, unknown>> = [];
@@ -133,7 +136,9 @@ export class MemoryRepo implements ApiRepo {
     tow_job_id: string;
     reason: string;
   }) {
-    this.manualReviews.push({ ...row, status: "open" });
+    if (!this.manualReviews.some((item) => item.tow_job_id === row.tow_job_id && item.status === "open")) {
+      this.manualReviews.push({ ...row, status: "open" });
+    }
   }
 
   priceLists = new Map<string, PriceListRecord>(); // keyed by tow company id
@@ -148,10 +153,19 @@ export class MemoryRepo implements ApiRepo {
   }
   towEvidenceObjects: Array<{ path: string; contentType: string; size: number }> = [];
   towJobEvidence: Array<Record<string, unknown>> = [];
-  async uploadTowEvidenceObject(path: string, bytes: Uint8Array, contentType: string): Promise<void> {
-    this.towEvidenceObjects.push({ path, contentType, size: bytes.length });
+  signedEvidenceUploads = new Map<string, string>();
+  async createTowEvidenceUpload(path: string): Promise<{ path: string; token: string }> {
+    const token = newId();
+    this.signedEvidenceUploads.set(path, token);
+    return { path, token };
+  }
+  async getTowEvidenceObject(path: string): Promise<{ size: number | null; contentType: string | null } | null> {
+    const file = this.towEvidenceObjects.find((entry) => entry.path === path);
+    return file ? { size: file.size, contentType: file.contentType } : null;
   }
   async createTowJobEvidence(row: Record<string, unknown>): Promise<{ id: string }> {
+    const existing = this.towJobEvidence.find((entry) => entry.storage_path === row.storage_path);
+    if (existing) return { id: String(existing.id) };
     const id = newId();
     this.towJobEvidence.push({ id, ...row });
     return { id };
@@ -256,8 +270,38 @@ export class MemoryRepo implements ApiRepo {
     return this.bankidSessions.get(sessionId) ?? null;
   }
   async recordBankidSignature(row: Record<string, unknown>) {
-    void row;
-    return { id: newId() };
+    const existing = this.bankidSignatures.find((entry) => entry.order_ref === row.order_ref);
+    if (existing) return { id: String(existing.id) };
+    const id = newId();
+    this.bankidSignatures.push({ id, ...row });
+    return { id };
+  }
+  async completeBankidSession(input: {
+    sessionId: string;
+    signature: Record<string, unknown>;
+    businessPayload: Record<string, unknown>;
+    result: Record<string, unknown>;
+    fromWebhook: boolean;
+  }) {
+    const session = this.bankidSessions.get(input.sessionId)
+      ?? [...this.bankidSessions.values()].find((row) => row.tic_session_id === input.sessionId);
+    if (!session) throw new Error("bankid_session_not_found");
+    const already = this.completedBankidSessions.has(session.id);
+    const saved = await this.recordBankidSignature(input.signature);
+    const vehiclePolicyId = typeof input.businessPayload.vehicle_policy_id === "string"
+      ? input.businessPayload.vehicle_policy_id
+      : null;
+    if (!already) {
+      this.completedBankidSessions.add(session.id);
+      session.status = "complete";
+      if (session.incident_id) await this.setIncidentBankidVerified(session.incident_id);
+    }
+    return {
+      newlyProcessed: !already,
+      signatureId: saved.id,
+      flow: session.incident_id ? "incident" as const : "vehicle_policy" as const,
+      relatedId: session.incident_id ?? vehiclePolicyId,
+    };
   }
   async getCustomerContact(incidentId: string) {
     return this.contacts.get(incidentId) ?? null;
@@ -273,6 +317,31 @@ export class MemoryRepo implements ApiRepo {
   }
   async getTowJobById(id: string) {
     return this.towJobs.get(id) ?? null;
+  }
+  async getActiveTowJobForIncident(tenantId: string, incidentId: string) {
+    return [...this.towJobs.values()].find((job) =>
+      job.tenant_id === tenantId && job.incident_id === incidentId && !["cancelled", "failed", "closed"].includes(job.status),
+    ) ?? null;
+  }
+  async claimTowDispatch(jobId: string): Promise<{ claimed: boolean; status: string }> {
+    const job = this.towJobs.get(jobId);
+    if (!job) throw new Error("tow_job_not_found");
+    if (job.driver_id || !["created", "matching"].includes(job.status) || this.dispatchClaims.has(jobId)) {
+      return { claimed: false, status: job.status };
+    }
+    this.dispatchClaims.add(jobId);
+    return { claimed: true, status: job.status };
+  }
+  async recordDispatchAttempt(jobId: string, error: string | null): Promise<{ attempts: number; status: string }> {
+    this.dispatchClaims.delete(jobId);
+    const job = this.towJobs.get(jobId) as (TowJobRecord & { dispatch_attempts?: number; last_dispatch_error?: string | null }) | undefined;
+    if (!job) return { attempts: 0, status: "created" };
+    job.dispatch_attempts = (job.dispatch_attempts ?? 0) + 1;
+    job.last_dispatch_error = error;
+    if (error && job.dispatch_attempts >= 3 && ["created", "matching", "offered"].includes(job.status)) {
+      job.status = "manual_review";
+    }
+    return { attempts: job.dispatch_attempts, status: job.status };
   }
   async listTowJobs(tenantId: string, opts: { status?: string; limit: number }) {
     return [...this.towJobs.values()]
@@ -295,6 +364,7 @@ export class MemoryRepo implements ApiRepo {
   }
   async createOffers(rows: Array<Record<string, unknown>>) {
     for (const r of rows) {
+      if (this.offers.some((offer) => offer.tow_job_id === r.tow_job_id && offer.driver_id === r.driver_id)) continue;
       this.offers.push({
         id: newId(),
         tow_job_id: r.tow_job_id as string,
@@ -460,7 +530,23 @@ export class MemoryRepo implements ApiRepo {
     return this.candidates;
   }
   async createCustomerShare(row: Record<string, unknown>) {
-    this.customerShares.push(row);
+    await this.ensureCustomerShare(row);
+  }
+  async ensureCustomerShare(row: Record<string, unknown>): Promise<{ id: string }> {
+    const jobId = String(row.tow_job_id);
+    const driverId = String(row.driver_id);
+    const existing = this.customerShares.find((share) => share.tow_job_id === jobId && share.driver_id === driverId);
+    if (existing) {
+      Object.assign(existing, row);
+      return { id: String(existing.id) };
+    }
+    const id = newId();
+    this.customerShares.push({ id, ...row });
+    return { id };
+  }
+  async getCustomerShare(jobId: string, driverId: string): Promise<{ id: string } | null> {
+    const existing = this.customerShares.find((share) => share.tow_job_id === jobId && share.driver_id === driverId);
+    return existing ? { id: String(existing.id) } : null;
   }
   async addEtaSnapshot(row: Record<string, unknown>) {
     this.etaSnapshots.push({
@@ -477,6 +563,24 @@ export class MemoryRepo implements ApiRepo {
   }
   async createInvoice(row: Record<string, unknown>) {
     this.invoices.push(row);
+  }
+  async finalizeTowJob(
+    jobId: string,
+    driverId: string,
+    report: Record<string, unknown>,
+    invoice: Record<string, unknown>,
+  ): Promise<{ status: string; total_minor: number; already_finalized: boolean }> {
+    const job = this.towJobs.get(jobId);
+    if (!job || job.driver_id !== driverId) throw new Error("forbidden");
+    const alreadyFinalized = job.status === "invoiced";
+    const reportIndex = this.completionReports.findIndex((row) => row.tow_job_id === jobId);
+    if (reportIndex >= 0) this.completionReports[reportIndex] = report;
+    else this.completionReports.push(report);
+    const invoiceIndex = this.invoices.findIndex((row) => row.tow_job_id === jobId);
+    if (invoiceIndex >= 0) this.invoices[invoiceIndex] = invoice;
+    else this.invoices.push(invoice);
+    job.status = "invoiced";
+    return { status: "invoiced", total_minor: Number(invoice.total_minor ?? 0), already_finalized: alreadyFinalized };
   }
   async getDriverIdForUser(userId: string) {
     return this.driverUsers.get(userId) ?? null;

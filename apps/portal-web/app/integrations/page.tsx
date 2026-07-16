@@ -1,7 +1,7 @@
 import { Button, Card, DataTable, PageHeader, type Column } from "@resqly/web-kit";
 import { getActiveTenant } from "../lib/tenant";
 import { listApiClients, listWebhooks } from "../lib/data";
-import { createApiKey, createWebhook } from "../lib/actions";
+import { consumeIntegrationReveal, createApiKey, createWebhook } from "../lib/actions";
 import { NoTenant } from "../lib/ui";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +26,10 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   if (!tenant) return <NoTenant />;
   const clients = await listApiClients(tenant.id);
   const webhooks = await listWebhooks(tenant.id);
-  const newKey = typeof sp.new_key === "string" ? sp.new_key : null;
+  const revealToken = typeof sp.reveal === "string" ? sp.reveal : null;
+  const reveal = revealToken ? await consumeIntegrationReveal(tenant.id, revealToken) : null;
+  const newKey = reveal?.kind === "api_key" ? reveal.secret : null;
+  const webhookSecret = reveal?.kind === "webhook_secret" ? reveal.secret : null;
 
   return (
     <div>
@@ -36,6 +39,13 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
           <h3 style={{ marginTop: 0 }}>Kopiera åtkomstnyckeln nu</h3>
           <p style={{ opacity: 0.72 }}>Nyckeln visas bara en gång. Spara den säkert — den kan inte visas igen.</p>
           <code style={{ display: "block", overflowWrap: "anywhere", padding: 12, background: "rgba(0,0,0,0.06)", borderRadius: 8 }}>{newKey}</code>
+        </Card>
+      ) : null}
+      {webhookSecret ? (
+        <Card style={{ border: "2px solid var(--rs-color-success)", marginBottom: 24 }}>
+          <h3 style={{ marginTop: 0 }}>Kopiera signeringshemligheten nu</h3>
+          <p style={{ opacity: 0.72 }}>Hemligheten visas bara en gång och används för att verifiera x-resqly-signature.</p>
+          <code style={{ display: "block", overflowWrap: "anywhere", padding: 12, background: "rgba(0,0,0,0.06)", borderRadius: 8 }}>{webhookSecret}</code>
         </Card>
       ) : null}
 

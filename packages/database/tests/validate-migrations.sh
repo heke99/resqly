@@ -75,6 +75,41 @@ begin
   if position('already_accepted_by_driver' in src) = 0 then raise exception 'accept_tow_offer missing idempotent re-accept'; end if;
 end $$;
 
+-- Launch-safety RPCs are service-only and exact-once constraints exist.
+do $$
+begin
+  if has_function_privilege('authenticated', 'public.complete_bankid_session(uuid,jsonb,jsonb,jsonb,boolean)', 'EXECUTE') then
+    raise exception 'authenticated can complete BankID sessions';
+  end if;
+  if not has_function_privilege('service_role', 'public.complete_bankid_session(uuid,jsonb,jsonb,jsonb,boolean)', 'EXECUTE') then
+    raise exception 'service_role cannot complete BankID sessions';
+  end if;
+  if has_function_privilege('authenticated', 'public.finalize_tow_job(uuid,uuid,jsonb,jsonb)', 'EXECUTE') then
+    raise exception 'authenticated can finalize tow jobs directly';
+  end if;
+  if has_function_privilege('authenticated', 'public.claim_tow_dispatch_job(uuid,integer)', 'EXECUTE') then
+    raise exception 'authenticated can claim tow dispatch directly';
+  end if;
+  if not has_function_privilege('service_role', 'public.claim_tow_dispatch_job(uuid,integer)', 'EXECUTE') then
+    raise exception 'service_role cannot claim tow dispatch';
+  end if;
+  if not has_function_privilege('service_role', 'public.finalize_tow_job(uuid,uuid,jsonb,jsonb)', 'EXECUTE') then
+    raise exception 'service_role cannot finalize tow jobs';
+  end if;
+  if exists (
+    select 1 from public.role_permissions
+    where role_key = 'tow_owner_admin' and permission_key = 'agreements.manage'
+  ) then
+    raise exception 'tow_owner_admin can still approve agreements';
+  end if;
+  if not exists (select 1 from pg_indexes where schemaname='public' and indexname='uq_tow_job_offers_job_driver') then
+    raise exception 'offer uniqueness index missing';
+  end if;
+  if not exists (select 1 from pg_indexes where schemaname='public' and indexname='uq_bankid_signatures_order_ref') then
+    raise exception 'BankID signature uniqueness index missing';
+  end if;
+end $$;
+
 select 'migration chain OK' as result;
 SQL
 

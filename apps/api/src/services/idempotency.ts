@@ -13,7 +13,8 @@ export function idempotencyScope(ctx: ApiContext): string {
  * If the caller supplied an Idempotency-Key header and a previous request with
  * the same scope + action + key succeeded, replay the stored response instead
  * of re-executing (prevents duplicate cases/tow requests from double clicks
- * and mobile retries). Only 2xx responses are stored.
+ * and mobile retries). Only stable 2xx responses are stored; transient 202
+ * responses must be re-executed so an in-progress dispatch can later finish.
  */
 export async function withIdempotency(
   ctx: ApiContext,
@@ -35,7 +36,7 @@ export async function withIdempotency(
   }
 
   const result = await handler();
-  if (result.status >= 200 && result.status < 300) {
+  if (result.status >= 200 && result.status < 300 && result.status !== 202) {
     await ctx.repo
       .storeIdempotentResponse(scope, action, key, getResourceId?.(result) ?? null, result.body ?? null)
       .catch(() => undefined);

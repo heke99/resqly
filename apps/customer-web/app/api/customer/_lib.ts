@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServiceClient } from "@resqly/web-kit/server";
 import type { AppSupabaseClient } from "@resqly/database";
+import { normalizePhoneE164 } from "@resqly/utils";
 
 type AuthUser = { id: string; email?: string | null; user_metadata?: Record<string, unknown> };
 
@@ -18,9 +19,29 @@ export async function requireCustomer(request: Request): Promise<{ db: AppSupaba
   if (error || !data.user) return jsonError(401, "Din session har gått ut. Logga in igen.");
   const user = data.user as AuthUser;
   const email = user.email ?? null;
-  const fullName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
-  await db.from("user_profiles" as never).upsert({ id: user.id, email, full_name: fullName } as never);
+  const authName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name.trim() : "";
+  const authPhone = typeof user.user_metadata?.phone === "string" ? normalizePhoneE164(user.user_metadata.phone) : null;
+  const patch: Record<string, unknown> = { id: user.id, email };
+  // Never replace already-complete profile values with null metadata from an
+  // older account. Metadata only fills values when it is actually present.
+  if (authName) patch.full_name = authName;
+  if (authPhone) patch.phone = authPhone;
+  await db.from("user_profiles" as never).upsert(patch as never);
   return { db, user };
+}
+
+export async function getCompleteCustomerProfile(db: AppSupabaseClient, userId: string) {
+  const { data } = await db
+    .from("user_profiles" as never)
+    .select("full_name, phone, email")
+    .eq("id", userId)
+    .maybeSingle();
+  const row = data as { full_name?: string | null; phone?: string | null; email?: string | null } | null;
+  const fullName = row?.full_name?.trim() ?? "";
+  const phone = row?.phone ? normalizePhoneE164(row.phone) : null;
+  return fullName.length >= 2 && phone
+    ? { fullName, phone, email: row?.email ?? null }
+    : null;
 }
 
 export function normalizeReg(reg: string): string {

@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@resqly/database": "workspace:*",
+    "@resqly/dispatch": "workspace:*",
     "@resqly/maps": "workspace:*",
     "@resqly/notifications": "workspace:*",
     "@resqly/types": "workspace:*",

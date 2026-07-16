@@ -4,6 +4,7 @@ import { evaluateOfferExpiry, type OfferRow } from "./jobs/offer-expiry";
 import { selectOfferFallbackActions, selectOfferPushRetries, type OfferPushRow } from "./jobs/offer-push";
 import { jobsNeedingEtaRefresh } from "./jobs/eta-refresh";
 import { renderOperationalMessage, type OperationalNotificationRow } from "./jobs/notification-queue-db";
+import { assertPublicWebhookTarget, isPrivateIpAddress } from "./jobs/webhook-db-delivery";
 
 describe("webhook delivery", () => {
   it("marks succeeded on a successful send", async () => {
@@ -156,5 +157,30 @@ describe("eta refresh", () => {
     expect(due).toContain("j4");
     expect(due).not.toContain("j2");
     expect(due).not.toContain("j3");
+  });
+});
+
+
+describe("webhook SSRF protection", () => {
+  it("blocks private and metadata addresses", () => {
+    expect(isPrivateIpAddress("127.0.0.1")).toBe(true);
+    expect(isPrivateIpAddress("169.254.169.254")).toBe(true);
+    expect(isPrivateIpAddress("10.0.0.1")).toBe(true);
+    expect(isPrivateIpAddress("::1")).toBe(true);
+    expect(isPrivateIpAddress("8.8.8.8")).toBe(false);
+  });
+
+  it("rejects a public hostname that resolves internally", async () => {
+    await expect(assertPublicWebhookTarget(
+      "https://hooks.example.com/receive",
+      async () => [{ address: "127.0.0.1", family: 4 }],
+    )).rejects.toThrow(/private or reserved/);
+  });
+
+  it("allows HTTPS targets resolving to public addresses", async () => {
+    await expect(assertPublicWebhookTarget(
+      "https://hooks.example.com/receive",
+      async () => [{ address: "8.8.8.8", family: 4 }],
+    )).resolves.toBeInstanceOf(URL);
   });
 });

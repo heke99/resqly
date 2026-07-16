@@ -71,8 +71,11 @@ export class App {
     r.post("/api/v1/tow/jobs/:id/complete", (ctx, a) =>
       tow.completeTowJob(ctx, a.params.id!, a.body),
     );
-    r.post("/api/v1/tow/jobs/:id/evidence", (ctx, a) =>
-      tow.uploadTowJobEvidence(ctx, a.params.id!, a.body),
+    r.post("/api/v1/tow/jobs/:id/evidence/upload", (ctx, a) =>
+      tow.createTowJobEvidenceUpload(ctx, a.params.id!, a.body),
+    );
+    r.post("/api/v1/tow/jobs/:id/evidence/complete", (ctx, a) =>
+      tow.completeTowJobEvidenceUpload(ctx, a.params.id!, a.body),
     );
     r.get("/api/v1/tow/jobs/:id/eta", (ctx, a) => tow.getTowJobEta(ctx, a.params.id!));
 
@@ -183,7 +186,7 @@ export class App {
     const allowsUserToken =
       url.pathname === "/api/v1/me/role-context" ||
       url.pathname.startsWith("/api/v1/drivers/") ||
-      /^\/api\/v1\/tow\/jobs\/[^/]+(\/(accept|reject|status|location|complete|eta|evidence))?$/.test(url.pathname);
+      /^\/api\/v1\/tow\/jobs\/[^/]+(\/(accept|reject|status|location|complete|eta|evidence)(\/(upload|complete))?)?$/.test(url.pathname);
     if (allowsUserToken && userTokenFromAuth && this.config.driverAuth) {
       const userId = await this.config.driverAuth.getUserIdFromAccessToken(userTokenFromAuth);
       if (userId) {

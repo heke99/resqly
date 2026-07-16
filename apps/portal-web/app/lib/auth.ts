@@ -41,8 +41,10 @@ async function session(): Promise<PortalSession> {
 
   const user = data.user as AuthUser;
   const email = user.email ?? null;
-  const fullName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
-  await db.from("user_profiles" as never).upsert({ id: user.id, email, full_name: fullName } as never);
+  const metadataName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name.trim() : "";
+  const profilePatch: Record<string, unknown> = { id: user.id, email };
+  if (metadataName) profilePatch.full_name = metadataName;
+  await db.from("user_profiles" as never).upsert(profilePatch as never);
   return { db, user };
 }
 
@@ -79,7 +81,10 @@ export async function requirePortalTenant(tenantId?: string | null): Promise<{ d
     (tenantId ? tenants.find((t) => t.id === tenantId) : undefined) ??
     (cookieTenant ? tenants.find((t) => t.id === cookieTenant) : undefined) ??
     tenants[0];
-  if (!tenant) redirect("/login?error=no_tenant_access");
+  if (!tenant) {
+    redirect("/login?error=no_tenant_access");
+    throw new Error("Ingen organisationstillgång hittades.");
+  }
   return { db, userId, tenant };
 }
 

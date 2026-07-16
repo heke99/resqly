@@ -18,10 +18,12 @@ import { DEFAULT_DISPATCH_SETTINGS } from "./orchestrator";
 export function createSupabaseDispatchStore(db: AppSupabaseClient): DispatchStore {
   return {
     async setJobStatus(jobId, status) {
-      await db.from("tow_jobs" as never).update({ status } as never).eq("id", jobId);
+      const { error } = await db.from("tow_jobs" as never).update({ status } as never).eq("id", jobId);
+      if (error) throw new Error(error.message);
     },
     async addJobStatusEvent(event: JobStatusEventRow) {
-      await db.from("tow_job_status_events" as never).insert(event as never);
+      const { error } = await db.from("tow_job_status_events" as never).insert(event as never);
+      if (error) throw new Error(error.message);
     },
     async getCandidates(pickup: Coordinate, radiusKm: number, limit: number, query: DispatchCandidateQuery) {
       const { data, error } = await db.rpc("dispatch_eligible_candidates" as never, {
@@ -79,31 +81,53 @@ export function createSupabaseDispatchStore(db: AppSupabaseClient): DispatchStor
         }));
     },
     async createOffers(rows: OfferInsertRow[]) {
-      const { error } = await db.from("tow_job_offers" as never).insert(rows as never);
+      const { error } = await db.from("tow_job_offers" as never).upsert(rows as never, {
+        onConflict: "tow_job_id,driver_id",
+        ignoreDuplicates: true,
+      } as never);
       if (error) throw new Error(error.message);
     },
     async listDriverPushTokens(driverId) {
-      const { data } = await db
+      const { data, error } = await db
         .from("driver_devices" as never)
         .select("expo_push_token")
         .eq("driver_id", driverId);
+      if (error) throw new Error(error.message);
       return ((data as Array<{ expo_push_token: string }> | null) ?? []).map((d) => d.expo_push_token);
     },
     async markOfferPush(jobId, driverId, status, error) {
       const patch: Record<string, unknown> = { push_status: status };
       if (status === "sent") patch.push_sent_at = new Date().toISOString();
       if (error) patch.push_error = error;
-      await db
+      const { error: updateError } = await db
         .from("tow_job_offers" as never)
         .update(patch as never)
         .eq("tow_job_id", jobId)
         .eq("driver_id", driverId);
+      if (updateError) throw new Error(updateError.message);
     },
     async createManualReview(row) {
-      await db.from("manual_reviews" as never).insert({ ...row, status: "open" } as never);
+      const { data: existing, error: lookupError } = await db
+        .from("manual_reviews" as never)
+        .select("id")
+        .eq("incident_id", row.incident_id)
+        .eq("reason", row.reason)
+        .in("status", ["open", "in_progress"] as never)
+        .limit(1)
+        .maybeSingle();
+      if (lookupError) throw new Error(lookupError.message);
+      if (existing) return;
+
+      const { error } = await db
+        .from("manual_reviews" as never)
+        .insert({ ...row, status: "open" } as never);
+      // Concurrent dispatch retries can race after the lookup. The partial
+      // unique index in 0026 makes one insert win; the other is already safe.
+      if (error && error.code !== "23505") throw new Error(error.message);
     },
     async recordAudit(row) {
-      await db.from("audit_logs" as never).insert(row as never);
+      const { error } = await db.from("audit_logs" as never).insert(row as never);
+      if (error) throw new Error(error.message);
     },
   };
 }

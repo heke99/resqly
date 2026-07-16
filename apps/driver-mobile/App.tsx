@@ -3,7 +3,7 @@ import { FlatList, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, Tex
 import { StatusBar } from "expo-status-bar";
 import * as Location from "expo-location";
 import { problemTypeLabel, towStatusLabel } from "@resqly/ui";
-import { getSupabase, apiPost, apiGet } from "./src/supabase";
+import { getSupabase, apiPost, apiGet, uploadSignedEvidence } from "./src/supabase";
 import { getExpoPushToken, devicePlatform, listenForOfferPushes } from "./src/push";
 import { startBackgroundLocation, stopBackgroundLocation } from "./src/location-task";
 import { takePhoto, pickPhotoFromLibrary } from "./src/photo";
@@ -539,16 +539,35 @@ function JobDetail({ offer, jobId, onBack }: { offer: Offer | null; jobId: strin
         setMessage("Ingen bild vald, eller så saknas kamerabehörighet.");
         return;
       }
-      const res = await apiPost(`/api/v1/tow/jobs/${jobId}/evidence`, {
+      const requested = await apiPost<{ storage_path: string; upload_token: string }>(
+        `/api/v1/tow/jobs/${jobId}/evidence/upload`,
+        { content_type: photo.contentType, size_bytes: Math.max(1, photo.sizeBytes || 1), phase: "during" },
+      );
+      if (!requested.ok) {
+        setMessage(requested.error ?? "Bilden kunde inte förberedas. Försök igen.");
+        return;
+      }
+      const uploaded = await uploadSignedEvidence({
+        path: requested.data.storage_path,
+        token: requested.data.upload_token,
+        uri: photo.uri,
+        contentType: photo.contentType,
+      });
+      if (!uploaded.ok) {
+        setMessage(uploaded.error);
+        return;
+      }
+      const registered = await apiPost(`/api/v1/tow/jobs/${jobId}/evidence/complete`, {
+        storage_path: requested.data.storage_path,
         content_type: photo.contentType,
-        data_base64: photo.base64,
+        size_bytes: uploaded.sizeBytes,
         phase: "during",
       });
-      if (res.ok) {
+      if (registered.ok) {
         setPhotoCount((n) => n + 1);
         setMessage("Bilden är uppladdad.");
       } else {
-        setMessage(res.error ?? "Bilden kunde inte laddas upp. Försök igen.");
+        setMessage(registered.error ?? "Bilden skickades men kunde inte registreras. Försök igen.");
       }
     } finally {
       setPhotoBusy(false);

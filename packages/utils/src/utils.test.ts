@@ -4,6 +4,8 @@ import { hashPersonalNumber, hmacSignature, verifyHmacSignature, signedPayloadHa
 import { RateLimiter } from "./rate-limit";
 import { retry } from "./retry";
 import { TransitionGuard } from "./fsm";
+import { normalizePhoneE164 } from "./phone";
+import { validatePublicHttpsUrl } from "./webhook-url";
 
 describe("case-number", () => {
   it("formats with prefix, year and zero-padded sequence", () => {
@@ -100,5 +102,29 @@ describe("TransitionGuard", () => {
   it("detects terminal states", () => {
     expect(guard.isTerminal("c")).toBe(true);
     expect(guard.isTerminal("a")).toBe(false);
+  });
+});
+
+
+describe("phone normalization", () => {
+  it("normalizes Swedish local and international numbers", () => {
+    expect(normalizePhoneE164("070-123 45 67")).toBe("+46701234567");
+    expect(normalizePhoneE164("0046 70 123 45 67")).toBe("+46701234567");
+    expect(normalizePhoneE164("+46701234567")).toBe("+46701234567");
+  });
+  it("rejects ambiguous or malformed numbers", () => {
+    expect(normalizePhoneE164("701234567")).toBeNull();
+    expect(normalizePhoneE164("abc")).toBeNull();
+  });
+});
+
+describe("webhook URL validation", () => {
+  it("accepts public HTTPS and rejects local targets", () => {
+    expect(validatePublicHttpsUrl("https://hooks.example.com/resqly").hostname).toBe("hooks.example.com");
+    expect(() => validatePublicHttpsUrl("http://example.com")).toThrow(/HTTPS/);
+    expect(() => validatePublicHttpsUrl("https://127.0.0.1/hook")).toThrow(/reserverade/);
+    expect(() => validatePublicHttpsUrl("https://169.254.169.254/latest/meta-data")).toThrow(/reserverade/);
+    expect(() => validatePublicHttpsUrl("https://[::1]/hook")).toThrow(/reserverade/);
+    expect(() => validatePublicHttpsUrl("https://localhost/hook")).toThrow(/Lokala/);
   });
 });

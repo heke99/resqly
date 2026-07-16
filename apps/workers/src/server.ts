@@ -1,5 +1,5 @@
 import { createServiceClient, type AppSupabaseClient } from "@resqly/database";
-import { assertNoMockBankidInProduction, boolEnv, optionalEnv } from "@resqly/utils";
+import { assertNoMockBankidInProduction, boolEnv, isProductionEnv, optionalEnv } from "@resqly/utils";
 import {
   HttpSmsAdapter,
   ResendEmailAdapter,
@@ -15,6 +15,7 @@ import { pollWebhookDeliveries } from "./jobs/webhook-db-delivery";
 import { pollOperationalNotificationQueue } from "./jobs/notification-queue-db";
 import { pollOfferFallbacks } from "./jobs/offer-fallback-db";
 import { pollEtaRefresh } from "./jobs/eta-refresh-db";
+import { pollDispatchRecovery } from "./jobs/dispatch-recovery-db";
 
 /**
  * Worker runner. Polls the database for due offer expiries, failed offer
@@ -22,8 +23,9 @@ import { pollEtaRefresh } from "./jobs/eta-refresh-db";
  * and processes them on an interval. The job decision logic lives in ./jobs
  * and is unit-tested in isolation; this module wires it to Supabase.
  *
- * When Supabase env is not configured the worker starts cleanly and the tick
- * is a no-op (useful for local/dev without a database).
+ * In production the worker fails fast when Supabase is not configured. A live
+ * process without a database is not a healthy worker and must never pass a
+ * deployment health check.
  */
 const intervalMs = Number(optionalEnv("WORKER_INTERVAL_MS", "15000")) || 15000;
 const pushEnabled = optionalEnv("EXPO_PUSH_ENABLED", "true") !== "false";
@@ -32,8 +34,31 @@ const pushUrl = optionalEnv("EXPO_PUSH_URL") || undefined;
 function dbOrNull(): AppSupabaseClient | null {
   const url = optionalEnv("NEXT_PUBLIC_SUPABASE_URL");
   const key = optionalEnv("SUPABASE_SERVICE_ROLE_KEY");
-  if (!url || !key) return null;
+  if (!url || !key) {
+    if (isProductionEnv()) {
+      throw new Error("NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for workers in production");
+    }
+    return null;
+  }
   return createServiceClient(url, key);
+}
+
+const workerInstanceId = optionalEnv(
+  "WORKER_INSTANCE_ID",
+  `${process.env.HOSTNAME ?? "local"}-${process.pid}`,
+);
+
+async function writeHeartbeat(
+  db: AppSupabaseClient,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const { error } = await db.from("worker_heartbeats" as never).upsert({
+    worker_name: "resqly-main",
+    instance_id: workerInstanceId,
+    updated_at: new Date().toISOString(),
+    ...patch,
+  } as never, { onConflict: "worker_name" } as never);
+  if (error) throw new Error(`worker heartbeat failed: ${error.message}`);
 }
 
 function buildChannelAdapters(): Partial<Record<"sms" | "email", ChannelAdapter>> {
@@ -78,23 +103,46 @@ export async function pollOfferExpiry(db: AppSupabaseClient, now = Date.now()): 
 
   const decision = evaluateOfferExpiry(offers, now);
   for (const id of decision.expire) {
-    await db
+    const { error: expireError } = await db
       .from("tow_job_offers" as never)
       .update({ status: "expired" } as never)
-      .eq("id", id);
+      .eq("id", id)
+      .eq("status", "pending");
+    if (expireError) throw new Error(`offer expiry failed: ${expireError.message}`);
   }
   for (const job of decision.perJob) {
     if (job.escalateToManualReview) {
-      await db
+      const { data: escalated, error: updateError } = await db
         .from("tow_jobs" as never)
         .update({ status: "manual_review" } as never)
         .eq("id", job.towJobId)
-        .is("driver_id", null);
-      await db.from("tow_job_status_events" as never).insert({
+        .is("driver_id", null)
+        .in("status", ["created", "matching", "offered"] as never)
+        .select("tenant_id, incident_id")
+        .maybeSingle();
+      if (updateError) throw new Error(`offer expiry update failed: ${updateError.message}`);
+      const row = escalated as { tenant_id: string; incident_id: string } | null;
+      if (!row) continue;
+
+      const { error: eventError } = await db.from("tow_job_status_events" as never).insert({
         tow_job_id: job.towJobId,
         to_status: "manual_review",
         reason: "all offers expired",
       } as never);
+      if (eventError) throw new Error(`offer expiry status event failed: ${eventError.message}`);
+
+      const { error: reviewError } = await db.from("manual_reviews" as never).insert({
+        tenant_id: row.tenant_id,
+        incident_id: row.incident_id,
+        tow_job_id: job.towJobId,
+        reason: "Alla förarerbjudanden löpte ut utan acceptans",
+        status: "open",
+      } as never);
+      // Another worker may have inserted the same open review after the status
+      // update. The partial unique index makes that race harmless.
+      if (reviewError && reviewError.code !== "23505") {
+        throw new Error(`offer expiry manual review failed: ${reviewError.message}`);
+      }
     }
     // Remaining ranked offers stay pending and become the "next" candidate(s).
   }
@@ -176,11 +224,10 @@ interface TickDeps {
   maps: MapsClient;
 }
 
-async function tick(db: AppSupabaseClient | null, deps: TickDeps): Promise<void> {
-  if (!db) return;
-  // Each job is individually guarded: one failing job must never take down
-  // the loop or starve the other jobs.
+async function tick(db: AppSupabaseClient, deps: TickDeps): Promise<void> {
+  const failures: string[] = [];
   const jobs: Array<[string, () => Promise<void>]> = [
+    ["dispatch-recovery", () => pollDispatchRecovery(db, { pushEnabled, pushUrl })],
     ["offer-expiry", () => pollOfferExpiry(db)],
     ["offer-push-retry", () => pollOfferPushRetries(db)],
     ["offer-fallback", () => pollOfferFallbacks(db)],
@@ -192,18 +239,44 @@ async function tick(db: AppSupabaseClient | null, deps: TickDeps): Promise<void>
     try {
       await run();
     } catch (e) {
-      console.error(`[workers] ${name} error`, e instanceof Error ? e.message : e);
+      const message = e instanceof Error ? e.message : String(e);
+      failures.push(`${name}: ${message}`);
+      console.error(`[workers] ${name} error`, message);
     }
   }
+
+  const now = new Date().toISOString();
+  if (failures.length > 0) {
+    await writeHeartbeat(db, {
+      status: "degraded",
+      last_failed_at: now,
+      last_error: failures.join(" | ").slice(0, 4000),
+    });
+    return;
+  }
+  await writeHeartbeat(db, {
+    status: "running",
+    last_succeeded_at: now,
+    last_error: null,
+  });
 }
 
 async function main(): Promise<void> {
   // Hard production guard: never run with mock BankID config in production.
   assertNoMockBankidInProduction();
   const db = dbOrNull();
+  if (!db) {
+    console.warn("[workers] database is not configured; local worker exits instead of reporting a false healthy state");
+    return;
+  }
   const deps: TickDeps = { adapters: buildChannelAdapters(), maps: buildMapsClient() };
+  await writeHeartbeat(db, {
+    status: "starting",
+    last_started_at: new Date().toISOString(),
+    last_error: null,
+  });
   console.log(
-    `[workers] starting, interval=${intervalMs}ms, db=${db ? "on" : "off"}, sms=${deps.adapters.sms ? "on" : "off"}, email=${deps.adapters.email ? "on" : "off"}`,
+    `[workers] starting, interval=${intervalMs}ms, db=on, sms=${deps.adapters.sms ? "on" : "off"}, email=${deps.adapters.email ? "on" : "off"}`,
   );
   for (;;) {
     await tick(db, deps);
@@ -212,5 +285,9 @@ async function main(): Promise<void> {
 }
 
 if (process.env.NODE_ENV !== "test") {
-  void main();
+  void main().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[workers] fatal startup/runtime error", message);
+    process.exitCode = 1;
+  });
 }

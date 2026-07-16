@@ -64,7 +64,16 @@ export class SupabaseRepo implements ApiRepo {
     tow_job_id: string;
     reason: string;
   }): Promise<void> {
-    await this.table("manual_reviews").insert({ ...row, status: "open" } as never);
+    const { data: existing } = await this.table("manual_reviews")
+      .select("id")
+      .eq("tow_job_id", row.tow_job_id)
+      .in("status", ["open", "in_progress"])
+      .limit(1)
+      .maybeSingle();
+    if (existing) return;
+    const { error } = await this.table("manual_reviews").insert({ ...row, status: "open" } as never);
+    // A concurrent request may have inserted the same open review first.
+    if (error && (error as { code?: string }).code !== "23505") throw error;
   }
 
   async getTenant(id: string): Promise<TenantRecord | null> {
@@ -110,17 +119,13 @@ export class SupabaseRepo implements ApiRepo {
     lng: number;
     address?: string | null;
   }): Promise<void> {
-    await this.table("incident_locations")
-      .delete()
-      .eq("incident_id", row.incident_id)
-      .eq("kind", row.kind);
-    const { error } = await this.table("incident_locations").insert({
+    const { error } = await this.table("incident_locations").upsert({
       incident_id: row.incident_id,
       kind: row.kind,
       lat: row.lat,
       lng: row.lng,
       address: row.address ?? null,
-    } as never);
+    } as never, { onConflict: "incident_id,kind" } as never);
     if (error) throw new Error(error.message);
   }
   async getIncident(tenantId: string, id: string): Promise<IncidentRecord | null> {
@@ -170,9 +175,41 @@ export class SupabaseRepo implements ApiRepo {
     return (data as BankidSessionRecord | null) ?? null;
   }
   async recordBankidSignature(row: Record<string, unknown>) {
-    const { data, error } = await this.table("bankid_signatures").insert(row as never).select("id").single();
+    const { data, error } = await this.table("bankid_signatures")
+      .upsert(row as never, { onConflict: "order_ref" } as never)
+      .select("id")
+      .single();
     if (error) throw new Error(error.message);
     return data as { id: string };
+  }
+
+  async completeBankidSession(input: {
+    sessionId: string;
+    signature: Record<string, unknown>;
+    businessPayload: Record<string, unknown>;
+    result: Record<string, unknown>;
+    fromWebhook: boolean;
+  }) {
+    const { data, error } = await this.db.rpc("complete_bankid_session" as never, {
+      p_session_id: input.sessionId,
+      p_signature: input.signature,
+      p_business_payload: input.businessPayload,
+      p_result: input.result,
+      p_from_webhook: input.fromWebhook,
+    } as never);
+    if (error) throw new Error(error.message);
+    const row = (Array.isArray(data) ? data[0] : data) as {
+      newly_processed?: boolean;
+      signature_id?: string | null;
+      flow?: "incident" | "vehicle_policy";
+      related_id?: string | null;
+    } | null;
+    return {
+      newlyProcessed: Boolean(row?.newly_processed),
+      signatureId: row?.signature_id ?? null,
+      flow: row?.flow ?? "incident",
+      relatedId: row?.related_id ?? null,
+    };
   }
 
   async getCustomerContact(incidentId: string): Promise<CustomerContact | null> {
@@ -251,16 +288,30 @@ export class SupabaseRepo implements ApiRepo {
       .is("price_snapshot", null);
   }
 
-  async uploadTowEvidenceObject(path: string, bytes: Uint8Array, contentType: string): Promise<void> {
-    const { error } = await this.db.storage
-      .from("tow-evidence")
-      .upload(path, bytes, { contentType, upsert: false });
+  async createTowEvidenceUpload(path: string): Promise<{ path: string; token: string }> {
+    const { data, error } = await this.db.storage.from("tow-evidence").createSignedUploadUrl(path);
+    if (error || !data?.token) throw new Error(error?.message ?? "Could not create signed upload URL");
+    return { path: data.path ?? path, token: data.token };
+  }
+
+  async getTowEvidenceObject(path: string): Promise<{ size: number | null; contentType: string | null } | null> {
+    const slash = path.lastIndexOf("/");
+    const folder = slash >= 0 ? path.slice(0, slash) : "";
+    const name = slash >= 0 ? path.slice(slash + 1) : path;
+    const { data, error } = await this.db.storage.from("tow-evidence").list(folder, { search: name, limit: 20 });
     if (error) throw new Error(error.message);
+    const file = data?.find((entry) => entry.name === name);
+    if (!file) return null;
+    const metadata = file.metadata as { size?: number; mimetype?: string; contentType?: string } | null;
+    return {
+      size: typeof metadata?.size === "number" ? metadata.size : null,
+      contentType: metadata?.mimetype ?? metadata?.contentType ?? null,
+    };
   }
 
   async createTowJobEvidence(row: Record<string, unknown>): Promise<{ id: string }> {
     const { data, error } = await this.table("tow_job_evidence")
-      .insert(row as never)
+      .upsert(row as never, { onConflict: "storage_path" } as never)
       .select("id")
       .single();
     if (error) throw new Error(error.message);
@@ -294,6 +345,42 @@ export class SupabaseRepo implements ApiRepo {
     const { data } = await this.table("tow_jobs").select("*").eq("id", id).maybeSingle();
     return (data as TowJobRecord | null) ?? null;
   }
+  async getActiveTowJobForIncident(tenantId: string, incidentId: string): Promise<TowJobRecord | null> {
+    const { data } = await this.table("tow_jobs")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("incident_id", incidentId)
+      .not("status", "in", "(cancelled,failed,closed)" as never)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return (data as TowJobRecord | null) ?? null;
+  }
+
+  async claimTowDispatch(jobId: string): Promise<{ claimed: boolean; status: string }> {
+    const { data, error } = await this.db.rpc("claim_tow_dispatch_job" as never, {
+      p_job: jobId,
+      p_lease_seconds: 300,
+    } as never);
+    if (error) throw new Error(error.message);
+    const row = (Array.isArray(data) ? data[0] : data) as { claimed?: boolean; job_status?: string } | null;
+    return { claimed: Boolean(row?.claimed), status: row?.job_status ?? "created" };
+  }
+
+  async recordDispatchAttempt(jobId: string, errorMessage: string | null): Promise<{ attempts: number; status: string }> {
+    const { data, error } = await this.db.rpc("record_tow_dispatch_attempt" as never, {
+      p_job: jobId,
+      p_error: errorMessage,
+    } as never);
+    if (error) throw new Error(error.message);
+    const row = Array.isArray(data) ? data[0] : data;
+    const parsed = row as { attempts?: number; job_status?: string } | null;
+    return {
+      attempts: Number(parsed?.attempts ?? 0),
+      status: parsed?.job_status ?? "created",
+    };
+  }
+
   async listTowJobs(tenantId: string, opts: { status?: string; limit: number }) {
     let q = this.table("tow_jobs").select("*").eq("tenant_id", tenantId);
     if (opts.status) q = q.eq("status", opts.status);
@@ -317,7 +404,11 @@ export class SupabaseRepo implements ApiRepo {
     } as never);
   }
   async createOffers(rows: Array<Record<string, unknown>>) {
-    await this.table("tow_job_offers").insert(rows as never);
+    const { error } = await this.table("tow_job_offers").upsert(rows as never, {
+      onConflict: "tow_job_id,driver_id",
+      ignoreDuplicates: true,
+    } as never);
+    if (error) throw new Error(error.message);
   }
   async getOfferForDriver(jobId: string, driverId: string) {
     const { data } = await this.table("tow_job_offers")
@@ -645,7 +736,25 @@ export class SupabaseRepo implements ApiRepo {
   }
 
   async createCustomerShare(row: Record<string, unknown>) {
-    await this.table("tow_job_customer_shares").insert(row as never);
+    await this.ensureCustomerShare(row);
+  }
+
+  async ensureCustomerShare(row: Record<string, unknown>): Promise<{ id: string }> {
+    const { data, error } = await this.table("tow_job_customer_shares")
+      .upsert(row as never, { onConflict: "tow_job_id,driver_id" } as never)
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    return data as { id: string };
+  }
+
+  async getCustomerShare(jobId: string, driverId: string): Promise<{ id: string } | null> {
+    const { data } = await this.table("tow_job_customer_shares")
+      .select("id")
+      .eq("tow_job_id", jobId)
+      .eq("driver_id", driverId)
+      .maybeSingle();
+    return (data as { id: string } | null) ?? null;
   }
 
   async addEtaSnapshot(row: Record<string, unknown>) {
@@ -666,6 +775,27 @@ export class SupabaseRepo implements ApiRepo {
   }
   async createInvoice(row: Record<string, unknown>) {
     await this.table("tow_job_invoices").insert(row as never);
+  }
+  async finalizeTowJob(
+    jobId: string,
+    driverId: string,
+    report: Record<string, unknown>,
+    invoice: Record<string, unknown>,
+  ): Promise<{ status: string; total_minor: number; already_finalized: boolean }> {
+    const { data, error } = await this.db.rpc("finalize_tow_job" as never, {
+      p_job: jobId,
+      p_driver: driverId,
+      p_report: report,
+      p_invoice: invoice,
+    } as never);
+    if (error) throw new Error(error.message);
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) throw new Error("Tow job finalization returned no result");
+    return {
+      status: String((row as { job_status?: string; status?: string }).job_status ?? (row as { status?: string }).status ?? "invoiced"),
+      total_minor: Number((row as { total_minor?: number }).total_minor ?? 0),
+      already_finalized: Boolean((row as { already_finalized?: boolean }).already_finalized),
+    };
   }
   async getDriverIdForUser(userId: string): Promise<string | null> {
     const { data } = await this.table("tow_drivers").select("id").eq("user_id", userId).maybeSingle();

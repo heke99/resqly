@@ -27,6 +27,7 @@ export const ROLE_PERMISSIONS: Record<RoleKey, PermissionKey[]> = {
     "webhooks.manage",
     "audit_logs.read",
     "agreements.manage",
+    "agreements.request",
   ],
   insurance_owner_admin: [
     "incidents.read",
@@ -45,6 +46,7 @@ export const ROLE_PERMISSIONS: Record<RoleKey, PermissionKey[]> = {
     "webhooks.manage",
     "audit_logs.read",
     "agreements.manage",
+    "agreements.request",
   ],
   insurance_claims_handler: [
     "incidents.read",
@@ -77,7 +79,7 @@ export const ROLE_PERMISSIONS: Record<RoleKey, PermissionKey[]> = {
     "billing.manage",
     "white_label.manage",
     "audit_logs.read",
-    "agreements.manage",
+    "agreements.request",
   ],
   tow_dispatcher: ["tow_jobs.read", "tow_jobs.dispatch", "tow_jobs.accept", "drivers.manage"],
   tow_driver: ["tow_jobs.read", "tow_jobs.accept", "tow_jobs.complete"],
@@ -118,4 +120,4 @@ export const ROLE_META: RoleMeta[] = [
   { key: "tow_viewer", label: "Läsbehörighet", tenantType: "tow_company" },
 ];
 
-export const ALL_PERMISSIONS: PermissionKey[] = ROLE_PERMISSIONS.platform_superadmin;
+export const ALL_PERMISSIONS: PermissionKey[] = ROLE_PERMISSIONS.platform_superadmin!;

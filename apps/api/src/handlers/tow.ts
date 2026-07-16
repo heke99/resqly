@@ -4,7 +4,7 @@ import {
   towJobLocationInputSchema,
   towJobStatusInputSchema,
 } from "@resqly/types";
-import { AppError, notFound, badRequest, forbidden } from "@resqly/utils";
+import { AppError, notFound, badRequest, forbidden, normalizePhoneE164 } from "@resqly/utils";
 import {
   buildCustomerShare,
   buildCompletionReport,
@@ -28,10 +28,13 @@ const EVIDENCE_EXTENSIONS: Record<string, string> = {
   "image/webp": "webp",
   "image/heic": "heic",
 };
-const evidenceSchema = z.object({
+const evidenceUploadSchema = z.object({
   content_type: z.enum(["image/jpeg", "image/png", "image/webp", "image/heic"]),
-  data_base64: z.string().min(1),
+  size_bytes: z.number().int().positive().max(MAX_EVIDENCE_BYTES),
   phase: z.enum(["before", "during", "after"]).optional(),
+});
+const evidenceCompleteSchema = evidenceUploadSchema.extend({
+  storage_path: z.string().min(1).max(500),
 });
 
 function requireAuthenticatedDriver(ctx: ApiContext): string {
@@ -40,7 +43,9 @@ function requireAuthenticatedDriver(ctx: ApiContext): string {
 }
 
 function assertAssignedDriver(jobDriverId: string | null, driverId: string): void {
-  if (jobDriverId && jobDriverId !== driverId) throw forbidden("This job is assigned to another driver");
+  if (jobDriverId !== driverId) {
+    throw forbidden(jobDriverId ? "This job is assigned to another driver" : "Accept the job before changing it");
+  }
 }
 
 /**
@@ -123,6 +128,16 @@ export async function acceptJobForDriver(
 ): Promise<RouteResult> {
   const job = await loadJobForContext(ctx, jobId);
 
+  // Validate the contact before assigning the job. Otherwise a successful
+  // race-safe accept could leave the winning driver without a callable number.
+  const contact = await ctx.repo.getCustomerContact(job.incident_id);
+  const normalizedPhone = contact ? normalizePhoneE164(contact.phone) : null;
+  if (!contact || contact.name.trim().length < 2 || !normalizedPhone) {
+    throw new AppError("conflict", "Customer contact details are incomplete", {
+      user_message: "Kundens kontaktuppgifter är inte kompletta. Be trafikledningen kontrollera ärendet.",
+    });
+  }
+
   const result = await ctx.repo.acceptOffer(jobId, driverId);
   if (!result.accepted) {
     const reason = result.reason ?? "";
@@ -132,36 +147,17 @@ export async function acceptJobForDriver(
     });
   }
 
-  // Idempotent re-accept by the winning driver (e.g. a mobile retry after a
-  // network hiccup). The customer share already exists — do not duplicate it.
-  if (result.reason === "already_accepted_by_driver") {
-    return {
-      status: 200,
-      body: {
-        status: "accepted",
-        customer_shared: true,
-        shared_fields: SHAREABLE_CUSTOMER_FIELDS,
-        tow_company_id: result.towCompanyId,
-      },
-    };
-  }
-
-  // Freeze the accepted price terms for private jobs (the customer's price
-  // must never change because the company edits its price list afterwards).
-  if (job.payer_type === "customer_private" && result.towCompanyId) {
+  if (job.payer_type === "customer_private" && result.towCompanyId && result.reason !== "already_accepted_by_driver") {
     await snapshotAcceptedPrice(ctx, jobId, job, result.towCompanyId);
   }
 
-  // ---- The critical step: share customer data ONLY now, after accept. ----
-  const contact = await ctx.repo.getCustomerContact(job.incident_id);
-  if (!contact) throw new AppError("internal_error", "Customer contact unavailable");
-
+  const existingShare = await ctx.repo.getCustomerShare(jobId, driverId);
   const share = buildCustomerShare({
     tenantId: job.tenant_id,
     towJobId: jobId,
     driverId,
     jobStatus: "accepted",
-    customer: { name: contact.name, phone: contact.phone, email: contact.email },
+    customer: { name: contact.name.trim(), phone: normalizedPhone, email: contact.email },
     registrationNumber: contact.registration_number,
     problemSummary: contact.problem_summary,
     pickup: contact.pickup,
@@ -169,33 +165,37 @@ export async function acceptJobForDriver(
     destinationAddress: contact.destination_address,
     customerNotes: contact.customer_notes,
   });
-  await ctx.repo.createCustomerShare(share);
+  await ctx.repo.ensureCustomerShare(share);
 
-  await ctx.repo.recordAudit(
-    buildCustomerShareAudit({
-      tenantId: job.tenant_id,
-      actorUserId: driverId,
-      driverId,
+  // A mobile retry repairs a missing share but does not duplicate audit,
+  // webhooks or customer messages when the share already existed.
+  if (!existingShare) {
+    await ctx.repo.recordAudit(
+      buildCustomerShareAudit({
+        tenantId: job.tenant_id,
+        actorUserId: ctx.driverUserId ?? null,
+        driverId,
+        towJobId: jobId,
+        fields: [...SHAREABLE_CUSTOMER_FIELDS],
+        reason: "driver accepted job",
+        ip: ctx.ip,
+      }),
+    );
+    await enqueueWebhookEvent(ctx, "tow.driver_accepted", {
+      tow_job_id: jobId,
+      incident_id: job.incident_id,
+      driver_id: driverId,
+      tow_company_id: result.towCompanyId,
+    });
+    await sendEmail(ctx, {
+      to: contact.email,
+      subject: "Bärgare har accepterat ditt ärende",
+      html: `<p>En bärgare har accepterat ditt ärende.</p><p>Fordon: ${escapeHtml(contact.registration_number)}</p>`,
+      incidentId: job.incident_id,
       towJobId: jobId,
-      fields: [...SHAREABLE_CUSTOMER_FIELDS],
-      reason: "driver accepted job",
-      ip: ctx.ip,
-    }),
-  );
-  await enqueueWebhookEvent(ctx, "tow.driver_accepted", {
-    tow_job_id: jobId,
-    incident_id: job.incident_id,
-    driver_id: driverId,
-    tow_company_id: result.towCompanyId,
-  });
-  await sendEmail(ctx, {
-    to: contact.email,
-    subject: "Bärgare har accepterat ditt ärende",
-    html: `<p>En bärgare har accepterat ditt ärende.</p><p>Fordon: ${escapeHtml(contact.registration_number)}</p>`,
-    incidentId: job.incident_id,
-    towJobId: jobId,
-    dedupeKey: `email:driver_accepted:${jobId}`,
-  });
+      dedupeKey: `email:driver_accepted:${jobId}`,
+    });
+  }
 
   return {
     status: 200,
@@ -204,6 +204,7 @@ export async function acceptJobForDriver(
       customer_shared: true,
       shared_fields: SHAREABLE_CUSTOMER_FIELDS,
       tow_company_id: result.towCompanyId,
+      repaired: result.reason === "already_accepted_by_driver" && !existingShare,
     },
   };
 }
@@ -285,50 +286,79 @@ export async function acceptTowJob(
   return acceptJobForDriver(ctx, id, driverId);
 }
 
-/**
- * Driver photo upload for an assigned job. The file lands in the tow-evidence
- * bucket under the job's path; type and size are validated before upload.
- */
-export async function uploadTowJobEvidence(
+/** Create a one-time direct upload token. The driver uploads bytes directly
+ * to private Storage so large mobile photos never pass through the JSON API. */
+export async function createTowJobEvidenceUpload(
   ctx: ApiContext,
   id: string,
   body: unknown,
 ): Promise<RouteResult> {
-  const input = evidenceSchema.parse(body);
+  const input = evidenceUploadSchema.parse(body);
   const driverId = requireAuthenticatedDriver(ctx);
   const job = await loadJobForContext(ctx, id);
-  if (!job.driver_id) throw forbidden("Photos can only be added after the job is assigned");
   assertAssignedDriver(job.driver_id, driverId);
 
-  const bytes = Buffer.from(input.data_base64, "base64");
-  if (bytes.length === 0) throw badRequest("Empty file");
-  if (bytes.length > MAX_EVIDENCE_BYTES) {
-    throw new AppError("bad_request", "File too large (max 10 MB)", {
-      user_message: "Bilden är för stor. Max 10 MB per bild.",
-    });
+  const ext = EVIDENCE_EXTENSIONS[input.content_type];
+  const path = `${job.id}/${driverId}/${crypto.randomUUID()}.${ext}`;
+  const upload = await ctx.repo.createTowEvidenceUpload(path);
+  return {
+    status: 201,
+    body: {
+      storage_path: upload.path,
+      upload_token: upload.token,
+      bucket: "tow-evidence",
+      max_bytes: MAX_EVIDENCE_BYTES,
+    },
+  };
+}
+
+/** Register an uploaded object only after the server has verified path, owner,
+ * type and size. Safe to retry because storage_path is unique. */
+export async function completeTowJobEvidenceUpload(
+  ctx: ApiContext,
+  id: string,
+  body: unknown,
+): Promise<RouteResult> {
+  const input = evidenceCompleteSchema.parse(body);
+  const driverId = requireAuthenticatedDriver(ctx);
+  const job = await loadJobForContext(ctx, id);
+  assertAssignedDriver(job.driver_id, driverId);
+
+  const expectedPrefix = `${job.id}/${driverId}/`;
+  if (!input.storage_path.startsWith(expectedPrefix) || input.storage_path.includes("..")) {
+    throw forbidden("Invalid evidence storage path");
+  }
+  const expectedExt = EVIDENCE_EXTENSIONS[input.content_type];
+  if (!input.storage_path.toLowerCase().endsWith(`.${expectedExt}`)) {
+    throw badRequest("File extension does not match content type");
   }
 
-  const ext = EVIDENCE_EXTENSIONS[input.content_type];
-  const path = `${job.id}/${crypto.randomUUID()}.${ext}`;
-  await ctx.repo.uploadTowEvidenceObject(path, bytes, input.content_type);
+  const object = await ctx.repo.getTowEvidenceObject(input.storage_path);
+  if (!object || object.size == null) throw badRequest("Uploaded file could not be verified");
+  if (object.size <= 0 || object.size > MAX_EVIDENCE_BYTES || object.size !== input.size_bytes) {
+    throw badRequest("Uploaded file size does not match the declared size");
+  }
+  if (object.contentType && object.contentType !== input.content_type) {
+    throw badRequest("Uploaded file type does not match the declared type");
+  }
+
   const row = await ctx.repo.createTowJobEvidence({
     tenant_id: job.tenant_id,
     tow_job_id: job.id,
     driver_id: driverId,
-    storage_path: path,
+    storage_path: input.storage_path,
     content_type: input.content_type,
     phase: input.phase ?? "during",
   });
-
   await ctx.repo.recordAudit({
     tenant_id: job.tenant_id,
+    actor_user_id: ctx.driverUserId ?? null,
     action: "create",
     entity_type: "tow_job_evidence",
     entity_id: row.id,
     fields: ["storage_path", "content_type", "phase"],
-    metadata: { tow_job_id: job.id, driver_id: driverId, size_bytes: bytes.length },
+    metadata: { tow_job_id: job.id, driver_id: driverId, size_bytes: object.size },
   });
-
   return { status: 201, body: { evidence_id: row.id } };
 }
 
@@ -442,31 +472,17 @@ export async function completeTowJob(
   body: unknown,
 ): Promise<RouteResult> {
   const input = towJobCompleteInputSchema.parse(body);
-  const driver_id = requireAuthenticatedDriver(ctx);
+  const driverId = requireAuthenticatedDriver(ctx);
   const job = await loadJobForContext(ctx, id);
-  if (!job.driver_id) throw new AppError("conflict", "Job has no assigned driver");
-  assertAssignedDriver(job.driver_id, driver_id);
-
-  // delivered -> completed (allow from transporting/delivered)
-  if (job.status === "transporting") {
-    await ctx.repo.setTowJobStatus(id, "delivered");
-    await ctx.repo.addTowJobStatusEvent({ tow_job_id: id, from_status: "transporting", to_status: "delivered" });
-  }
-  const fromStatus = job.status === "transporting" ? "delivered" : job.status;
-  transitionTowJob({ towJobId: id, from: fromStatus, to: "completed" });
-  await ctx.repo.setTowJobStatus(id, "completed");
-  await ctx.repo.addTowJobStatusEvent({ tow_job_id: id, from_status: fromStatus, to_status: "completed" });
+  assertAssignedDriver(job.driver_id, driverId);
 
   const report = buildCompletionReport({
     tenantId: job.tenant_id,
     towJobId: id,
-    driverId: job.driver_id,
+    driverId,
     input,
   });
-  await ctx.repo.createCompletionReport(report);
 
-  // The invoice basis uses the price terms frozen at accept time when
-  // available (private jobs), otherwise the company's current price list.
   const snapshot = (job.price_snapshot ?? null) as {
     price_list?: PriceList;
     factors?: { evening_night?: boolean; weekend?: boolean; distance_km?: number | null };
@@ -484,7 +500,7 @@ export async function completeTowJob(
     waitingMinutes: input.waiting_minutes,
     failedTrip: input.failed_trip,
   });
-  await ctx.repo.createInvoice({
+  const invoiceRow = {
     tenant_id: job.tenant_id,
     tow_job_id: id,
     payer_type: invoice.payer_type,
@@ -494,35 +510,42 @@ export async function completeTowJob(
     vat_minor: invoice.vat_minor,
     total_minor: invoice.total_minor,
     currency: invoice.currency,
-  });
-  await ctx.repo.setTowJobStatus(id, "invoiced");
-  await ctx.repo.addTowJobStatusEvent({ tow_job_id: id, from_status: "completed", to_status: "invoiced" });
+  };
 
-  await ctx.repo.recordAudit({
-    tenant_id: job.tenant_id,
-    action: "status_change",
-    entity_type: "tow_job",
-    entity_id: id,
-    fields: ["completion_report", "invoice_basis"],
-  });
-  await enqueueWebhookEvent(ctx, "tow.completed", {
-    tow_job_id: id,
-    incident_id: job.incident_id,
-    status: "invoiced",
-    invoice_total_minor: invoice.total_minor,
-  });
-  const contact = await ctx.repo.getCustomerContact(job.incident_id);
-  await sendEmail(ctx, {
-    to: contact?.email,
-    subject: "Bärgningsärendet är avslutat",
-    html: `<p>Ditt bärgningsärende är avslutat.</p><p>Tack för att du använde tjänsten.</p>`,
-    incidentId: job.incident_id,
-    towJobId: id,
-    dedupeKey: `email:tow_completed:${id}`,
-  });
+  // One database transaction locks the job, validates assignment/state,
+  // upserts report + invoice and advances every status event exactly once.
+  const finalized = await ctx.repo.finalizeTowJob(id, driverId, report, invoiceRow);
+
+  if (!finalized.already_finalized) {
+    await ctx.repo.recordAudit({
+      tenant_id: job.tenant_id,
+      actor_user_id: ctx.driverUserId ?? null,
+      action: "status_change",
+      entity_type: "tow_job",
+      entity_id: id,
+      fields: ["completion_report", "invoice_basis", "status"],
+      metadata: { status: finalized.status, total_minor: finalized.total_minor },
+    });
+    // The tow.completed webhook outbox is inserted inside finalize_tow_job,
+    // in the same transaction as the report, invoice and status change.
+    const contact = await ctx.repo.getCustomerContact(job.incident_id);
+    await sendEmail(ctx, {
+      to: contact?.email,
+      subject: "Bärgningsärendet är avslutat",
+      html: `<p>Ditt bärgningsärende är avslutat.</p><p>Tack för att du använde tjänsten.</p>`,
+      incidentId: job.incident_id,
+      towJobId: id,
+      dedupeKey: `email:tow_completed:${id}`,
+    });
+  }
 
   return {
     status: 200,
-    body: { status: "invoiced", invoice_total_minor: invoice.total_minor, completion_recorded: true },
+    body: {
+      status: finalized.status,
+      invoice_total_minor: finalized.total_minor,
+      completion_recorded: true,
+      idempotent_replay: finalized.already_finalized,
+    },
   };
 }

@@ -235,6 +235,19 @@ export interface ApiRepo {
   getBankidSessionByTicSessionId(sessionId: string): Promise<BankidSessionRecord | null>;
   getBankidSessionById(sessionId: string): Promise<BankidSessionRecord | null>;
   recordBankidSignature(row: Record<string, unknown>): Promise<{ id: string }>;
+  /** Atomically completes a BankID session and all related business state. */
+  completeBankidSession(input: {
+    sessionId: string;
+    signature: Record<string, unknown>;
+    businessPayload: Record<string, unknown>;
+    result: Record<string, unknown>;
+    fromWebhook: boolean;
+  }): Promise<{
+    newlyProcessed: boolean;
+    signatureId: string | null;
+    flow: "incident" | "vehicle_policy";
+    relatedId: string | null;
+  }>;
   getCustomerContact(incidentId: string): Promise<CustomerContact | null>;
 
   createTowJob(row: Record<string, unknown>): Promise<TowJobRecord>;
@@ -247,10 +260,16 @@ export interface ApiRepo {
     pickup: Coordinate | null;
     destination: Coordinate | null;
   }>;
-  /** Store a driver photo in the tow-evidence bucket (server-side upload). */
-  uploadTowEvidenceObject(path: string, bytes: Uint8Array, contentType: string): Promise<void>;
+  /** Create a one-time direct-to-Storage upload token for the driver app. */
+  createTowEvidenceUpload(path: string): Promise<{ path: string; token: string }>;
+  /** Verify that the uploaded object exists before registering evidence. */
+  getTowEvidenceObject(path: string): Promise<{ size: number | null; contentType: string | null } | null>;
   createTowJobEvidence(row: Record<string, unknown>): Promise<{ id: string }>;
   getTowJob(tenantId: string, id: string): Promise<TowJobRecord | null>;
+  getActiveTowJobForIncident(tenantId: string, incidentId: string): Promise<TowJobRecord | null>;
+  claimTowDispatch(jobId: string): Promise<{ claimed: boolean; status: string }>;
+  recordDispatchAttempt(jobId: string, error: string | null): Promise<{ attempts: number; status: string }>;
+
   /** Lookup by id only — callers MUST verify driver/tenant authorization. */
   getTowJobById(id: string): Promise<TowJobRecord | null>;
   listTowJobs(tenantId: string, opts: { status?: string; limit: number }): Promise<TowJobRecord[]>;
@@ -319,12 +338,20 @@ export interface ApiRepo {
   ): Promise<DispatchCandidate[]>;
 
   createCustomerShare(row: Record<string, unknown>): Promise<void>;
+  ensureCustomerShare(row: Record<string, unknown>): Promise<{ id: string }>;
+  getCustomerShare(jobId: string, driverId: string): Promise<{ id: string } | null>;
 
   addEtaSnapshot(row: Record<string, unknown>): Promise<void>;
   getLatestEta(jobId: string): Promise<EtaSnapshotRecord | null>;
 
   createCompletionReport(row: Record<string, unknown>): Promise<void>;
   createInvoice(row: Record<string, unknown>): Promise<void>;
+  finalizeTowJob(
+    jobId: string,
+    driverId: string,
+    report: Record<string, unknown>,
+    invoice: Record<string, unknown>,
+  ): Promise<{ status: string; total_minor: number; already_finalized: boolean }>;
 
   /** Resolve the driver record id for an authenticated driver user (if any). */
   getDriverIdForUser(userId: string): Promise<string | null>;

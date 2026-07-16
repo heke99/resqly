@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSupabase } from "../lib/supabase-client";
 import { SESSION_MARKER_COOKIE } from "../lib/session-marker";
+import { normalizePhoneE164 } from "@resqly/utils";
 
 function safeNextPath(raw: string | null): string {
   // Only same-origin relative paths are allowed as post-login destinations.
@@ -17,6 +18,8 @@ function LoginInner() {
   const nextPath = safeNextPath(params.get("next"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
   const [mode, setMode] = useState<"sign_in" | "sign_up">("sign_in");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,20 +44,47 @@ function LoginInner() {
     if (busy) return;
     setBusy(true);
     setMessage(null);
-    const fn =
+    const normalizedPhone = mode === "sign_up" ? normalizePhoneE164(phone) : null;
+    if (mode === "sign_up" && fullName.trim().length < 2) {
+      setBusy(false);
+      setMessage("Ange ditt fullständiga namn.");
+      return;
+    }
+    if (mode === "sign_up" && !normalizedPhone) {
+      setBusy(false);
+      setMessage("Ange ett giltigt mobilnummer, till exempel 0701234567.");
+      return;
+    }
+    const result =
       mode === "sign_in"
-        ? supabase!.auth.signInWithPassword({ email, password })
-        : supabase!.auth.signUp({ email, password });
-    const { error } = await fn;
+        ? await supabase!.auth.signInWithPassword({ email, password })
+        : await supabase!.auth.signUp({
+            email,
+            password,
+            options: { data: { full_name: fullName.trim(), phone: normalizedPhone } },
+          });
     setBusy(false);
-    if (error) setMessage(friendlyAuthError(error.message));
+    if (result.error) setMessage(friendlyAuthError(result.error.message));
     else {
-      const { data: userData } = await supabase!.auth.getUser();
+      if (mode === "sign_up" && !result.data.session) {
+        setMessage("Kontot är skapat. Bekräfta din e-postadress via mejlet vi skickade och logga sedan in.");
+        return;
+      }
+      const userData = result.data.user ? { user: result.data.user } : (await supabase!.auth.getUser()).data;
       if (userData.user) {
-        await supabase!.from("user_profiles").upsert({
+        const profile: Record<string, unknown> = {
           id: userData.user.id,
           email: userData.user.email ?? null,
-        } as never);
+        };
+        if (mode === "sign_up") {
+          profile.full_name = fullName.trim();
+          profile.phone = normalizedPhone;
+        }
+        const { error: profileError } = await supabase!.from("user_profiles").upsert(profile as never);
+        if (profileError) {
+          setMessage("Kontot skapades men kontaktuppgifterna kunde inte sparas. Öppna Profil innan du begär bärgning.");
+          return;
+        }
       }
       // Set the middleware marker before navigating so protected pages open
       // directly (the layout session listener keeps it in sync afterwards).
@@ -71,6 +101,14 @@ function LoginInner() {
       <form onSubmit={submit}>
         <label htmlFor="email">E-post</label>
         <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        {mode === "sign_up" ? (
+          <>
+            <label htmlFor="full_name">Fullständigt namn</label>
+            <input id="full_name" value={fullName} onChange={(e) => setFullName(e.target.value)} autoComplete="name" required />
+            <label htmlFor="phone">Mobilnummer</label>
+            <input id="phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" placeholder="0701234567" required />
+          </>
+        ) : null}
         <label htmlFor="password">Lösenord</label>
         <input
           id="password"

@@ -22,6 +22,7 @@ import {
 import { getSupabase } from "./src/supabase";
 import { customerApi, newIdempotencyKey, pollBankidSession } from "./src/api";
 import { DEFAULT_BRANDING, fetchBrandingForTenant, type Branding } from "./src/branding";
+import { normalizePhoneE164 } from "@resqly/utils";
 
 type Screen = "home" | "account" | "vehicles" | "insurance" | "newCase" | "cases" | "caseDetail";
 
@@ -188,13 +189,30 @@ function Account({ authed, palette, onDone }: { authed: boolean | null; palette:
   const supabase = getSupabase();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [userId, setUserId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [currentEmail, setCurrentEmail] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase || !authed) return;
-    void supabase.auth.getUser().then(({ data }) => setCurrentEmail(data.user?.email ?? null));
+    void (async () => {
+      const { data } = await supabase.auth.getUser();
+      setCurrentEmail(data.user?.email ?? null);
+      setUserId(data.user?.id ?? null);
+      if (data.user) {
+        const { data: profile } = await supabase
+          .from("user_profiles")
+          .select("full_name, phone")
+          .eq("id", data.user.id)
+          .maybeSingle();
+        const row = profile as { full_name?: string | null; phone?: string | null } | null;
+        setFullName(row?.full_name ?? "");
+        setPhone(row?.phone ?? "");
+      }
+    })();
   }, [supabase, authed]);
 
   async function signIn() {
@@ -207,14 +225,56 @@ function Account({ authed, palette, onDone }: { authed: boolean | null; palette:
   }
   async function signUp() {
     if (!supabase || busy) return;
+    const normalizedPhone = normalizePhoneE164(phone);
+    if (fullName.trim().length < 2) return setMessage("Ange ditt fullständiga namn.");
+    if (!normalizedPhone) return setMessage("Ange ett giltigt mobilnummer, till exempel 0701234567.");
     setBusy(true);
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: fullName.trim(), phone: normalizedPhone } },
+    });
+    if (!error && !data.session) {
+      setBusy(false);
+      setMessage("Kontot är skapat. Bekräfta din e-postadress via mejlet vi skickade och logga sedan in.");
+      return;
+    }
+    if (!error && data.user) {
+      const { error: profileError } = await supabase.from("user_profiles").upsert({
+        id: data.user.id,
+        email: data.user.email ?? email,
+        full_name: fullName.trim(),
+        phone: normalizedPhone,
+      } as never);
+      if (profileError) {
+        setBusy(false);
+        setMessage("Kontot skapades men kontaktuppgifterna kunde inte sparas. Öppna Konto innan du begär bärgning.");
+        return;
+      }
+    }
     setBusy(false);
     if (error) setMessage(friendlyAuthError(error.message));
     else {
       setMessage("Kontot är skapat. Du är nu inloggad.");
       onDone();
     }
+  }
+  async function saveProfile() {
+    if (!supabase || !userId || busy) return;
+    const normalizedPhone = normalizePhoneE164(phone);
+    if (fullName.trim().length < 2) return setMessage("Ange ditt fullständiga namn.");
+    if (!normalizedPhone) return setMessage("Ange ett giltigt mobilnummer, till exempel 0701234567.");
+    setBusy(true);
+    const { error } = await supabase.from("user_profiles").upsert({
+      id: userId,
+      email: currentEmail,
+      full_name: fullName.trim(),
+      phone: normalizedPhone,
+    } as never);
+    if (!error) await supabase.auth.updateUser({ data: { full_name: fullName.trim(), phone: normalizedPhone } });
+    setBusy(false);
+    setPhone(normalizedPhone);
+    setMessage(error ? "Kontaktuppgifterna kunde inte sparas." : "Kontaktuppgifterna är sparade.");
   }
   async function signOut() {
     if (!supabase) return;
@@ -228,6 +288,16 @@ function Account({ authed, palette, onDone }: { authed: boolean | null; palette:
       <ScrollView>
         <Text style={styles.h1}>Mitt konto</Text>
         {currentEmail ? <Text>Inloggad som {currentEmail}</Text> : null}
+        <View style={[styles.card, { backgroundColor: palette.surface }]}>
+          <Text style={{ fontWeight: "700" }}>Kontaktuppgifter för bärgning</Text>
+          <Text style={styles.label}>Fullständigt namn</Text>
+          <TextInput style={styles.input} value={fullName} onChangeText={setFullName} autoCapitalize="words" />
+          <Text style={styles.label}>Mobilnummer</Text>
+          <TextInput style={styles.input} value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="0701234567" />
+          <Pressable style={[styles.bigbtn, { backgroundColor: palette.primary }, busy ? styles.disabled : null]} onPress={saveProfile} disabled={busy}>
+            <Text style={[styles.bigbtnText, { color: palette.onPrimary }]}>{busy ? "Sparar…" : "Spara uppgifter"}</Text>
+          </Pressable>
+        </View>
         <View style={[styles.card, { backgroundColor: palette.surface }]}>
           <Text style={{ fontWeight: "700" }}>BankID</Text>
           <Text style={styles.muted}>
@@ -246,6 +316,10 @@ function Account({ authed, palette, onDone }: { authed: boolean | null; palette:
   return (
     <ScrollView>
       <Text style={styles.h1}>Logga in eller skapa konto</Text>
+      <Text style={styles.label}>Fullständigt namn (krävs när du skapar konto)</Text>
+      <TextInput style={styles.input} value={fullName} onChangeText={setFullName} autoCapitalize="words" />
+      <Text style={styles.label}>Mobilnummer (krävs när du skapar konto)</Text>
+      <TextInput style={styles.input} value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="0701234567" />
       <Text style={styles.label}>E-post</Text>
       <TextInput style={styles.input} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
       <Text style={styles.label}>Lösenord</Text>

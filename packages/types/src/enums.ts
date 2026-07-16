@@ -61,6 +61,7 @@ export const permissionKeySchema = z.enum([
   "webhooks.manage",
   "audit_logs.read",
   "agreements.manage",
+  "agreements.request",
 ]);
 export type PermissionKey = z.infer<typeof permissionKeySchema>;
 

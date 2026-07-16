@@ -368,6 +368,9 @@ importers:
       '@resqly/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@resqly/dispatch':
+        specifier: workspace:*
+        version: link:../../packages/dispatch
       '@resqly/maps':
         specifier: workspace:*
         version: link:../../packages/maps

@@ -1,5 +1,5 @@
 import { Button, Card, DataTable, PageHeader, StatusChip, type Column } from "@resqly/web-kit";
-import { listInsurerReadiness, listTowReadiness } from "../lib/data";
+import { getPlatformRuntimeReadiness, listInsurerReadiness, listTowReadiness } from "../lib/data";
 import { createStagingDemo } from "../lib/actions";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +14,11 @@ function num(v: unknown): number {
 const isProduction = (process.env.APP_ENV ?? process.env.NODE_ENV) === "production";
 
 export default async function AdminReadinessPage() {
-  const [insurers, towCompanies] = await Promise.all([listInsurerReadiness(), listTowReadiness()]);
+  const [insurers, towCompanies, runtime] = await Promise.all([
+    listInsurerReadiness(),
+    listTowReadiness(),
+    getPlatformRuntimeReadiness(),
+  ]);
 
   const insurerColumns: Column<Row>[] = [
     { key: "name", header: "Försäkringsbolag", render: (r) => String(r.insurer_name ?? "—") },
@@ -52,6 +56,38 @@ export default async function AdminReadinessPage() {
         title="Redo för drift"
         subtitle="Checklistor per organisation — allt ska vara grönt innan skarpa ärenden tas emot."
       />
+      <Card style={{ marginBottom: 20 }}>
+        <h3 style={{ marginTop: 0 }}>Teknisk driftstatus</h3>
+        <p>
+          <StatusChip
+            status={runtime.ready ? "Redo för drift" : "Launch blockerad"}
+            tone={runtime.ready ? "success" : "danger"}
+          />
+        </p>
+        <p style={{ opacity: 0.8 }}>
+          Databas: {runtime.databaseReachable ? "ansluten" : "inte tillgänglig"} · Väntande webhooks: {runtime.pendingWebhooks} ·
+          Misslyckade webhooks: {runtime.failedWebhooks} · Väntande notifieringar: {runtime.pendingNotifications} ·
+          Misslyckade notifieringar: {runtime.failedNotifications}
+        </p>
+        {runtime.workers.length ? (
+          <ul>
+            {runtime.workers.map((worker) => (
+              <li key={`${worker.worker_name}-${worker.instance_id}`}>
+                {worker.worker_name}: {worker.status}{worker.stale ? " · heartbeat för gammal" : " · aktiv"}
+                {worker.last_error ? ` · ${worker.last_error}` : ""}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>Ingen worker-heartbeat har registrerats.</p>
+        )}
+        {runtime.blockers.length ? (
+          <div>
+            <strong>Blockerare</strong>
+            <ul>{runtime.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
+          </div>
+        ) : null}
+      </Card>
       {!isProduction ? (
         <Card style={{ marginBottom: 20 }}>
           <h3 style={{ marginTop: 0 }}>Testmiljö</h3>

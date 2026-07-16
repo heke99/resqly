@@ -35,13 +35,13 @@ export default async function AgreementsPage({
   return (
     <div>
       <PageHeader
-        title="Insurance agreements"
-        subtitle="Endast försäkringsbolag med aktivt avtal kan skicka försäkringsuppdrag till er"
+        title="Försäkringsavtal"
+        subtitle="Skicka en avtalsförfrågan. Försäkringsbolaget måste godkänna den innan uppdrag kan skickas."
       />
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 24, alignItems: "start" }}>
         <DataTable columns={columns} rows={agreements} empty="Inga avtal ännu" />
         <Card>
-          <h3 style={{ marginTop: 0 }}>Add / update agreement</h3>
+          <h3 style={{ marginTop: 0 }}>Skicka avtalsförfrågan</h3>
           <form action={saveAgreement} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <input type="hidden" name="tenant_id" value={tenant.id} />
             <Field label="Insurance company">
@@ -54,15 +54,8 @@ export default async function AgreementsPage({
                 ))}
               </select>
             </Field>
-            <Field label="Status">
-              <select name="status" defaultValue="active">
-                {["active", "pending", "suspended", "terminated"].map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            <input type="hidden" name="status" value="pending" />
+            <p style={{ margin: 0, opacity: 0.72 }}>Status blir väntande tills försäkringsbolaget godkänner avtalet.</p>
             <Field label="Priority (lower = preferred)">
               <input name="priority" type="number" defaultValue={100} />
             </Field>
@@ -72,7 +65,7 @@ export default async function AgreementsPage({
             <Field label="Pricing model">
               <input name="pricing_model" defaultValue="standard" />
             </Field>
-            <Button type="submit">Save agreement</Button>
+            <Button type="submit">Skicka förfrågan</Button>
           </form>
         </Card>
       </div>
