@@ -14,6 +14,13 @@ import {
 } from "../../../_lib";
 import { sendCustomerEmail } from "../../../_email";
 
+type TowJobRow = {
+  id: string;
+  status: string;
+  payer_type: "insurance_company" | "customer_private";
+  priority: string;
+};
+
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -130,12 +137,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  let job = existingRow as {
-    id: string;
-    status: string;
-    payer_type: "insurance_company" | "customer_private";
-    priority: string;
-  } | null;
+  let job = existingRow as TowJobRow | null;
 
   if (job && !["created", "matching"].includes(job.status)) {
     const existingBody = {
@@ -166,7 +168,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         .select("id, status, payer_type, priority")
         .single();
       if (manualErr) return jsonError(503, "Bärgningen kunde inte skickas just nu. Försök igen eller kontakta support.");
-      job = manualJob as typeof job;
+      job = manualJob as TowJobRow;
     } else {
       await db.from("tow_jobs" as never).update({ status: "manual_review" } as never).eq("id", job.id);
       job.status = "manual_review";
@@ -230,13 +232,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      job = concurrent as typeof job;
+      job = concurrent as TowJobRow | null;
       if (!job) return jsonError(503, "Bärgningen kunde inte skickas just nu. Försök igen om en stund.");
       if (!["created", "matching"].includes(job.status)) {
         return NextResponse.json({ tow_job_id: job.id, status: job.status }, { status: 200 });
       }
     } else {
-      job = inserted as typeof job;
+      job = inserted as TowJobRow;
       created = true;
     }
   }
