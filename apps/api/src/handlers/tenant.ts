@@ -3,6 +3,7 @@ import { notFound } from "@resqly/utils";
 import { buildResolvedTheme, DEFAULT_THEME_TOKENS } from "@resqly/white-label";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
+import { apiActorFields } from "../services/audit";
 
 export async function getTenantTheme(ctx: ApiContext): Promise<RouteResult> {
   const tenant = await ctx.repo.getTenant(ctx.tenantId);
@@ -32,6 +33,7 @@ export async function patchTenantBranding(ctx: ApiContext, body: unknown): Promi
   }
   await ctx.repo.recordAudit({
     tenant_id: ctx.tenantId,
+    ...apiActorFields(ctx),
     action: "update",
     entity_type: "tenant_branding",
     entity_id: ctx.tenantId,
@@ -50,6 +52,7 @@ export async function patchTenantSettings(ctx: ApiContext, body: unknown): Promi
   await ctx.repo.updateTenantSettings(ctx.tenantId, patch);
   await ctx.repo.recordAudit({
     tenant_id: ctx.tenantId,
+    ...apiActorFields(ctx),
     action: "update",
     entity_type: "tenant_settings",
     entity_id: ctx.tenantId,

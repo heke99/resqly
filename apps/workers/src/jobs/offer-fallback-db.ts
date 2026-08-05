@@ -30,19 +30,21 @@ export async function pollOfferFallbacks(
 ): Promise<void> {
   const nowMs = (opts.now ?? new Date()).getTime();
 
-  const { data: ruleRows } = await db
+  const { data: ruleRows, error: ruleError } = await db
     .from("tenant_notification_fallback_rules" as never)
     .select("*")
     .eq("enabled", true);
+  if (ruleError) throw new Error(`fallback rule load failed: ${ruleError.message}`);
   const rules = ((ruleRows as FallbackRuleRow[] | null) ?? []) as FallbackRuleRow[];
   if (rules.length === 0) return;
 
   for (const rule of rules) {
-    const { data: offerRows } = await db
+    const { data: offerRows, error: offerError } = await db
       .from("tow_job_offers" as never)
       .select("id, tow_job_id, driver_id, tow_company_id, tow_vehicle_id, status, push_status, push_attempts, offered_at, tenant_id")
       .eq("tenant_id", rule.tenant_id)
       .eq("status", "pending");
+    if (offerError) throw new Error(`fallback offer load failed: ${offerError.message}`);
     const offers = ((offerRows as Array<OfferFallbackRow & { id: string; tenant_id: string }> | null) ?? []);
     if (offers.length === 0) continue;
 
@@ -62,15 +64,16 @@ export async function pollOfferFallbacks(
         const contacts = (rule.operational_contacts ?? []).filter((c) => c.phone);
         for (const contact of contacts) {
           // One SMS per offer + recipient, ever.
-          const { data: existing } = await db
+          const { data: existing, error: existingError } = await db
             .from("operational_notification_queue" as never)
             .select("id")
             .eq("offer_id", offer.id)
             .eq("channel", "sms")
             .eq("recipient", contact.phone!)
             .limit(1);
+          if (existingError) throw new Error(`fallback queue lookup failed: ${existingError.message}`);
           if (((existing as unknown[] | null) ?? []).length > 0) continue;
-          await db.from("operational_notification_queue" as never).insert({
+          const { error: queueError } = await db.from("operational_notification_queue" as never).insert({
             tenant_id: rule.tenant_id,
             tow_job_id: offer.tow_job_id,
             offer_id: offer.id,
@@ -84,45 +87,42 @@ export async function pollOfferFallbacks(
             status: "pending",
             next_attempt_at: new Date().toISOString(),
           } as never);
+          if (queueError && queueError.code !== "23505") {
+            throw new Error(`fallback queue insert failed: ${queueError.message}`);
+          }
         }
       }
 
       if (action.channel === "manual_review") {
         // Only escalate jobs that are still unassigned.
-        const { data: jobRow } = await db
+        const { data: jobRow, error: jobError } = await db
           .from("tow_jobs" as never)
           .select("id, status, driver_id, incident_id")
           .eq("id", offer.tow_job_id)
+          .eq("tenant_id", rule.tenant_id)
           .maybeSingle();
+        if (jobError) throw new Error(`fallback job load failed: ${jobError.message}`);
         const job = jobRow as { id: string; status: string; driver_id: string | null; incident_id: string } | null;
         if (!job || job.driver_id || !["offered", "matching"].includes(job.status)) continue;
 
-        const { data: existingReview } = await db
-          .from("manual_reviews" as never)
-          .select("id")
-          .eq("tow_job_id", job.id)
-          .eq("status", "open")
-          .limit(1);
-        if (((existingReview as unknown[] | null) ?? []).length > 0) continue;
-
-        await db
-          .from("tow_jobs" as never)
-          .update({ status: "manual_review" } as never)
-          .eq("id", job.id)
-          .is("driver_id", null);
-        await db.from("tow_job_status_events" as never).insert({
-          tow_job_id: job.id,
-          from_status: job.status,
-          to_status: "manual_review",
-          reason: "ingen bärgare svarade inom tidsgränsen",
-        } as never);
-        await db.from("manual_reviews" as never).insert({
-          tenant_id: rule.tenant_id,
-          incident_id: job.incident_id,
-          tow_job_id: job.id,
-          reason: "Ingen bärgare accepterade uppdraget inom tidsgränsen",
-          status: "open",
-        } as never);
+        const { data: resultData, error: escalationError } = await db.rpc(
+          "escalate_tow_job_manual_review" as never,
+          {
+            p_job: job.id,
+            p_tenant: rule.tenant_id,
+            p_actor_user: null,
+            p_reason: "ingen bärgare svarade inom tidsgränsen",
+            p_review_reason: "Ingen bärgare accepterade uppdraget inom tidsgränsen",
+            p_assign_to: null,
+            p_actor_worker: "offer-fallback",
+            p_actor_api_client: null,
+          } as never,
+        );
+        if (escalationError) throw new Error(`fallback escalation failed: ${escalationError.message}`);
+        const result = (Array.isArray(resultData) ? resultData[0] : resultData) as { error?: string } | null;
+        if (result?.error && !["already_closed", "status_not_reviewable"].includes(result.error)) {
+          throw new Error(`fallback escalation rejected: ${result.error}`);
+        }
       }
     }
   }

@@ -46,19 +46,20 @@ export async function pollOperationalNotificationQueue(
   opts: { now?: Date; limit?: number } = {},
 ): Promise<void> {
   const now = opts.now ?? new Date();
-  const { data } = await db
+  const { data, error: loadError } = await db
     .from("operational_notification_queue" as never)
     .select("id, tenant_id, tow_job_id, offer_id, channel, recipient, template_key, payload, status, attempts")
     .eq("status", "pending")
     .lte("next_attempt_at", now.toISOString())
     .order("created_at", { ascending: true })
     .limit(opts.limit ?? 25);
+  if (loadError) throw new Error(`notification queue load failed: ${loadError.message}`);
 
   const rows = ((data as OperationalNotificationRow[] | null) ?? []) as OperationalNotificationRow[];
   for (const row of rows) {
     const adapter = row.channel === "sms" || row.channel === "email" ? adapters[row.channel] : undefined;
     if (!adapter) {
-      await db
+      const { error: skipError } = await db
         .from("operational_notification_queue" as never)
         .update({
           status: "skipped",
@@ -66,6 +67,7 @@ export async function pollOperationalNotificationQueue(
           updated_at: new Date().toISOString(),
         } as never)
         .eq("id", row.id);
+      if (skipError) throw new Error(`notification queue skip failed: ${skipError.message}`);
       continue;
     }
 
@@ -79,10 +81,11 @@ export async function pollOperationalNotificationQueue(
         tenantId: row.tenant_id ?? undefined,
       });
       if (result.delivered) {
-        await db
+        const { error: sentError } = await db
           .from("operational_notification_queue" as never)
           .update({ status: "sent", attempts, last_error: null, updated_at: new Date().toISOString() } as never)
           .eq("id", row.id);
+        if (sentError) throw new Error(`notification queue sent update failed: ${sentError.message}`);
       } else {
         await failOrRetry(db, row, attempts, result.error ?? "delivery failed");
       }
@@ -99,14 +102,15 @@ async function failOrRetry(
   error: string,
 ): Promise<void> {
   if (attempts >= MAX_ATTEMPTS) {
-    await db
+    const { error: updateError } = await db
       .from("operational_notification_queue" as never)
       .update({ status: "failed", attempts, last_error: error, updated_at: new Date().toISOString() } as never)
       .eq("id", row.id);
+    if (updateError) throw new Error(`notification queue failure update failed: ${updateError.message}`);
     return;
   }
   const backoff = RETRY_BACKOFF_MS[Math.min(attempts - 1, RETRY_BACKOFF_MS.length - 1)]!;
-  await db
+  const { error: updateError } = await db
     .from("operational_notification_queue" as never)
     .update({
       status: "pending",
@@ -116,4 +120,5 @@ async function failOrRetry(
       updated_at: new Date().toISOString(),
     } as never)
     .eq("id", row.id);
+  if (updateError) throw new Error(`notification queue retry update failed: ${updateError.message}`);
 }

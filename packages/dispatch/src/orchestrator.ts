@@ -51,6 +51,15 @@ export interface OfferInsertRow {
   rank: number;
   distance_meters: number | null;
   eta_seconds: number | null;
+  status: "pending";
+  offered_at: string;
+  accepted_at: null;
+  rejected_at: null;
+  rejection_reason: null;
+  push_sent_at: null;
+  push_status: "pending";
+  push_attempts: number;
+  push_error: null;
   expires_at: string;
 }
 
@@ -59,14 +68,16 @@ export interface JobStatusEventRow {
   from_status: string | null;
   to_status: string;
   actor_user_id?: string | null;
+  actor_api_client_id?: string | null;
+  actor_kind?: "user" | "api_client" | "system" | "worker";
+  actor_worker?: string | null;
   reason?: string | null;
 }
 
 /** Persistence needed by the orchestrator; implemented by the partner API repo
  * adapter and by the Supabase store for the web apps. */
 export interface DispatchStore {
-  setJobStatus(jobId: string, status: string): Promise<void>;
-  addJobStatusEvent(event: JobStatusEventRow): Promise<void>;
+  transitionJobStatus(event: JobStatusEventRow): Promise<void>;
   getCandidates(
     pickup: Coordinate,
     radiusKm: number,
@@ -81,11 +92,16 @@ export interface DispatchStore {
     status: "sent" | "failed" | "skipped",
     error?: string | null,
   ): Promise<void>;
-  createManualReview(row: {
+  escalateManualReview(row: {
     tenant_id: string;
     incident_id: string | null;
     tow_job_id: string;
-    reason: string;
+    status_reason: string;
+    review_reason: string;
+    actor_user_id?: string | null;
+    actor_api_client_id?: string | null;
+    actor_kind: "user" | "api_client" | "worker";
+    actor_worker?: string | null;
   }): Promise<void>;
   recordAudit(row: Record<string, unknown>): Promise<void>;
 }
@@ -101,6 +117,12 @@ export interface OrchestrateDispatchInput {
   caseNumber?: string | null;
   /** The user (customer) who triggered dispatch, for status events/audit. */
   actorUserId?: string | null;
+  /** Partner API client that triggered dispatch when no end-user token exists. */
+  actorApiClientId?: string | null;
+  /** Worker-triggered retries use this to distinguish automation from users. */
+  actorKind?: "user" | "api_client" | "system" | "worker";
+  /** Stable worker name written to status and audit rows. Required for worker actions. */
+  actorWorker?: string | null;
   settings?: Partial<DispatchSettings> | null;
 }
 
@@ -132,16 +154,28 @@ export async function orchestrateDispatch(
   const settings: DispatchSettings = { ...DEFAULT_DISPATCH_SETTINGS, ...(input.settings ?? {}) };
   const { job, pickup, payerType } = input;
   const isInsurance = payerType === "insurance_company";
+  const actorKind =
+    input.actorKind ??
+    (input.actorUserId ? "user" : input.actorApiClientId ? "api_client" : "system");
+  const actorWorker = input.actorWorker?.trim() || null;
+  if (actorKind === "worker" && !actorWorker) {
+    throw new Error("Worker dispatch requires actorWorker attribution");
+  }
+  if (actorKind === "system") {
+    throw new Error("Dispatch requires an attributed user, API client or worker");
+  }
 
   // A failed request may resume an already-created/matching job. Do not emit
   // duplicate matching events when the same job is safely retried.
   if (job.status !== "matching") {
-    await store.setJobStatus(job.id, "matching");
-    await store.addJobStatusEvent({
+    await store.transitionJobStatus({
       tow_job_id: job.id,
       from_status: job.status ?? null,
       to_status: "matching",
       actor_user_id: input.actorUserId ?? null,
+      actor_api_client_id: input.actorApiClientId ?? null,
+      actor_kind: actorKind,
+      actor_worker: actorKind === "worker" ? actorWorker : null,
       reason: isInsurance
         ? "kunden begärde bärgning; avtalade bärgare matchas"
         : "kunden begärde fri bärgning; marketplace matchas närmast först",
@@ -200,6 +234,7 @@ export async function orchestrateDispatch(
   }
 
   if (dispatch.offers.length > 0) {
+    const offeredAt = new Date().toISOString();
     const expiresAt = new Date(Date.now() + settings.offer_expiry_seconds * 1000).toISOString();
     await store.createOffers(
       dispatch.offers.map((o) => ({
@@ -211,15 +246,26 @@ export async function orchestrateDispatch(
         rank: o.rank,
         distance_meters: Number.isFinite(o.distanceMeters) ? o.distanceMeters : null,
         eta_seconds: o.etaSeconds ?? null,
+        status: "pending",
+        offered_at: offeredAt,
+        accepted_at: null,
+        rejected_at: null,
+        rejection_reason: null,
+        push_sent_at: null,
+        push_status: "pending",
+        push_attempts: 0,
+        push_error: null,
         expires_at: expiresAt,
       })),
     );
-    await store.setJobStatus(job.id, "offered");
-    await store.addJobStatusEvent({
+    await store.transitionJobStatus({
       tow_job_id: job.id,
       from_status: "matching",
       to_status: "offered",
       actor_user_id: input.actorUserId ?? null,
+      actor_api_client_id: input.actorApiClientId ?? null,
+      actor_kind: actorKind,
+      actor_worker: actorKind === "worker" ? actorWorker : null,
       reason: isInsurance
         ? "erbjudande skickat till alla behöriga avtalade bärgningsbilar i radie"
         : usedFallbackWave
@@ -234,23 +280,20 @@ export async function orchestrateDispatch(
     });
     await sendOfferPushes(store, input, dispatch.offers, expiresAt, hooks);
   } else {
-    await store.setJobStatus(job.id, "manual_review");
-    await store.addJobStatusEvent({
-      tow_job_id: job.id,
-      from_status: "matching",
-      to_status: "manual_review",
-      actor_user_id: input.actorUserId ?? null,
-      reason: isInsurance
-        ? "ingen aktiv avtalad bärgare hittades inom radie"
-        : "ingen aktiv marketplace-bärgare hittades inom radie",
-    });
-    await store.createManualReview({
+    await store.escalateManualReview({
       tenant_id: input.tenantId,
       incident_id: job.incident_id,
       tow_job_id: job.id,
-      reason: isInsurance
+      status_reason: isInsurance
+        ? "ingen aktiv avtalad bärgare hittades inom radie"
+        : "ingen aktiv marketplace-bärgare hittades inom radie",
+      review_reason: isInsurance
         ? "Ingen behörig avtalad bärgare fanns tillgänglig i området."
         : "Ingen bärgare som tar emot privata uppdrag fanns tillgänglig i området.",
+      actor_user_id: input.actorUserId ?? null,
+      actor_api_client_id: input.actorApiClientId ?? null,
+      actor_kind: actorKind,
+      actor_worker: actorKind === "worker" ? actorWorker : null,
     });
     await hooks.onEvent?.("tow.manual_review", {
       tow_job_id: job.id,
@@ -274,6 +317,9 @@ export async function orchestrateDispatch(
   await store.recordAudit({
     tenant_id: input.tenantId,
     actor_user_id: input.actorUserId ?? null,
+    actor_api_client_id: input.actorApiClientId ?? null,
+    actor_kind: actorKind,
+    actor_worker: actorKind === "worker" ? actorWorker : null,
     action: "dispatch",
     entity_type: "tow_job",
     entity_id: job.id,

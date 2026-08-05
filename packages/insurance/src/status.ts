@@ -7,7 +7,7 @@ export const INCIDENT_TRANSITIONS: Record<IncidentStatus, readonly IncidentStatu
   bankid_verified: ["signed", "submitted", "cancelled"],
   signed: ["submitted", "cancelled"],
   submitted: ["received", "more_info_required", "in_progress", "rejected", "cancelled"],
-  received: ["more_info_required", "in_progress", "rejected", "closed"],
+  received: ["more_info_required", "in_progress", "rejected", "cancelled", "closed"],
   more_info_required: ["submitted", "received", "in_progress", "cancelled"],
   in_progress: ["completed", "more_info_required", "cancelled"],
   completed: ["closed"],

@@ -68,11 +68,12 @@ export async function completeCustomerBankidSession(input: {
     : {};
 
   if (result.status !== "complete" || !result.completionData) {
-    await db.from("bankid_sessions" as never).update({
+    const { error } = await db.from("bankid_sessions" as never).update({
       status: result.status,
       hint_code: result.hintCode ?? null,
       raw_status: { ...previousRaw, provider_result: result.raw ?? result },
     } as never).eq("id", session.id);
+    if (error) throw new Error(error.message);
     return { status: result.status, bankid_verified: false, hint_code: result.hintCode ?? null };
   }
 
@@ -90,11 +91,12 @@ export async function completeCustomerBankidSession(input: {
     payload = signedPayloadFromSession;
   } else {
     if (!incidentId) throw new Error("BankID session saknar koppling till ärende eller fordon.");
-    const { data: incident } = await db.from("incidents" as never)
+    const { data: incident, error: incidentError } = await db.from("incidents" as never)
       .select("id, case_number, type, vehicle_id, insurance_company_id, problem_type, damage_type")
       .eq("id", incidentId)
       .eq("customer_user_id", session.user_id)
       .maybeSingle();
+    if (incidentError) throw new Error(incidentError.message);
     if (!incident) throw new Error("Ärendet hittades inte.");
     payload = signedPayloadForCustomerIncident(incident as {
       id: string;

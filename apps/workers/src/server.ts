@@ -94,11 +94,12 @@ function buildMapsClient(): MapsClient {
 
 /** Expire stale pending offers and escalate jobs with no remaining candidate. */
 export async function pollOfferExpiry(db: AppSupabaseClient, now = Date.now()): Promise<void> {
-  const { data } = await db
+  const { data, error: offerLoadError } = await db
     .from("tow_job_offers" as never)
-    .select("id, tow_job_id, driver_id, status, rank, expires_at")
+    .select("id, tow_job_id, driver_id, status, rank, expires_at, tenant_id")
     .eq("status", "pending");
-  const offers = ((data as OfferRow[] | null) ?? []) as OfferRow[];
+  if (offerLoadError) throw new Error(`offer expiry load failed: ${offerLoadError.message}`);
+  const offers = ((data as Array<OfferRow & { tenant_id: string }> | null) ?? []);
   if (offers.length === 0) return;
 
   const decision = evaluateOfferExpiry(offers, now);
@@ -112,36 +113,25 @@ export async function pollOfferExpiry(db: AppSupabaseClient, now = Date.now()): 
   }
   for (const job of decision.perJob) {
     if (job.escalateToManualReview) {
-      const { data: escalated, error: updateError } = await db
-        .from("tow_jobs" as never)
-        .update({ status: "manual_review" } as never)
-        .eq("id", job.towJobId)
-        .is("driver_id", null)
-        .in("status", ["created", "matching", "offered"] as never)
-        .select("tenant_id, incident_id")
-        .maybeSingle();
-      if (updateError) throw new Error(`offer expiry update failed: ${updateError.message}`);
-      const row = escalated as { tenant_id: string; incident_id: string } | null;
-      if (!row) continue;
-
-      const { error: eventError } = await db.from("tow_job_status_events" as never).insert({
-        tow_job_id: job.towJobId,
-        to_status: "manual_review",
-        reason: "all offers expired",
-      } as never);
-      if (eventError) throw new Error(`offer expiry status event failed: ${eventError.message}`);
-
-      const { error: reviewError } = await db.from("manual_reviews" as never).insert({
-        tenant_id: row.tenant_id,
-        incident_id: row.incident_id,
-        tow_job_id: job.towJobId,
-        reason: "Alla förarerbjudanden löpte ut utan acceptans",
-        status: "open",
-      } as never);
-      // Another worker may have inserted the same open review after the status
-      // update. The partial unique index makes that race harmless.
-      if (reviewError && reviewError.code !== "23505") {
-        throw new Error(`offer expiry manual review failed: ${reviewError.message}`);
+      const tenantId = offers.find((offer) => offer.tow_job_id === job.towJobId)?.tenant_id;
+      if (!tenantId) throw new Error(`offer expiry tenant missing for job ${job.towJobId}`);
+      const { data: resultData, error: escalationError } = await db.rpc(
+        "escalate_tow_job_manual_review" as never,
+        {
+          p_job: job.towJobId,
+          p_tenant: tenantId,
+          p_actor_user: null,
+          p_reason: "all offers expired",
+          p_review_reason: "Alla förarerbjudanden löpte ut utan acceptans",
+          p_assign_to: null,
+          p_actor_worker: "offer-expiry",
+          p_actor_api_client: null,
+        } as never,
+      );
+      if (escalationError) throw new Error(`offer expiry escalation failed: ${escalationError.message}`);
+      const result = (Array.isArray(resultData) ? resultData[0] : resultData) as { error?: string } | null;
+      if (result?.error && !["already_closed", "status_not_reviewable"].includes(result.error)) {
+        throw new Error(`offer expiry escalation rejected: ${result.error}`);
       }
     }
     // Remaining ranked offers stay pending and become the "next" candidate(s).
@@ -150,19 +140,21 @@ export async function pollOfferExpiry(db: AppSupabaseClient, now = Date.now()): 
 
 /** Approximate pickup area (rounded coordinates — no exact address pre-accept). */
 async function approxAreaForJob(db: AppSupabaseClient, towJobId: string): Promise<string> {
-  const { data: job } = await db
+  const { data: job, error: jobError } = await db
     .from("tow_jobs" as never)
     .select("incident_id")
     .eq("id", towJobId)
     .maybeSingle();
+  if (jobError) throw new Error(`offer push job load failed: ${jobError.message}`);
   const incidentId = (job as { incident_id: string } | null)?.incident_id;
   if (!incidentId) return "okänt område";
-  const { data: loc } = await db
+  const { data: loc, error: locationError } = await db
     .from("incident_locations" as never)
     .select("lat, lng")
     .eq("incident_id", incidentId)
     .eq("kind", "pickup")
     .maybeSingle();
+  if (locationError) throw new Error(`offer push location load failed: ${locationError.message}`);
   const l = loc as { lat: number; lng: number } | null;
   return l ? `${l.lat.toFixed(1)}, ${l.lng.toFixed(1)}` : "okänt område";
 }
@@ -170,28 +162,31 @@ async function approxAreaForJob(db: AppSupabaseClient, towJobId: string): Promis
 /** Retry pushes for pending offers whose last push attempt failed. */
 export async function pollOfferPushRetries(db: AppSupabaseClient): Promise<void> {
   if (!pushEnabled) return;
-  const { data } = await db
+  const { data, error: loadError } = await db
     .from("tow_job_offers" as never)
     .select("tow_job_id, driver_id, tenant_id, status, push_status, push_attempts, expires_at")
     .eq("status", "pending")
     .in("push_status", ["failed", "pending"]);
+  if (loadError) throw new Error(`offer push retry load failed: ${loadError.message}`);
   const offers = ((data as Array<OfferPushRow & { tenant_id: string; expires_at: string }> | null) ?? []);
   const retries = selectOfferPushRetries(offers);
   for (const retry of retries) {
-    const { data: devices } = await db
+    const { data: devices, error: deviceError } = await db
       .from("driver_devices" as never)
       .select("expo_push_token")
       .eq("driver_id", retry.driverId);
+    if (deviceError) throw new Error(`offer push device load failed: ${deviceError.message}`);
     const tokens = ((devices as Array<{ expo_push_token: string }> | null) ?? []).map(
       (d) => d.expo_push_token,
     );
     const offer = offers.find((o) => o.tow_job_id === retry.towJobId && o.driver_id === retry.driverId);
     if (tokens.length === 0) {
-      await db
+      const { error: skipError } = await db
         .from("tow_job_offers" as never)
         .update({ push_status: "skipped", push_attempts: retry.attempt } as never)
         .eq("tow_job_id", retry.towJobId)
         .eq("driver_id", retry.driverId);
+      if (skipError) throw new Error(`offer push skip update failed: ${skipError.message}`);
       continue;
     }
     const approxArea = await approxAreaForJob(db, retry.towJobId);
@@ -206,7 +201,7 @@ export async function pollOfferPushRetries(db: AppSupabaseClient): Promise<void>
       }),
     );
     const res = await sendExpoPush(messages, { url: pushUrl });
-    await db
+    const { error: updateError } = await db
       .from("tow_job_offers" as never)
       .update({
         push_status: res.ok ? "sent" : "failed",
@@ -216,6 +211,7 @@ export async function pollOfferPushRetries(db: AppSupabaseClient): Promise<void>
       } as never)
       .eq("tow_job_id", retry.towJobId)
       .eq("driver_id", retry.driverId);
+    if (updateError) throw new Error(`offer push retry update failed: ${updateError.message}`);
   }
 }
 

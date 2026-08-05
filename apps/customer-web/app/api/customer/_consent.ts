@@ -40,13 +40,14 @@ export interface RecordConsentInput {
  * audit-logged with the text hash and version.
  */
 export async function recordConsent(db: AppSupabaseClient, input: RecordConsentInput): Promise<void> {
-  const { data: version } = await db
+  const { data: version, error: versionError } = await db
     .from("tenant_legal_text_versions" as never)
     .select("id, body, version")
     .eq("tenant_id", input.tenantId)
     .eq("kind", input.kind)
     .eq("status", "active")
     .maybeSingle();
+  if (versionError) throw new Error(`Samtyckestexten kunde inte läsas: ${versionError.message}`);
   const versionRow = version as { id: string; body: string; version: number } | null;
   const acceptedText = versionRow?.body ?? DEFAULT_CONSENT_TEXTS[input.kind];
   const textHash = createHash("sha256").update(acceptedText).digest("hex");
@@ -54,7 +55,7 @@ export async function recordConsent(db: AppSupabaseClient, input: RecordConsentI
   const ip = input.request?.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
   const userAgent = input.request?.headers.get("user-agent")?.slice(0, 300) ?? null;
 
-  await db.from("customer_consent_acceptances" as never).insert({
+  const { data: consent, error: consentError } = await db.from("customer_consent_acceptances" as never).insert({
     tenant_id: input.tenantId,
     user_id: input.userId,
     legal_version_id: versionRow?.id ?? null,
@@ -70,15 +71,24 @@ export async function recordConsent(db: AppSupabaseClient, input: RecordConsentI
       text_version: versionRow?.version ?? 0,
       used_default_text: !versionRow,
     },
-  } as never);
+  } as never).select("id").single();
+  if (consentError || !consent) {
+    throw new Error(`Samtycket kunde inte sparas: ${consentError?.message ?? "okänt fel"}`);
+  }
+  const consentId = (consent as { id: string }).id;
 
-  await db.from("audit_logs" as never).insert({
+  const { error: auditError } = await db.from("audit_logs" as never).insert({
     tenant_id: input.tenantId,
     actor_user_id: input.userId,
+    actor_kind: "user",
     action: "consent",
     entity_type: "customer_consent",
     entity_id: input.incidentId ?? input.vehiclePolicyId ?? input.vehicleId ?? input.userId,
     fields: ["consent_kind", "accepted_text_hash"],
     metadata: { consent_kind: input.kind, text_version: versionRow?.version ?? 0 },
   } as never);
+  if (auditError) {
+    await db.from("customer_consent_acceptances" as never).delete().eq("id", consentId);
+    throw new Error(`Samtycket sparades men revisionsloggen kunde inte skrivas: ${auditError.message}`);
+  }
 }

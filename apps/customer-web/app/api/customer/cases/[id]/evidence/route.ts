@@ -12,12 +12,13 @@ const ALLOWED_TYPES: Record<string, string> = {
 };
 
 async function assertOwnedIncident(db: AppSupabaseClient, incidentId: string, userId: string) {
-  const { data } = await db
+  const { data, error } = await db
     .from("incidents" as never)
     .select("id, tenant_id, status")
     .eq("id", incidentId)
     .eq("customer_user_id", userId)
     .maybeSingle();
+  if (error) throw new Error(`incident evidence owner lookup failed: ${error.message}`);
   return data as { id: string; tenant_id: string; status: string } | null;
 }
 
@@ -28,7 +29,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { db, user } = session;
   const { id } = await params;
 
-  const incident = await assertOwnedIncident(db, id, user.id);
+  let incident: Awaited<ReturnType<typeof assertOwnedIncident>>;
+  try {
+    incident = await assertOwnedIncident(db, id, user.id);
+  } catch {
+    return jsonError(503, "Ärendet kunde inte hämtas just nu. Försök igen.");
+  }
   if (!incident) return jsonError(404, "Ärendet hittades inte.");
   if (["closed", "cancelled"].includes(incident.status)) {
     return jsonError(409, "Ärendet är avslutat och kan inte längre kompletteras.");
@@ -65,17 +71,30 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return jsonError(503, "Uppladdningen kunde inte sparas. Försök igen.");
   }
 
-  await db.from("audit_logs" as never).insert({
+  const evidenceId = (row as { id: string }).id;
+  const { error: auditError } = await db.from("audit_logs" as never).insert({
     tenant_id: incident.tenant_id,
     actor_user_id: user.id,
     action: "create",
     entity_type: "incident_evidence",
-    entity_id: (row as { id: string }).id,
+    entity_id: evidenceId,
     fields: ["storage_path", "content_type"],
     metadata: { incident_id: incident.id, content_type: file.type, size_bytes: file.size },
   } as never);
+  if (auditError) {
+    const { error: rowCleanupError } = await db.from("incident_evidence" as never).delete().eq("id", evidenceId);
+    const { error: storageCleanupError } = await db.storage.from("incident-evidence").remove([path]);
+    console.error("[customer evidence] audit failed", {
+      incident_id: incident.id,
+      evidence_id: evidenceId,
+      error: auditError.message,
+      row_cleanup_error: rowCleanupError?.message ?? null,
+      storage_cleanup_error: storageCleanupError?.message ?? null,
+    });
+    return jsonError(503, "Uppladdningen kunde inte registreras korrekt. Försök igen.");
+  }
 
-  return NextResponse.json({ evidence_id: (row as { id: string }).id }, { status: 201 });
+  return NextResponse.json({ evidence_id: evidenceId }, { status: 201 });
 }
 
 /** List the case's uploads with short-lived signed URLs for display. */
@@ -85,15 +104,21 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { db, user } = session;
   const { id } = await params;
 
-  const incident = await assertOwnedIncident(db, id, user.id);
+  let incident: Awaited<ReturnType<typeof assertOwnedIncident>>;
+  try {
+    incident = await assertOwnedIncident(db, id, user.id);
+  } catch {
+    return jsonError(503, "Ärendet kunde inte hämtas just nu. Försök igen.");
+  }
   if (!incident) return jsonError(404, "Ärendet hittades inte.");
 
-  const { data: rows } = await db
+  const { data: rows, error: rowsError } = await db
     .from("incident_evidence" as never)
     .select("id, storage_path, content_type, created_at")
     .eq("incident_id", incident.id)
     .order("created_at", { ascending: false })
     .limit(30);
+  if (rowsError) return jsonError(503, "Bilagorna kunde inte hämtas just nu. Försök igen.");
   const evidence = (rows as Array<{ id: string; storage_path: string; content_type: string; created_at: string }> | null) ?? [];
 
   const items = await Promise.all(

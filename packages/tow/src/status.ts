@@ -30,6 +30,9 @@ export type TowJobStatusEventRow = {
   from_status: TowJobStatus | null;
   to_status: TowJobStatus;
   actor_user_id: string | null;
+  actor_api_client_id: string | null;
+  actor_kind: "user" | "api_client" | "system" | "worker";
+  actor_worker: string | null;
   reason: string | null;
 }
 
@@ -38,6 +41,9 @@ export function transitionTowJob(params: {
   from: TowJobStatus;
   to: TowJobStatus;
   actorUserId?: string | null;
+  actorApiClientId?: string | null;
+  actorKind?: "user" | "api_client" | "system" | "worker";
+  actorWorker?: string | null;
   reason?: string | null;
 }): TowJobStatusEventRow {
   towJobStatusGuard.assertTransition(params.from, params.to);
@@ -46,6 +52,11 @@ export function transitionTowJob(params: {
     from_status: params.from,
     to_status: params.to,
     actor_user_id: params.actorUserId ?? null,
+    actor_api_client_id: params.actorApiClientId ?? null,
+    actor_kind:
+      params.actorKind ??
+      (params.actorUserId ? "user" : params.actorApiClientId ? "api_client" : params.actorWorker ? "worker" : "system"),
+    actor_worker: params.actorWorker?.trim() || null,
     reason: params.reason ?? null,
   };
 }

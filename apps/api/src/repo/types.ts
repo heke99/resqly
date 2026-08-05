@@ -6,10 +6,32 @@ import type {
 } from "@resqly/types";
 import type { DispatchCandidate } from "@resqly/dispatch";
 
+export type ApiScope =
+  | "incidents:read"
+  | "incidents:write"
+  | "tow:read"
+  | "tow:write"
+  | "eta:read"
+  | "dispatch:write"
+  | "tenant:read"
+  | "tenant:write";
+
+export const ALL_API_SCOPES: ApiScope[] = [
+  "incidents:read",
+  "incidents:write",
+  "tow:read",
+  "tow:write",
+  "eta:read",
+  "dispatch:write",
+  "tenant:read",
+  "tenant:write",
+];
+
 export interface ApiClientRecord {
   id: string;
   tenantId: string;
   active: boolean;
+  scopes: ApiScope[];
 }
 
 export interface TenantRecord {
@@ -54,6 +76,7 @@ export interface TowJobRecord {
   incident_id: string;
   tow_company_id: string | null;
   driver_id: string | null;
+  tow_vehicle_id: string | null;
   status: TowJobStatus;
   payer_type: string;
   priority: string;
@@ -200,12 +223,17 @@ export interface ApiRepo {
     status_code: number;
   }): Promise<void>;
   recordAudit(row: Record<string, unknown>): Promise<void>;
-  /** Operational escalation queue shown to admins when dispatch cannot proceed. */
-  createManualReview(row: {
+  /** Atomically change the job, status history, audit and review queue. */
+  escalateTowJobManualReview(row: {
     tenant_id: string;
     incident_id: string | null;
     tow_job_id: string;
-    reason: string;
+    status_reason: string;
+    review_reason: string;
+    actor_user_id?: string | null;
+    actor_api_client_id?: string | null;
+    actor_kind: "user" | "api_client" | "worker";
+    actor_worker?: string | null;
   }): Promise<void>;
 
   getTenant(tenantId: string): Promise<TenantRecord | null>;
@@ -217,6 +245,17 @@ export interface ApiRepo {
 
   allocateCaseNumber(tenantId: string, scope: string): Promise<string>;
 
+  /**
+   * Validate all externally supplied incident references before a service-role
+   * insert. This prevents a partner API client from linking another customer's
+   * vehicle or another tenant's insurance company.
+   */
+  assertIncidentContext(input: {
+    tenantId: string;
+    customerUserId: string;
+    vehicleId: string | null;
+    insuranceCompanyId: string | null;
+  }): Promise<void>;
   createIncident(row: Record<string, unknown>): Promise<IncidentRecord>;
   /** Insert or replace an incident location (kind = pickup/destination). */
   upsertIncidentLocation(row: {
@@ -273,12 +312,18 @@ export interface ApiRepo {
   /** Lookup by id only — callers MUST verify driver/tenant authorization. */
   getTowJobById(id: string): Promise<TowJobRecord | null>;
   listTowJobs(tenantId: string, opts: { status?: string; limit: number }): Promise<TowJobRecord[]>;
-  setTowJobStatus(id: string, status: TowJobStatus): Promise<void>;
-  addTowJobStatusEvent(row: Record<string, unknown>): Promise<void>;
-  assignTowJob(id: string, driverId: string, towCompanyId: string): Promise<void>;
+  transitionTowJobStatus(row: {
+    tow_job_id: string;
+    from_status: string | null;
+    to_status: string;
+    actor_user_id?: string | null;
+    actor_api_client_id?: string | null;
+    actor_worker?: string | null;
+    reason?: string | null;
+  }): Promise<void>;
+  assignTowJob(tenantId: string, id: string, driverId: string, towCompanyId: string, towVehicleId: string): Promise<void>;
   createOffers(rows: Array<Record<string, unknown>>): Promise<void>;
   getOfferForDriver(jobId: string, driverId: string): Promise<{ status: string } | null>;
-  setOfferStatus(jobId: string, driverId: string, status: string): Promise<void>;
 
   /**
    * Race-safe offer acceptance. Locks the job, accepts the driver's pending
@@ -286,7 +331,7 @@ export interface ApiRepo {
    */
   acceptOffer(jobId: string, driverId: string): Promise<AcceptOfferResult>;
   getOfferById(id: string): Promise<OfferRecord | null>;
-  rejectOffer(jobId: string, driverId: string, reason: string | null): Promise<void>;
+  rejectOffer(jobId: string, driverId: string, reason: string | null): Promise<boolean>;
 
   /** Driver self-service. */
   getDriverProfile(driverId: string): Promise<DriverProfileRecord | null>;

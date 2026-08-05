@@ -17,13 +17,19 @@ import { DEFAULT_DISPATCH_SETTINGS } from "./orchestrator";
  */
 export function createSupabaseDispatchStore(db: AppSupabaseClient): DispatchStore {
   return {
-    async setJobStatus(jobId, status) {
-      const { error } = await db.from("tow_jobs" as never).update({ status } as never).eq("id", jobId);
+    async transitionJobStatus(event: JobStatusEventRow) {
+      const { data, error } = await db.rpc("transition_tow_job_status" as never, {
+        p_job: event.tow_job_id,
+        p_expected_from: event.from_status,
+        p_to_status: event.to_status,
+        p_actor_user: event.actor_user_id ?? null,
+        p_actor_api_client: event.actor_api_client_id ?? null,
+        p_actor_worker: event.actor_worker ?? null,
+        p_reason: event.reason ?? null,
+      } as never);
       if (error) throw new Error(error.message);
-    },
-    async addJobStatusEvent(event: JobStatusEventRow) {
-      const { error } = await db.from("tow_job_status_events" as never).insert(event as never);
-      if (error) throw new Error(error.message);
+      const result = (Array.isArray(data) ? data[0] : data) as { error?: string; actual?: string } | null;
+      if (result?.error) throw new Error(`tow status transition failed: ${result.error}${result.actual ? ` (${result.actual})` : ""}`);
     },
     async getCandidates(pickup: Coordinate, radiusKm: number, limit: number, query: DispatchCandidateQuery) {
       const { data, error } = await db.rpc("dispatch_eligible_candidates" as never, {
@@ -83,7 +89,6 @@ export function createSupabaseDispatchStore(db: AppSupabaseClient): DispatchStor
     async createOffers(rows: OfferInsertRow[]) {
       const { error } = await db.from("tow_job_offers" as never).upsert(rows as never, {
         onConflict: "tow_job_id,driver_id",
-        ignoreDuplicates: true,
       } as never);
       if (error) throw new Error(error.message);
     },
@@ -106,23 +111,20 @@ export function createSupabaseDispatchStore(db: AppSupabaseClient): DispatchStor
         .eq("driver_id", driverId);
       if (updateError) throw new Error(updateError.message);
     },
-    async createManualReview(row) {
-      const { data: existing, error: lookupError } = await db
-        .from("manual_reviews" as never)
-        .select("id")
-        .eq("tow_job_id", row.tow_job_id)
-        .in("status", ["open", "in_progress"] as never)
-        .limit(1)
-        .maybeSingle();
-      if (lookupError) throw new Error(lookupError.message);
-      if (existing) return;
-
-      const { error } = await db
-        .from("manual_reviews" as never)
-        .insert({ ...row, status: "open" } as never);
-      // Concurrent dispatch retries can race after the lookup. The partial
-      // unique index in 0026 makes one insert win; the other is already safe.
-      if (error && error.code !== "23505") throw new Error(error.message);
+    async escalateManualReview(row) {
+      const { data, error } = await db.rpc("escalate_tow_job_manual_review" as never, {
+        p_job: row.tow_job_id,
+        p_tenant: row.tenant_id,
+        p_actor_user: row.actor_user_id ?? null,
+        p_reason: row.status_reason,
+        p_review_reason: row.review_reason,
+        p_assign_to: null,
+        p_actor_worker: row.actor_worker ?? null,
+        p_actor_api_client: row.actor_api_client_id ?? null,
+      } as never);
+      if (error) throw new Error(error.message);
+      const result = (Array.isArray(data) ? data[0] : data) as { error?: string } | null;
+      if (result?.error) throw new Error(`manual review escalation failed: ${result.error}`);
     },
     async recordAudit(row) {
       const { error } = await db.from("audit_logs" as never).insert(row as never);
@@ -136,13 +138,14 @@ export async function loadDispatchSettings(
   db: AppSupabaseClient,
   tenantId: string,
 ): Promise<DispatchSettings> {
-  const { data } = await db
+  const { data, error } = await db
     .from("tenant_settings" as never)
     .select(
       "default_dispatch_strategy, max_dispatch_radius_km, max_dispatch_candidates, max_insurance_broadcast_candidates, private_dispatch_wave_radius_km, offer_expiry_seconds, allow_marketplace_fallback",
     )
     .eq("tenant_id", tenantId)
     .maybeSingle();
+  if (error) throw new Error(error.message);
   const row = (data as Partial<DispatchSettings> | null) ?? {};
   const merged: Record<string, unknown> = { ...DEFAULT_DISPATCH_SETTINGS };
   for (const key of Object.keys(DEFAULT_DISPATCH_SETTINGS) as Array<keyof DispatchSettings>) {

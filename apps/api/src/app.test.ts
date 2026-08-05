@@ -7,6 +7,7 @@ const API_KEY = "rk_test_secret";
 const DRIVER_TOKEN = "driver_session_token";
 const DRIVER2_TOKEN = "driver2_session_token";
 const CUSTOMER_USER_ID = "11111111-1111-4111-8111-111111111111";
+const INSURANCE_COMPANY_ID = "22222222-2222-4222-8222-222222222222";
 
 function setup() {
   const repo = new MemoryRepo();
@@ -39,8 +40,8 @@ const auth = (extra: Record<string, string> = {}) => ({
   ...extra,
 });
 
-const driverAuth = () => auth({ "x-driver-authorization": `Bearer ${DRIVER_TOKEN}` });
-const driver2Auth = () => auth({ "x-driver-authorization": `Bearer ${DRIVER2_TOKEN}` });
+const driverAuth = () => ({ "x-driver-authorization": `Bearer ${DRIVER_TOKEN}` });
+const driver2Auth = () => ({ "x-driver-authorization": `Bearer ${DRIVER2_TOKEN}` });
 
 describe("API auth", () => {
   it("rejects requests without an API key", async () => {
@@ -75,6 +76,40 @@ describe("API auth", () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(429);
   });
+
+  it("enforces read and write scopes for tenant API keys", async () => {
+    const repo = new MemoryRepo();
+    repo.seedTenant({ id: "t-if", case_number_prefix: "IF" });
+    repo.seedApiClient("t-if", sha256Hex(API_KEY), ["tenant:read"]);
+    const app = new App({
+      repo,
+      maps: { routesEnabled: false },
+      bankid: { env: "mock", mockEnabled: true },
+      encryptionKey: "p",
+    });
+
+    const read = await app.handle({ method: "GET", path: "/api/v1/tenant/settings", headers: auth() });
+    const write = await app.handle({
+      method: "PATCH",
+      path: "/api/v1/tenant/settings",
+      headers: auth(),
+      body: { offer_expiry_seconds: 90 },
+    });
+
+    expect(read.status).toBe(200);
+    expect(write.status).toBe(403);
+    expect((write.body as { error: { user_message?: string } }).error.user_message).toContain("tenant:write");
+  });
+
+  it("never lets an API key call user-session-only driver routes", async () => {
+    const { app } = setup();
+    const res = await app.handle({
+      method: "GET",
+      path: "/api/v1/drivers/me/offers",
+      headers: auth(),
+    });
+    expect(res.status).toBe(403);
+  });
 });
 
 describe("incident + tow lifecycle (acceptance criteria)", () => {
@@ -88,7 +123,12 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
       method: "POST",
       path: "/api/v1/incidents",
       headers: auth(),
-      body: { type: "towing", customer_user_id: CUSTOMER_USER_ID, problem_type: "dead_battery" },
+      body: {
+        type: "towing",
+        customer_user_id: CUSTOMER_USER_ID,
+        insurance_company_id: INSURANCE_COMPANY_ID,
+        problem_type: "dead_battery",
+      },
     });
   }
 
@@ -395,6 +435,48 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     });
     expect(res.status).toBe(200);
     expect(repo.offers.find((o) => o.id === offer.id)?.status).toBe("rejected");
+  });
+
+  it("refreshes a previously rejected offer when the job is dispatched again", async () => {
+    const repo = env.repo;
+    const job = await repo.createTowJob({
+      tenant_id: "t-if",
+      incident_id: "inc-redispatch",
+      status: "offered",
+      payer_type: "insurance_company",
+      priority: "normal",
+    });
+    const firstExpiry = new Date(Date.now() + 60_000).toISOString();
+    await repo.createOffers([
+      {
+        tenant_id: "t-if",
+        tow_job_id: job.id,
+        driver_id: "drv1",
+        tow_company_id: "tc1",
+        tow_vehicle_id: "truck1",
+        rank: 0,
+        expires_at: firstExpiry,
+      },
+    ]);
+    expect(await repo.rejectOffer(job.id, "drv1", "busy")).toBe(true);
+
+    const secondExpiry = new Date(Date.now() + 120_000).toISOString();
+    await repo.createOffers([
+      {
+        tenant_id: "t-if",
+        tow_job_id: job.id,
+        driver_id: "drv1",
+        tow_company_id: "tc1",
+        tow_vehicle_id: "truck1",
+        rank: 0,
+        expires_at: secondExpiry,
+      },
+    ]);
+
+    const refreshed = repo.offers.find((offer) => offer.tow_job_id === job.id && offer.driver_id === "drv1");
+    expect(refreshed?.status).toBe("pending");
+    expect(refreshed?.expires_at).toBe(secondExpiry);
+    expect(repo.offers.filter((offer) => offer.tow_job_id === job.id && offer.driver_id === "drv1")).toHaveLength(1);
   });
 
   it("requires an authenticated user for role-context", async () => {

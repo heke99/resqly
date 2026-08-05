@@ -20,6 +20,7 @@ import type { BankidSessionRecord, IncidentRecord } from "../repo/types";
 import { runDispatchForJob } from "./dispatch";
 import { enqueueWebhookEvent, escapeHtml, sendEmail } from "../services/notifications";
 import { withIdempotency } from "../services/idempotency";
+import { apiActorFields } from "../services/audit";
 
 const bankidStartSchema = z.object({
   purpose: z.string().min(1).default("Verifiera bärgningsärende"),
@@ -33,6 +34,12 @@ export async function createIncident(ctx: ApiContext, body: unknown): Promise<Ro
     ctx,
     "incident.create",
     async () => {
+      await ctx.repo.assertIncidentContext({
+        tenantId: ctx.tenantId,
+        customerUserId: input.customer_user_id,
+        vehicleId: input.vehicle_id ?? null,
+        insuranceCompanyId: input.insurance_company_id ?? null,
+      });
       const settings = await ctx.repo.getTenantSettings(ctx.tenantId);
       const requiresBankid = determineRequiresBankid(input.type, {
         bankidRequiredForClaims: settings.bankid_required_for_claims,
@@ -51,6 +58,13 @@ export async function createIncident(ctx: ApiContext, body: unknown): Promise<Ro
         requiresBankid,
         caseNumber,
       });
+      Object.assign(row, {
+        created_by_user_id: ctx.userId ?? null,
+        created_by_api_client_id:
+          !ctx.userId && ctx.apiClientId && !["public", "user-token"].includes(ctx.apiClientId)
+            ? ctx.apiClientId
+            : null,
+      });
       const incident = await ctx.repo.createIncident(row);
 
       // Persist the pickup location so ETA, dispatch and the post-accept
@@ -67,6 +81,7 @@ export async function createIncident(ctx: ApiContext, body: unknown): Promise<Ro
       if (input.destination_address) {
         await ctx.repo.recordAudit({
           tenant_id: ctx.tenantId,
+          ...apiActorFields(ctx),
           action: "create",
           entity_type: "incident_destination",
           entity_id: incident.id,
@@ -77,6 +92,7 @@ export async function createIncident(ctx: ApiContext, body: unknown): Promise<Ro
 
       await ctx.repo.recordAudit({
         tenant_id: ctx.tenantId,
+        ...apiActorFields(ctx),
         action: "create",
         entity_type: "incident",
         entity_id: incident.id,
@@ -122,9 +138,15 @@ export async function addEvidence(
     incident_id: id,
     storage_path: input.storage_path,
     content_type: input.content_type,
+    uploaded_by: ctx.userId ?? null,
+    uploaded_by_api_client_id:
+      !ctx.userId && ctx.apiClientId && !["public", "user-token"].includes(ctx.apiClientId)
+        ? ctx.apiClientId
+        : null,
   });
   await ctx.repo.recordAudit({
     tenant_id: ctx.tenantId,
+    ...apiActorFields(ctx),
     action: "update",
     entity_type: "incident_evidence",
     entity_id: evidence.id,
@@ -203,6 +225,7 @@ export async function signIncident(
     await ctx.repo.setIncidentBankidVerified(incident.id);
     await ctx.repo.recordAudit({
       tenant_id: ctx.tenantId,
+      ...apiActorFields(ctx),
       action: "sign",
       entity_type: "bankid_signature",
       entity_id: saved.id,
@@ -231,6 +254,7 @@ export async function signIncident(
   await persistBankidSession(ctx, incident, input.purpose, started, "sign", signedPayload);
   await ctx.repo.recordAudit({
     tenant_id: ctx.tenantId,
+    ...apiActorFields(ctx),
     action: "sign",
     entity_type: "bankid_session",
     entity_id: started.sessionId,
@@ -311,9 +335,18 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
   const input = requestTowInputSchema.parse(body);
   const incident = await ctx.repo.getIncident(ctx.tenantId, id);
   if (!incident) throw notFound("Incident not found");
+  if (["completed", "closed", "cancelled", "rejected"].includes(incident.status)) {
+    throw new AppError("conflict", `A tow cannot be requested for an incident with status ${incident.status}`);
+  }
 
   if (incident.requires_bankid && !incident.bankid_verified) {
     throw new AppError("conflict", "BankID verification is required before requesting a tow");
+  }
+  if (input.payer_type === "insurance_company" && !incident.insurance_company_id) {
+    throw new AppError(
+      "conflict",
+      "Insurance-funded towing requires an insurance company linked to the incident",
+    );
   }
 
   const contact = await ctx.repo.getCustomerContact(incident.id);
@@ -334,7 +367,6 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
         kind: "pickup",
         lat: input.pickup.lat,
         lng: input.pickup.lng,
-        address: null,
       });
 
       let job = await ctx.repo.getActiveTowJobForIncident(ctx.tenantId, incident.id);
@@ -362,6 +394,11 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
             status: "created",
             payer_type: input.payer_type,
             priority: input.priority,
+            created_by_user_id: ctx.userId ?? null,
+            created_by_api_client_id:
+              !ctx.userId && ctx.apiClientId && !["public", "user-token"].includes(ctx.apiClientId)
+                ? ctx.apiClientId
+                : null,
           });
           created = true;
         } catch (error) {
@@ -400,9 +437,17 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
           job,
           pickup: input.pickup,
           payerType: job.payer_type as "insurance_company" | "customer_private",
-          priority: input.priority,
+          priority: (["normal", "high", "urgent"].includes(job.priority) ? job.priority : "normal") as
+            | "normal"
+            | "high"
+            | "urgent",
           strategy: input.dispatch_strategy,
           problemType: incident.problem_type,
+          actorUserId: ctx.userId ?? null,
+          actorApiClientId:
+            !ctx.userId && ctx.apiClientId && !["public", "user-token"].includes(ctx.apiClientId)
+              ? ctx.apiClientId
+              : null,
         });
         await ctx.repo.recordDispatchAttempt(job.id, null);
       } catch (error) {

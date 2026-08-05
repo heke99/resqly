@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AppError, isAppError, newRequestId, sha256Hex } from "@resqly/utils";
 import { Router, type RouteResult } from "./http/router";
 import { type AppConfig, type ApiContext, defaultRateLimiter } from "./context";
+import type { ApiScope } from "./repo/types";
 import * as incidents from "./handlers/incidents";
 import * as tow from "./handlers/tow";
 import * as eta from "./handlers/eta";
@@ -262,6 +263,14 @@ export class App {
       return unauthorized(requestId);
     }
 
+    const requiredScope = requiredApiScope(req.method, url.pathname);
+    if (requiredScope === "user_token_only") {
+      return forbiddenScope(requestId, "Den här resursen kräver en inloggad användarsession.");
+    }
+    if (requiredScope && !client.scopes.includes(requiredScope)) {
+      return forbiddenScope(requestId, `API-nyckeln saknar behörigheten ${requiredScope}.`);
+    }
+
     // --- Rate limiting per tenant ---
     const rl = this.rateLimiter.check(client.tenantId);
     if (!rl.allowed) {
@@ -324,6 +333,37 @@ export class App {
 
     return { ...result, headers: { ...baseHeaders, ...(result.headers ?? {}) } };
   }
+}
+
+function requiredApiScope(method: string, path: string): ApiScope | "user_token_only" | null {
+  const verb = method.toUpperCase();
+  if (path === "/api/v1/me/role-context" || path.startsWith("/api/v1/drivers/")) return "user_token_only";
+  if (path.startsWith("/api/v1/incidents/") || path === "/api/v1/incidents" || path.startsWith("/api/v1/bankid/sessions/")) {
+    return verb === "GET" ? "incidents:read" : "incidents:write";
+  }
+  if (path.startsWith("/api/v1/tow/jobs")) return verb === "GET" ? "tow:read" : "tow:write";
+  if (path.startsWith("/api/v1/eta/")) return "eta:read";
+  if (path === "/api/v1/tenant/theme" || path === "/api/v1/tenant/settings") {
+    return verb === "GET" ? "tenant:read" : "tenant:write";
+  }
+  if (path === "/api/v1/tenant/branding") return verb === "GET" ? "tenant:read" : "tenant:write";
+  if (path === "/api/v1/dispatch/run") return "dispatch:write";
+  return null;
+}
+
+function forbiddenScope(requestId: string, userMessage: string): RouteResult {
+  return {
+    status: 403,
+    body: {
+      error: {
+        code: "forbidden",
+        message: "API key scope does not allow this operation",
+        user_message: userMessage,
+        request_id: requestId,
+      },
+    },
+    headers: { "x-request-id": requestId },
+  };
 }
 
 function extractBearer(header?: string): string | null {

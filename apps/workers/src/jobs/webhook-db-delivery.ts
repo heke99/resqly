@@ -38,26 +38,33 @@ export async function pollWebhookDeliveries(
   opts: { fetchImpl?: FetchLike; resolveHost?: ResolveHost; now?: Date; limit?: number } = {},
 ): Promise<void> {
   const now = opts.now ?? new Date();
-  const { data } = await db
+  const { data, error: loadError } = await db
     .from("webhook_deliveries" as never)
     .select("id, tenant_id, webhook_id, event, payload, status, attempts")
     .in("status", ["pending", "failed"])
     .or(`next_attempt_at.is.null,next_attempt_at.lte.${now.toISOString()}`)
     .order("created_at", { ascending: true })
     .limit(opts.limit ?? 50);
+  if (loadError) throw new Error(`webhook delivery load failed: ${loadError.message}`);
 
   const deliveries = ((data as WebhookDeliveryRow[] | null) ?? []) as WebhookDeliveryRow[];
   for (const delivery of deliveries) {
-    await db
+    const { data: claimed, error: claimError } = await db
       .from("webhook_deliveries" as never)
       .update({ status: "delivering", updated_at: new Date().toISOString() } as never)
-      .eq("id", delivery.id);
+      .eq("id", delivery.id)
+      .in("status", ["pending", "failed"])
+      .select("id")
+      .maybeSingle();
+    if (claimError) throw new Error(`webhook delivery claim failed: ${claimError.message}`);
+    if (!claimed) continue;
 
-    const { data: webhook } = await db
+    const { data: webhook, error: webhookError } = await db
       .from("tenant_webhooks" as never)
       .select("id, url, secret, active, events")
       .eq("id", delivery.webhook_id)
       .maybeSingle();
+    if (webhookError) throw new Error(`webhook target load failed: ${webhookError.message}`);
     const target = webhook as TenantWebhookRow | null;
     const outcome = await processDelivery(
       delivery,
@@ -70,7 +77,7 @@ export async function pollWebhookDeliveries(
       { now: now.getTime() },
     );
 
-    await db
+    const { error: updateError } = await db
       .from("webhook_deliveries" as never)
       .update({
         status: outcome.status,
@@ -83,6 +90,7 @@ export async function pollWebhookDeliveries(
         delivered_at: outcome.status === "succeeded" ? new Date().toISOString() : null,
       } as never)
       .eq("id", delivery.id);
+    if (updateError) throw new Error(`webhook delivery update failed: ${updateError.message}`);
   }
 }
 

@@ -31,8 +31,15 @@ export default async function AdminCaseDetailPage({ params }: { params: Promise<
     );
   }
   const { incident, tenantName, locations, evidenceCount, consents, jobs, offers, timeline, manualReviews } = detail;
-  const liveJob = jobs.find((j) => !["cancelled", "failed", "closed"].includes(String(j.status)));
-  const caseOpen = !["closed", "cancelled"].includes(String(incident.status));
+  const dispatchJob = jobs.find(
+    (j) => !j.driver_id && ["created", "matching", "offered", "failed", "manual_review"].includes(String(j.status)),
+  );
+  const reviewJob = jobs.find((j) => ["created", "matching", "offered", "failed", "manual_review"].includes(String(j.status)));
+  const caseCancellable = [
+    "draft", "awaiting_bankid", "bankid_verified", "signed", "submitted",
+    "received", "more_info_required", "in_progress",
+  ].includes(String(incident.status));
+  const hasCaseActions = Boolean(dispatchJob || reviewJob || caseCancellable);
 
   const offerColumns: Column<Row>[] = [
     { key: "driver", header: "Förare", render: (r) => String(r.driver_id ?? "—").slice(0, 8) },
@@ -112,32 +119,34 @@ export default async function AdminCaseDetailPage({ params }: { params: Promise<
           ) : null}
         </Card>
 
-        {caseOpen ? (
+        {hasCaseActions ? (
           <Card>
             <h3 style={{ marginTop: 0 }}>Åtgärder (loggas alltid)</h3>
-            {liveJob && !liveJob.driver_id ? (
+            {dispatchJob ? (
               <form action={adminRedispatchJob} style={{ marginBottom: 14 }}>
-                <input type="hidden" name="tow_job_id" value={String(liveJob.id)} />
+                <input type="hidden" name="tow_job_id" value={String(dispatchJob.id)} />
                 <button type="submit">Skicka ut uppdraget igen</button>
                 <p style={{ opacity: 0.65, fontSize: 13, margin: "4px 0 0" }}>
                   Avbryter väntande erbjudanden och matchar behöriga bärgare på nytt.
                 </p>
               </form>
             ) : null}
-            {liveJob ? (
+            {reviewJob ? (
               <form action={adminCompleteJob} style={{ marginBottom: 14 }}>
-                <input type="hidden" name="tow_job_id" value={String(liveJob.id)} />
-                <label htmlFor="complete-reason" style={{ display: "block", fontSize: 13 }}>Anledning till manuell slutförning</label>
-                <input id="complete-reason" name="reason" required placeholder="T.ex. bekräftad slutförd per telefon" style={{ width: "100%" }} />
-                <button type="submit" style={{ marginTop: 6 }}>Markera som slutförd</button>
+                <input type="hidden" name="tow_job_id" value={String(reviewJob.id)} />
+                <label htmlFor="complete-reason" style={{ display: "block", fontSize: 13 }}>Anledning till manuell kontroll</label>
+                <input id="complete-reason" name="reason" required placeholder="T.ex. status behöver verifieras med förare och kund" style={{ width: "100%" }} />
+                <button type="submit" style={{ marginTop: 6 }}>Skicka till manuell kontroll</button>
               </form>
             ) : null}
-            <form action={adminCancelCase}>
-              <input type="hidden" name="incident_id" value={String(incident.id)} />
-              <label htmlFor="cancel-reason" style={{ display: "block", fontSize: 13 }}>Anledning till avbrytande</label>
-              <input id="cancel-reason" name="reason" required placeholder="T.ex. kunden återkallade begäran" style={{ width: "100%" }} />
-              <button type="submit" style={{ marginTop: 6 }}>Avbryt ärendet</button>
-            </form>
+            {caseCancellable ? (
+              <form action={adminCancelCase}>
+                <input type="hidden" name="incident_id" value={String(incident.id)} />
+                <label htmlFor="cancel-reason" style={{ display: "block", fontSize: 13 }}>Anledning till avbrytande</label>
+                <input id="cancel-reason" name="reason" required placeholder="T.ex. kunden återkallade begäran" style={{ width: "100%" }} />
+                <button type="submit" style={{ marginTop: 6 }}>Avbryt ärendet</button>
+              </form>
+            ) : null}
           </Card>
         ) : null}
       </div>

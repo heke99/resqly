@@ -12,6 +12,7 @@ import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
 import type { TowJobRecord } from "../repo/types";
 import { enqueueWebhookEvent } from "../services/notifications";
+import { apiActorFields } from "../services/audit";
 
 export interface RunDispatchInput {
   job: TowJobRecord;
@@ -20,6 +21,8 @@ export interface RunDispatchInput {
   priority: "normal" | "high" | "urgent";
   strategy?: DispatchStrategy;
   problemType?: string | null;
+  actorUserId?: string | null;
+  actorApiClientId?: string | null;
 }
 
 export type RunDispatchOutcome = OrchestrateDispatchOutcome;
@@ -27,8 +30,7 @@ export type RunDispatchOutcome = OrchestrateDispatchOutcome;
 /** Adapts the API repository to the shared orchestrator's store interface. */
 function dispatchStoreFromRepo(ctx: ApiContext): DispatchStore {
   return {
-    setJobStatus: (jobId, status) => ctx.repo.setTowJobStatus(jobId, status as never),
-    addJobStatusEvent: (event) => ctx.repo.addTowJobStatusEvent(event as unknown as Record<string, unknown>),
+    transitionJobStatus: (event) => ctx.repo.transitionTowJobStatus(event),
     getCandidates: (pickup, radiusKm, limit, query) =>
       ctx.repo.getDispatchCandidates(pickup, radiusKm, limit, {
         payerType: query.payerType,
@@ -39,8 +41,12 @@ function dispatchStoreFromRepo(ctx: ApiContext): DispatchStore {
     listDriverPushTokens: async (driverId) =>
       (await ctx.repo.listDriverDevices(driverId)).map((d) => d.expo_push_token),
     markOfferPush: (jobId, driverId, status, error) => ctx.repo.markOfferPush(jobId, driverId, status, error),
-    createManualReview: (row) => ctx.repo.createManualReview(row),
-    recordAudit: (row) => ctx.repo.recordAudit(row),
+    escalateManualReview: (row) => ctx.repo.escalateTowJobManualReview(row),
+    recordAudit: (row) =>
+      ctx.repo.recordAudit({
+        ...row,
+        ...apiActorFields(ctx),
+      }),
   };
 }
 
@@ -66,6 +72,12 @@ export async function runDispatchForJob(
       strategy: input.strategy,
       problemType: input.problemType ?? null,
       caseNumber: null,
+      actorUserId: input.actorUserId ?? ctx.userId ?? null,
+      actorApiClientId:
+        input.actorApiClientId ??
+        (!ctx.userId && ctx.apiClientId && !["public", "user-token"].includes(ctx.apiClientId)
+          ? ctx.apiClientId
+          : null),
       settings,
     },
     {
@@ -120,12 +132,30 @@ export async function runDispatch(ctx: ApiContext, body: unknown): Promise<Route
   const input = dispatchRunInputSchema.parse(body);
   const job = await ctx.repo.getTowJob(ctx.tenantId, input.tow_job_id);
   if (!job) throw notFound("Tow job not found");
+  let pickup = (await ctx.repo.getIncidentCoordinates(job.incident_id)).pickup;
+  if (!pickup) {
+    await ctx.repo.upsertIncidentLocation({
+      incident_id: job.incident_id,
+      kind: "pickup",
+      lat: input.pickup.lat,
+      lng: input.pickup.lng,
+    });
+    pickup = input.pickup;
+  }
   const outcome = await runDispatchForJob(ctx, {
     job,
-    pickup: input.pickup,
-    payerType: input.payer_type,
-    priority: input.priority,
+    pickup,
+    payerType: job.payer_type === "customer_private" ? "customer_private" : "insurance_company",
+    priority: (["normal", "high", "urgent"].includes(job.priority) ? job.priority : "normal") as
+      | "normal"
+      | "high"
+      | "urgent",
     strategy: input.dispatch_strategy,
+    actorUserId: ctx.userId ?? null,
+    actorApiClientId:
+      !ctx.userId && ctx.apiClientId && !["public", "user-token"].includes(ctx.apiClientId)
+        ? ctx.apiClientId
+        : null,
   });
   return {
     status: 200,

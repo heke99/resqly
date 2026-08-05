@@ -1,10 +1,12 @@
 import { newId } from "@resqly/utils";
 import { formatCaseNumber } from "@resqly/utils";
 import type { DispatchCandidate } from "@resqly/dispatch";
+import { ALL_API_SCOPES } from "./types";
 import type {
   AcceptOfferResult,
   ApiClientRecord,
   ApiRepo,
+  ApiScope,
   BankidSessionRecord,
   CustomerContact,
   DriverDeviceRecord,
@@ -92,8 +94,8 @@ export class MemoryRepo implements ApiRepo {
     this.settings.set(rec.id, { ...DEFAULT_SETTINGS });
     return rec;
   }
-  seedApiClient(tenantId: string, keyHash: string): ApiClientRecord {
-    const rec = { id: newId(), tenantId, active: true };
+  seedApiClient(tenantId: string, keyHash: string, scopes: ApiScope[] = ALL_API_SCOPES): ApiClientRecord {
+    const rec = { id: newId(), tenantId, active: true, scopes: [...scopes] };
     this.apiClients.set(keyHash, rec);
     return rec;
   }
@@ -130,15 +132,48 @@ export class MemoryRepo implements ApiRepo {
     this.auditLogs.push(row);
   }
   manualReviews: Array<Record<string, unknown>> = [];
-  async createManualReview(row: {
+  async escalateTowJobManualReview(row: {
     tenant_id: string;
     incident_id: string | null;
     tow_job_id: string;
-    reason: string;
+    status_reason: string;
+    review_reason: string;
+    actor_user_id?: string | null;
+    actor_api_client_id?: string | null;
+    actor_kind: "user" | "api_client" | "worker";
+    actor_worker?: string | null;
   }) {
-    if (!this.manualReviews.some((item) => item.tow_job_id === row.tow_job_id && item.status === "open")) {
-      this.manualReviews.push({ ...row, status: "open" });
+    const job = this.towJobs.get(row.tow_job_id);
+    if (!job || job.tenant_id !== row.tenant_id) throw new Error("tow job not found");
+    const fromStatus = job.status;
+    this.towJobs.set(job.id, { ...job, status: "manual_review" });
+    for (const offer of this.offers) {
+      if (offer.tow_job_id === job.id && offer.status === "pending") offer.status = "cancelled";
     }
+    if (!this.manualReviews.some((item) => item.tow_job_id === row.tow_job_id && ["open", "in_progress"].includes(String(item.status)))) {
+      this.manualReviews.push({
+        tenant_id: row.tenant_id,
+        incident_id: row.incident_id,
+        tow_job_id: row.tow_job_id,
+        reason: row.review_reason,
+        status: "open",
+        created_by_user_id: row.actor_user_id ?? null,
+        created_by_api_client_id: row.actor_api_client_id ?? null,
+        created_by_kind: row.actor_kind,
+        created_by_worker: row.actor_worker ?? null,
+      });
+    }
+    this.auditLogs.push({
+      tenant_id: row.tenant_id,
+      actor_user_id: row.actor_user_id ?? null,
+      actor_api_client_id: row.actor_api_client_id ?? null,
+      actor_kind: row.actor_kind,
+      actor_worker: row.actor_worker ?? null,
+      action: "status_change",
+      entity_type: "tow_job",
+      entity_id: row.tow_job_id,
+      metadata: { from: fromStatus, to: "manual_review", reason: row.status_reason },
+    });
   }
 
   priceLists = new Map<string, PriceListRecord>(); // keyed by tow company id
@@ -208,6 +243,15 @@ export class MemoryRepo implements ApiRepo {
     this.seq.set(key, next);
     return formatCaseNumber({ prefix: tenant.case_number_prefix, year, sequence: next });
   }
+  async assertIncidentContext(_input: {
+    tenantId: string;
+    customerUserId: string;
+    vehicleId: string | null;
+    insuranceCompanyId: string | null;
+  }) {
+    // Unit tests use synthetic UUIDs without a complete relational fixture.
+    // Production enforcement lives both in SupabaseRepo and migration 0027.
+  }
   async createIncident(row: Record<string, unknown>) {
     const rec = { id: newId(), ...(row as object) } as IncidentRecord;
     this.incidents.set(rec.id, rec);
@@ -220,10 +264,16 @@ export class MemoryRepo implements ApiRepo {
     lng: number;
     address?: string | null;
   }) {
+    const previous = this.incidentLocations.find(
+      (l) => l.incident_id === row.incident_id && l.kind === row.kind,
+    );
     this.incidentLocations = this.incidentLocations.filter(
       (l) => !(l.incident_id === row.incident_id && l.kind === row.kind),
     );
-    this.incidentLocations.push({ ...row, address: row.address ?? null });
+    this.incidentLocations.push({
+      ...row,
+      address: row.address === undefined ? previous?.address ?? null : row.address,
+    });
     // Keep the contact pickup in sync so dispatch/share tests see real coords.
     const contact = this.contacts.get(row.incident_id);
     if (contact && row.kind === "pickup") {
@@ -353,27 +403,45 @@ export class MemoryRepo implements ApiRepo {
       .filter((j) => j.tenant_id === tenantId && (!opts.status || j.status === opts.status))
       .slice(0, opts.limit);
   }
-  async setTowJobStatus(id: string, status: TowJobStatus) {
-    const job = this.towJobs.get(id);
-    if (job) job.status = status;
+  async transitionTowJobStatus(row: {
+    tow_job_id: string;
+    from_status: string | null;
+    to_status: string;
+    actor_user_id?: string | null;
+    actor_api_client_id?: string | null;
+    actor_worker?: string | null;
+    reason?: string | null;
+  }) {
+    const job = this.towJobs.get(row.tow_job_id);
+    if (!job) throw new Error("tow_job_not_found");
+    if (row.from_status && job.status !== row.from_status) throw new Error("stale_status");
+    job.status = row.to_status as TowJobStatus;
+    this.auditLogs.push({
+      tenant_id: job.tenant_id,
+      actor_user_id: row.actor_user_id ?? null,
+      actor_api_client_id: row.actor_api_client_id ?? null,
+      actor_worker: row.actor_worker ?? null,
+      action: "status_change",
+      entity_type: "tow_job",
+      entity_id: job.id,
+      fields: ["status"],
+      metadata: { from: row.from_status, to: row.to_status },
+    });
   }
-  async addTowJobStatusEvent(row: Record<string, unknown>) {
-    void row;
-  }
-  async assignTowJob(id: string, driverId: string, towCompanyId: string) {
+  async assignTowJob(_tenantId: string, id: string, driverId: string, towCompanyId: string, towVehicleId: string) {
     const job = this.towJobs.get(id);
     if (job) {
       job.driver_id = driverId;
       job.tow_company_id = towCompanyId;
+      job.tow_vehicle_id = towVehicleId;
     }
   }
   async createOffers(rows: Array<Record<string, unknown>>) {
     for (const r of rows) {
-      if (this.offers.some((offer) => offer.tow_job_id === r.tow_job_id && offer.driver_id === r.driver_id)) continue;
-      this.offers.push({
-        id: newId(),
-        tow_job_id: r.tow_job_id as string,
-        driver_id: r.driver_id as string,
+      const existing = this.offers.find(
+        (offer) => offer.tow_job_id === r.tow_job_id && offer.driver_id === r.driver_id,
+      );
+      const refreshed = {
         tow_company_id: (r.tow_company_id as string | undefined) ?? null,
         tow_vehicle_id: (r.tow_vehicle_id as string | undefined) ?? null,
         tenant_id: (r.tenant_id as string | undefined) ?? null,
@@ -381,16 +449,22 @@ export class MemoryRepo implements ApiRepo {
         rank: (r.rank as number | undefined) ?? 0,
         expires_at: (r.expires_at as string | undefined) ?? new Date(Date.now() + 120_000).toISOString(),
         push_status: "pending",
-      });
+      };
+      if (existing) {
+        Object.assign(existing, refreshed);
+      } else {
+        this.offers.push({
+          id: newId(),
+          tow_job_id: r.tow_job_id as string,
+          driver_id: r.driver_id as string,
+          ...refreshed,
+        });
+      }
     }
   }
   async getOfferForDriver(jobId: string, driverId: string) {
     const o = this.offers.find((x) => x.tow_job_id === jobId && x.driver_id === driverId);
     return o ? { status: o.status } : null;
-  }
-  async setOfferStatus(jobId: string, driverId: string, status: string) {
-    const o = this.offers.find((x) => x.tow_job_id === jobId && x.driver_id === driverId);
-    if (o) o.status = status;
   }
   // Mirrors the accept_tow_offer SQL function (0020): row-lock semantics are
   // approximated, expired offers are rejected, and a retry by the winning
@@ -440,11 +514,13 @@ export class MemoryRepo implements ApiRepo {
     };
   }
   async rejectOffer(jobId: string, driverId: string, reason: string | null) {
-    const o = this.offers.find((x) => x.tow_job_id === jobId && x.driver_id === driverId);
-    if (o) {
-      o.status = "rejected";
-      o.rejection_reason = reason;
-    }
+    const o = this.offers.find(
+      (x) => x.tow_job_id === jobId && x.driver_id === driverId && x.status === "pending",
+    );
+    if (!o) return false;
+    o.status = "rejected";
+    o.rejection_reason = reason;
+    return true;
   }
   async getDriverProfile(driverId: string) {
     return this.driverProfiles.get(driverId) ?? null;

@@ -26,16 +26,18 @@ export async function requireCustomer(request: Request): Promise<{ db: AppSupaba
   // older account. Metadata only fills values when it is actually present.
   if (authName) patch.full_name = authName;
   if (authPhone) patch.phone = authPhone;
-  await db.from("user_profiles" as never).upsert(patch as never);
+  const { error: profileError } = await db.from("user_profiles" as never).upsert(patch as never);
+  if (profileError) return jsonError(503, "Din kundprofil kunde inte synkroniseras. Försök igen om en stund.");
   return { db, user };
 }
 
 export async function getCompleteCustomerProfile(db: AppSupabaseClient, userId: string) {
-  const { data } = await db
+  const { data, error } = await db
     .from("user_profiles" as never)
     .select("full_name, phone, email")
     .eq("id", userId)
     .maybeSingle();
+  if (error) throw new Error(`Kundprofilen kunde inte läsas: ${error.message}`);
   const row = data as { full_name?: string | null; phone?: string | null; email?: string | null } | null;
   const fullName = row?.full_name?.trim() ?? "";
   const phone = row?.phone ? normalizePhoneE164(row.phone) : null;
@@ -66,13 +68,14 @@ export async function replayIfIdempotent(
 ): Promise<{ key: string | null; replay: NextResponse | null }> {
   const key = request.headers.get("idempotency-key") ?? request.headers.get("x-idempotency-key");
   if (!key) return { key: null, replay: null };
-  const { data } = await db
+  const { data, error } = await db
     .from("request_idempotency_keys" as never)
     .select("response")
     .eq("scope", `user:${userId}`)
     .eq("action", action)
     .eq("idempotency_key", key)
     .maybeSingle();
+  if (error) throw new Error(`Idempotency lookup failed: ${error.message}`);
   const stored = data as { response: unknown } | null;
   if (!stored) return { key, replay: null };
   return {

@@ -30,7 +30,9 @@ async function getUser(db: AppSupabaseClient, token: string): Promise<AuthUser |
 async function ensureProfile(db: AppSupabaseClient, user: AuthUser) {
   const email = user.email ?? null;
   const fullName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
-  await db.from("user_profiles" as never).upsert({ id: user.id, email, full_name: fullName } as never);
+  const { error } = await db.from("user_profiles" as never)
+    .upsert({ id: user.id, email, full_name: fullName } as never);
+  if (error) throw new Error(`Adminprofilen kunde inte sparas: ${error.message}`);
 }
 
 async function maybeBootstrapFirstSuperadmin(db: AppSupabaseClient, user: AuthUser): Promise<void> {
@@ -38,15 +40,19 @@ async function maybeBootstrapFirstSuperadmin(db: AppSupabaseClient, user: AuthUs
   const email = user.email?.trim().toLowerCase();
   if (!configured || !email || configured !== email) return;
 
-  const { data: existing } = await db
+  const { data: existing, error: lookupError } = await db
     .from("user_profiles" as never)
     .select("id")
     .eq("is_platform_admin", true)
     .limit(1);
+  if (lookupError) throw new Error(`Plattformsrollen kunde inte kontrolleras: ${lookupError.message}`);
   if (((existing as unknown[] | null) ?? []).length > 0) return;
 
-  await db.from("user_profiles" as never).update({ is_platform_admin: true } as never).eq("id", user.id);
-  await db.from("audit_logs" as never).insert({
+  const { error: grantError } = await db.from("user_profiles" as never)
+    .update({ is_platform_admin: true } as never)
+    .eq("id", user.id);
+  if (grantError) throw new Error(`Plattformsrollen kunde inte tilldelas: ${grantError.message}`);
+  const { error: auditError } = await db.from("audit_logs" as never).insert({
     tenant_id: null,
     actor_user_id: user.id,
     action: "grant_role",
@@ -55,6 +61,7 @@ async function maybeBootstrapFirstSuperadmin(db: AppSupabaseClient, user: AuthUs
     fields: ["is_platform_admin"],
     metadata: { bootstrap: true },
   } as never);
+  if (auditError) throw new Error(`Plattformsrollen tilldelades men revisionsloggen misslyckades: ${auditError.message}`);
 }
 
 export async function requirePlatformAdmin(): Promise<AdminSession> {

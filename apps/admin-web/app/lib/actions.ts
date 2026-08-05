@@ -89,12 +89,22 @@ function portalBaseUrl(): string {
 type AdminAuthUser = { id: string; email?: string | null };
 type AdminAuthError = { message: string } | null;
 
+async function mustSucceed<T extends { error?: { message: string } | null }>(
+  operation: PromiseLike<T>,
+  context: string,
+): Promise<T> {
+  const result = await operation;
+  if (result.error) throw new Error(`${context}: ${result.error.message}`);
+  return result;
+}
+
 async function findExistingAuthUserIdByEmail(db: Awaited<ReturnType<typeof requirePlatformAdmin>>["db"], email: string): Promise<string | null> {
-  const { data: profile } = await db
+  const { data: profile, error: profileError } = await db
     .from("user_profiles" as never)
     .select("id, email")
     .eq("email", email)
     .maybeSingle();
+  if (profileError) throw new Error(`Kunde inte söka efter befintlig användare: ${profileError.message}`);
   const profileId = (profile as { id?: string } | null)?.id;
   if (profileId) return profileId;
 
@@ -102,7 +112,7 @@ async function findExistingAuthUserIdByEmail(db: Awaited<ReturnType<typeof requi
     listUsers(options?: { page?: number; perPage?: number }): Promise<{ data: { users: AdminAuthUser[] }; error: AdminAuthError }>;
   };
   const { data, error } = await admin.listUsers({ page: 1, perPage: 1000 });
-  if (error) return null;
+  if (error) throw new Error(`Kunde inte läsa autentiseringsanvändare: ${error.message}`);
   return data.users.find((user) => user.email?.toLowerCase() === email)?.id ?? null;
 }
 
@@ -161,11 +171,21 @@ async function createTenantAdminForTenant(input: {
   });
   const userId = invite.userId;
 
-  await db.from("user_profiles" as never).upsert({ id: userId, email: input.email, full_name: input.fullName } as never);
-  await db.from("tenant_users" as never).upsert({ tenant_id: input.tenantId, user_id: userId, status: "active" } as never, { onConflict: "tenant_id,user_id" } as never);
-  await db.from("user_roles" as never).upsert({ tenant_id: input.tenantId, user_id: userId, role_key: input.roleKey } as never, { onConflict: "tenant_id,user_id,role_key" } as never);
+  await mustSucceed(
+    db.from("user_profiles" as never).upsert({ id: userId, email: input.email, full_name: input.fullName } as never),
+    "Databasåtgärden misslyckades",
+  );
+  await mustSucceed(
+    db.from("tenant_users" as never).upsert({ tenant_id: input.tenantId, user_id: userId, status: "active" } as never, { onConflict: "tenant_id,user_id" } as never),
+    "Databasåtgärden misslyckades",
+  );
+  await mustSucceed(
+    db.from("user_roles" as never).upsert({ tenant_id: input.tenantId, user_id: userId, role_key: input.roleKey } as never, { onConflict: "tenant_id,user_id,role_key" } as never),
+    "Databasåtgärden misslyckades",
+  );
 
-  await db.from("audit_logs" as never).insert({
+  await mustSucceed(
+    db.from("audit_logs" as never).insert({
     tenant_id: input.tenantId,
     actor_user_id: input.actorUserId,
     action: "invite",
@@ -178,7 +198,9 @@ async function createTenantAdminForTenant(input: {
       invitation_error: invite.invitationError ?? null,
       set_password_url: `${portalBaseUrl()}/set-password`,
     },
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
 }
 
 /** Superadmin: create a complete white-label tenant with defaults, branding and optional first admin. */
@@ -222,7 +244,8 @@ export async function createTenant(formData: FormData): Promise<void> {
   if (error) throw new Error(error.message);
   const tenantId = (data as { id: string }).id;
 
-  await db.from("tenant_branding" as never).insert({
+  await mustSucceed(
+    db.from("tenant_branding" as never).insert({
     tenant_id: tenantId,
     product_name: productName,
     logo_url: logoUrl,
@@ -231,49 +254,73 @@ export async function createTenant(formData: FormData): Promise<void> {
     support_phone: supportPhone,
     support_email: supportEmail,
     support_url: supportUrl,
-  } as never);
-  await db.from("tenant_theme_tokens" as never).insert({
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
+  await mustSucceed(
+    db.from("tenant_theme_tokens" as never).insert({
     tenant_id: tenantId,
     color_primary: colorPrimary,
     color_secondary: colorSecondary,
     color_background: colorBackground,
-  } as never);
-  await db.from("tenant_settings" as never).insert({
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
+  await mustSucceed(
+    db.from("tenant_settings" as never).insert({
     tenant_id: tenantId,
     default_dispatch_strategy: text(formData, "default_dispatch_strategy") ?? "eta_first",
     bankid_required_for_claims: bool(formData, "bankid_required_for_claims"),
     bankid_required_for_tow: bool(formData, "bankid_required_for_tow"),
     allow_marketplace_fallback: bool(formData, "allow_marketplace_fallback"),
     max_dispatch_radius_km: numberOrNull(formData, "max_dispatch_radius_km") ?? 50,
-  } as never);
-  await db.from("tenant_feature_flags" as never).insert({
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
+  await mustSucceed(
+    db.from("tenant_feature_flags" as never).insert({
     tenant_id: tenantId,
     damage_claims_enabled: bool(formData, "damage_claims_enabled"),
     marketplace_enabled: bool(formData, "marketplace_enabled"),
     realtime_tracking_enabled: true,
-  } as never);
-  await db.from("tenant_legal_texts" as never).insert({
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
+  await mustSucceed(
+    db.from("tenant_legal_texts" as never).insert({
     tenant_id: tenantId,
     locale: "sv-SE",
     terms_of_service: terms,
     privacy_policy: privacy,
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
   if (customDomain) {
-    await db.from("tenant_domains" as never).insert({ tenant_id: tenantId, domain: customDomain, is_primary: true, verified: false } as never);
+    await mustSucceed(
+      db.from("tenant_domains" as never).insert({ tenant_id: tenantId, domain: customDomain, is_primary: true, verified: false } as never),
+      "Databasåtgärden misslyckades",
+    );
   }
 
   if (type === "insurance_company") {
-    await db.from("insurance_companies" as never).insert({ tenant_id: tenantId, name } as never);
+    await mustSucceed(
+      db.from("insurance_companies" as never).insert({ tenant_id: tenantId, name } as never),
+      "Databasåtgärden misslyckades",
+    );
   }
   if (type === "tow_company") {
-    await db.from("tow_companies" as never).insert({ tenant_id: tenantId, name } as never);
+    await mustSucceed(
+      db.from("tow_companies" as never).insert({ tenant_id: tenantId, name } as never),
+      "Databasåtgärden misslyckades",
+    );
   }
 
   if (adminEmail && (type === "insurance_company" || type === "tow_company")) {
     await createTenantAdminForTenant({ tenantId, tenantType: type, email: adminEmail, fullName: adminName, roleKey, actorUserId: user.id });
   }
 
-  await db.from("audit_logs" as never).insert({
+  await mustSucceed(
+    db.from("audit_logs" as never).insert({
     tenant_id: tenantId,
     actor_user_id: user.id,
     action: "create",
@@ -281,7 +328,9 @@ export async function createTenant(formData: FormData): Promise<void> {
     entity_id: tenantId,
     fields: ["name", "slug", "case_number_prefix", "branding", "settings"],
     metadata: { customer_link: `${process.env.NEXT_PUBLIC_CUSTOMER_WEB_URL ?? "https://app.resqly.se"}/partner/${slug}` },
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
 
   revalidatePath("/");
   revalidatePath("/tenants");
@@ -296,10 +345,14 @@ export async function updateTenantBranding(formData: FormData): Promise<void> {
 
   const prefix = text(formData, "case_number_prefix")?.toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (prefix) {
-    await db.from("tenants" as never).update({ case_number_prefix: prefix } as never).eq("id", tenantId);
+    await mustSucceed(
+      db.from("tenants" as never).update({ case_number_prefix: prefix } as never).eq("id", tenantId),
+      "Databasåtgärden misslyckades",
+    );
   }
 
-  await db.from("tenant_branding" as never).upsert({
+  await mustSucceed(
+    db.from("tenant_branding" as never).upsert({
     tenant_id: tenantId,
     product_name: text(formData, "product_name"),
     logo_url: text(formData, "logo_url"),
@@ -308,51 +361,71 @@ export async function updateTenantBranding(formData: FormData): Promise<void> {
     support_phone: text(formData, "support_phone"),
     support_email: text(formData, "support_email"),
     support_url: text(formData, "support_url"),
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
 
-  await db.from("tenant_theme_tokens" as never).upsert({
+  await mustSucceed(
+    db.from("tenant_theme_tokens" as never).upsert({
     tenant_id: tenantId,
     color_primary: text(formData, "color_primary") ?? "#0B5FFF",
     color_secondary: text(formData, "color_secondary") ?? "#1F2937",
     color_background: text(formData, "color_background") ?? "#FFFFFF",
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
 
-  await db.from("tenant_settings" as never).upsert({
+  await mustSucceed(
+    db.from("tenant_settings" as never).upsert({
     tenant_id: tenantId,
     default_dispatch_strategy: text(formData, "default_dispatch_strategy") ?? "eta_first",
     bankid_required_for_claims: bool(formData, "bankid_required_for_claims"),
     bankid_required_for_tow: bool(formData, "bankid_required_for_tow"),
     allow_marketplace_fallback: bool(formData, "allow_marketplace_fallback"),
     max_dispatch_radius_km: numberOrNull(formData, "max_dispatch_radius_km") ?? 50,
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
 
-  await db.from("tenant_feature_flags" as never).upsert({
+  await mustSucceed(
+    db.from("tenant_feature_flags" as never).upsert({
     tenant_id: tenantId,
     damage_claims_enabled: bool(formData, "damage_claims_enabled"),
     marketplace_enabled: bool(formData, "marketplace_enabled"),
     realtime_tracking_enabled: true,
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
 
-  await db.from("tenant_legal_texts" as never).upsert({
+  await mustSucceed(
+    db.from("tenant_legal_texts" as never).upsert({
     tenant_id: tenantId,
     locale: "sv-SE",
     terms_of_service: text(formData, "terms_of_service"),
     privacy_policy: text(formData, "privacy_policy"),
-  } as never, { onConflict: "tenant_id,locale" } as never);
+  } as never, { onConflict: "tenant_id,locale" } as never),
+    "Databasåtgärden misslyckades",
+  );
 
   const domain = text(formData, "custom_domain")?.toLowerCase();
   if (domain) {
-    await db.from("tenant_domains" as never).upsert({ tenant_id: tenantId, domain, is_primary: true } as never, { onConflict: "domain" } as never);
+    await mustSucceed(
+      db.from("tenant_domains" as never).upsert({ tenant_id: tenantId, domain, is_primary: true } as never, { onConflict: "domain" } as never),
+      "Databasåtgärden misslyckades",
+    );
   }
 
-  await db.from("audit_logs" as never).insert({
+  await mustSucceed(
+    db.from("audit_logs" as never).insert({
     tenant_id: tenantId,
     actor_user_id: user.id,
     action: "update",
     entity_type: "tenant_branding",
     entity_id: tenantId,
     fields: ["branding", "theme", "settings", "legal"],
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
   revalidatePath(`/tenants/${tenantId}`);
 }
 
@@ -362,7 +435,8 @@ export async function upsertAgreement(formData: FormData): Promise<void> {
   const towCompanyId = text(formData, "tow_company_id");
   const insurerTenantId = text(formData, "insurance_tenant_id");
   if (!towCompanyId || !insurerTenantId) throw new Error("Tow company and insurance company are required.");
-  await db.from("tow_company_insurance_agreements" as never).upsert(
+  await mustSucceed(
+    db.from("tow_company_insurance_agreements" as never).upsert(
     {
       tow_company_id: towCompanyId,
       insurance_tenant_id: insurerTenantId,
@@ -372,15 +446,20 @@ export async function upsertAgreement(formData: FormData): Promise<void> {
       pricing_model: text(formData, "pricing_model") ?? "standard",
     } as never,
     { onConflict: "tow_company_id,insurance_tenant_id" } as never,
+  ),
+    "Databasåtgärden misslyckades",
   );
-  await db.from("audit_logs" as never).insert({
+  await mustSucceed(
+    db.from("audit_logs" as never).insert({
     tenant_id: insurerTenantId,
     actor_user_id: user.id,
     action: "update",
     entity_type: "tow_company_insurance_agreement",
     entity_id: towCompanyId,
     fields: ["status", "priority", "sla_minutes"],
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
   revalidatePath("/agreements");
 }
 
@@ -389,7 +468,8 @@ export async function upsertMarketplace(formData: FormData): Promise<void> {
   const { db, user } = await requirePlatformAdmin();
   const towCompanyId = text(formData, "tow_company_id");
   if (!towCompanyId) throw new Error("Tow company is required.");
-  await db.from("tow_company_marketplace_settings" as never).upsert(
+  await mustSucceed(
+    db.from("tow_company_marketplace_settings" as never).upsert(
     {
       tow_company_id: towCompanyId,
       accepts_direct_orders: bool(formData, "accepts_direct_orders"),
@@ -398,14 +478,19 @@ export async function upsertMarketplace(formData: FormData): Promise<void> {
       min_price_minor: Math.max(0, Math.round((numberOrNull(formData, "min_price_sek") ?? 0) * 100)),
     } as never,
     { onConflict: "tow_company_id" } as never,
+  ),
+    "Databasåtgärden misslyckades",
   );
-  await db.from("audit_logs" as never).insert({
+  await mustSucceed(
+    db.from("audit_logs" as never).insert({
     actor_user_id: user.id,
     action: "update",
     entity_type: "tow_company_marketplace_settings",
     entity_id: towCompanyId,
     fields: ["accepts_direct_orders", "active"],
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
   revalidatePath("/agreements");
 }
 
@@ -418,7 +503,12 @@ export async function createTenantAdmin(formData: FormData): Promise<void> {
   const roleKey = text(formData, "role_key") ?? "insurance_owner_admin";
   if (!email) throw new Error("Email is required.");
 
-  const { data: tenant } = await db.from("tenants" as never).select("type").eq("id", tenantId).maybeSingle();
+  const { data: tenant, error: tenantError } = await db
+    .from("tenants" as never)
+    .select("type")
+    .eq("id", tenantId)
+    .maybeSingle();
+  if (tenantError) throw new Error(tenantError.message);
   const tenantType = (tenant as { type?: string } | null)?.type;
   if (!tenantType) throw new Error("Tenant not found.");
 
@@ -433,22 +523,28 @@ export async function saveVehiclePermissionAdmin(formData: FormData): Promise<vo
   const towVehicleId = text(formData, "tow_vehicle_id");
   const status = text(formData, "status") ?? "active";
   if (!agreementId || !towVehicleId) throw new Error("Avtal och bärgningsbil krävs.");
-  await db.from("tow_vehicle_insurance_permissions" as never).upsert(
+  await mustSucceed(
+    db.from("tow_vehicle_insurance_permissions" as never).upsert(
     {
       insurance_agreement_id: agreementId,
       tow_vehicle_id: towVehicleId,
       status,
     } as never,
     { onConflict: "insurance_agreement_id,tow_vehicle_id" } as never,
+  ),
+    "Databasåtgärden misslyckades",
   );
-  await db.from("audit_logs" as never).insert({
+  await mustSucceed(
+    db.from("audit_logs" as never).insert({
     actor_user_id: user.id,
     action: "upsert",
     entity_type: "tow_vehicle_insurance_permission",
     entity_id: towVehicleId,
     fields: ["status"],
     metadata: { agreement_id: agreementId, status },
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
   revalidatePath("/agreements");
   revalidatePath("/readiness");
 }
@@ -458,17 +554,22 @@ export async function retryIntegrationDelivery(formData: FormData): Promise<void
   const { db, user } = await requirePlatformAdmin();
   const deliveryId = text(formData, "delivery_id");
   if (!deliveryId) throw new Error("Leverans-id krävs.");
-  await db
-    .from("webhook_deliveries" as never)
-    .update({ status: "pending", next_attempt_at: new Date().toISOString(), last_error: null } as never)
-    .eq("id", deliveryId);
-  await db.from("audit_logs" as never).insert({
+  await mustSucceed(
+    db.from("webhook_deliveries" as never)
+      .update({ status: "pending", next_attempt_at: new Date().toISOString(), last_error: null } as never)
+      .eq("id", deliveryId),
+    "Webhook-leveransen kunde inte återställas",
+  );
+  await mustSucceed(
+    db.from("audit_logs" as never).insert({
     actor_user_id: user.id,
     action: "retry",
     entity_type: "webhook_delivery",
     entity_id: deliveryId,
     fields: ["status"],
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
   revalidatePath("/operations");
 }
 
@@ -477,17 +578,22 @@ export async function retryOperationalNotification(formData: FormData): Promise<
   const { db, user } = await requirePlatformAdmin();
   const id = text(formData, "notification_id");
   if (!id) throw new Error("Notis-id krävs.");
-  await db
-    .from("operational_notification_queue" as never)
-    .update({ status: "pending", attempts: 0, next_attempt_at: new Date().toISOString(), last_error: null } as never)
-    .eq("id", id);
-  await db.from("audit_logs" as never).insert({
+  await mustSucceed(
+    db.from("operational_notification_queue" as never)
+      .update({ status: "pending", attempts: 0, next_attempt_at: new Date().toISOString(), last_error: null } as never)
+      .eq("id", id),
+    "Notisen kunde inte återställas",
+  );
+  await mustSucceed(
+    db.from("audit_logs" as never).insert({
     actor_user_id: user.id,
     action: "retry",
     entity_type: "operational_notification",
     entity_id: id,
     fields: ["status"],
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
   revalidatePath("/operations");
 }
 
@@ -496,15 +602,38 @@ export async function resolveManualReview(formData: FormData): Promise<void> {
   const { db, user } = await requirePlatformAdmin();
   const id = text(formData, "review_id");
   if (!id) throw new Error("Ärende-id krävs.");
-  await db.from("manual_reviews" as never).update({ status: "resolved" } as never).eq("id", id);
-  await db.from("audit_logs" as never).insert({
+  const { data: review, error: reviewError } = await db
+    .from("manual_reviews" as never)
+    .select("id, tenant_id, status")
+    .eq("id", id)
+    .maybeSingle();
+  if (reviewError) throw new Error(reviewError.message);
+  const current = review as { tenant_id: string; status: string } | null;
+  if (!current) throw new Error("Den manuella kontrollen hittades inte.");
+  if (current.status === "resolved") return;
+
+  const { error } = await db
+    .from("manual_reviews" as never)
+    .update({
+      status: "resolved",
+      resolved_by_user_id: user.id,
+      resolved_at: new Date().toISOString(),
+    } as never)
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+  await mustSucceed(
+    db.from("audit_logs" as never).insert({
+    tenant_id: current.tenant_id,
     actor_user_id: user.id,
+    actor_kind: "user",
     action: "update",
     entity_type: "manual_review",
     entity_id: id,
-    fields: ["status"],
-    metadata: { status: "resolved" },
-  } as never);
+    fields: ["status", "resolved_by_user_id", "resolved_at"],
+    metadata: { from: current.status, to: "resolved" },
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
   revalidatePath("/operations");
 }
 
@@ -518,11 +647,12 @@ export async function adminRedispatchJob(formData: FormData): Promise<void> {
   const jobId = text(formData, "tow_job_id");
   if (!jobId) throw new Error("Uppdrags-id krävs.");
 
-  const { data: job } = await db
+  const { data: job, error: jobError } = await db
     .from("tow_jobs" as never)
     .select("id, tenant_id, incident_id, status, driver_id, payer_type, priority")
     .eq("id", jobId)
     .maybeSingle();
+  if (jobError) throw new Error(jobError.message);
   const j = job as {
     id: string;
     tenant_id: string;
@@ -534,11 +664,11 @@ export async function adminRedispatchJob(formData: FormData): Promise<void> {
   } | null;
   if (!j) throw new Error("Uppdraget hittades inte.");
   if (j.driver_id) throw new Error("Uppdraget har redan en förare. Avbryt uppdraget först om det ska omfördelas.");
-  if (["completed", "invoiced", "closed", "cancelled"].includes(j.status)) {
-    throw new Error("Uppdraget är avslutat och kan inte skickas ut igen.");
+  if (!["created", "matching", "offered", "failed", "manual_review"].includes(j.status)) {
+    throw new Error("Uppdragets nuvarande status kan inte skickas ut igen.");
   }
 
-  const { data: loc } = await db
+  const { data: loc, error: locationError } = await db
     .from("incident_locations" as never)
     .select("lat, lng")
     .eq("incident_id", j.incident_id)
@@ -546,22 +676,26 @@ export async function adminRedispatchJob(formData: FormData): Promise<void> {
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (locationError) throw new Error(locationError.message);
   const pickup = loc as { lat: number | null; lng: number | null } | null;
   if (!pickup || pickup.lat == null || pickup.lng == null) {
     throw new Error("Ärendet saknar upphämtningsposition — bekräfta adressen med kunden först.");
   }
 
-  await db
-    .from("tow_job_offers" as never)
-    .update({ status: "cancelled" } as never)
-    .eq("tow_job_id", j.id)
-    .eq("status", "pending");
+  await mustSucceed(
+    db.from("tow_job_offers" as never)
+      .update({ status: "cancelled" } as never)
+      .eq("tow_job_id", j.id)
+      .eq("status", "pending"),
+    "Befintliga erbjudanden kunde inte avslutas",
+  );
 
-  const { data: incident } = await db
+  const { data: incident, error: incidentError } = await db
     .from("incidents" as never)
     .select("problem_type, case_number")
     .eq("id", j.incident_id)
     .maybeSingle();
+  if (incidentError) throw new Error(incidentError.message);
   const inc = incident as { problem_type: string | null; case_number: string | null } | null;
 
   const settings = await loadDispatchSettings(db, j.tenant_id);
@@ -581,7 +715,8 @@ export async function adminRedispatchJob(formData: FormData): Promise<void> {
     { push: { enabled: process.env.EXPO_PUSH_ENABLED !== "false" } },
   );
 
-  await db.from("audit_logs" as never).insert({
+  await mustSucceed(
+    db.from("audit_logs" as never).insert({
     tenant_id: j.tenant_id,
     actor_user_id: user.id,
     action: "dispatch",
@@ -589,7 +724,9 @@ export async function adminRedispatchJob(formData: FormData): Promise<void> {
     entity_id: j.id,
     fields: ["status"],
     metadata: { manual_redispatch: true, outcome: outcome.status, offers: outcome.offeredDrivers.length },
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
   revalidatePath(`/cases/${j.incident_id}`);
   revalidatePath("/operations");
 }
@@ -602,98 +739,69 @@ export async function adminCancelCase(formData: FormData): Promise<void> {
   if (!incidentId) throw new Error("Ärende-id krävs.");
   if (!reason) throw new Error("Ange en anledning till att ärendet avbryts.");
 
-  const { data: incident } = await db
+  const { data: incident, error: incidentError } = await db
     .from("incidents" as never)
     .select("id, tenant_id, status")
     .eq("id", incidentId)
     .maybeSingle();
+  if (incidentError) throw new Error(incidentError.message);
   const inc = incident as { id: string; tenant_id: string; status: string } | null;
   if (!inc) throw new Error("Ärendet hittades inte.");
-  if (["closed", "cancelled"].includes(inc.status)) throw new Error("Ärendet är redan avslutat.");
-
-  const { data: jobs } = await db
-    .from("tow_jobs" as never)
-    .select("id, status")
-    .eq("incident_id", inc.id)
-    .not("status", "in", "(cancelled,failed,closed)" as never);
-  for (const job of (jobs as Array<{ id: string; status: string }> | null) ?? []) {
-    await db.from("tow_job_offers" as never).update({ status: "cancelled" } as never).eq("tow_job_id", job.id).eq("status", "pending");
-    await db.from("tow_jobs" as never).update({ status: "cancelled" } as never).eq("id", job.id);
-    await db.from("tow_job_status_events" as never).insert({
-      tow_job_id: job.id,
-      from_status: job.status,
-      to_status: "cancelled",
-      actor_user_id: user.id,
-      reason: `avbruten av plattformsansvarig: ${reason}`,
-    } as never);
+  if (!["draft", "awaiting_bankid", "bankid_verified", "signed", "submitted", "received", "more_info_required", "in_progress"].includes(inc.status)) {
+    throw new Error("Ärendets nuvarande status kan inte avbrytas.");
   }
 
-  await db.from("incidents" as never).update({ status: "cancelled" } as never).eq("id", inc.id);
-  await db.from("incident_status_events" as never).insert({
-    incident_id: inc.id,
-    from_status: inc.status,
-    to_status: "cancelled",
-    actor_user_id: user.id,
-    reason,
-  } as never);
-  await db.from("audit_logs" as never).insert({
-    tenant_id: inc.tenant_id,
-    actor_user_id: user.id,
-    action: "status_change",
-    entity_type: "incident",
-    entity_id: inc.id,
-    fields: ["status"],
-    metadata: { from: inc.status, to: "cancelled", manual_override: true, reason },
-  } as never);
+  const { data: cancelResult, error: cancelError } = await db.rpc(
+    "cancel_incident_workflow" as never,
+    {
+      p_incident: inc.id,
+      p_actor_user: user.id,
+      p_reason: reason,
+      p_customer_only: false,
+    } as never,
+  );
+  if (cancelError) throw new Error("Ärendet kunde inte avbrytas just nu.");
+  const result = (cancelResult ?? {}) as { error?: string };
+  if (result.error === "already_closed") throw new Error("Ärendet är redan avslutat.");
+  if (result.error === "incident_locked") throw new Error("Ärendets nuvarande status kan inte avbrytas.");
+  if (result.error === "tow_job_locked") throw new Error("Bärgningsuppdraget har gått för långt för att avbrytas här.");
+  if (result.error) throw new Error("Ärendet kunde inte avbrytas.");
   revalidatePath(`/cases/${inc.id}`);
 }
 
-/** Support tool: mark a stuck job as completed manually (with reason). */
+/** Support tool: move a stuck job to manual review without fabricating completion data. */
 export async function adminCompleteJob(formData: FormData): Promise<void> {
   const { db, user } = await requirePlatformAdmin();
   const jobId = text(formData, "tow_job_id");
   const reason = text(formData, "reason");
   if (!jobId) throw new Error("Uppdrags-id krävs.");
-  if (!reason) throw new Error("Ange en anledning till manuell slutförning.");
+  if (!reason) throw new Error("Ange varför uppdraget behöver manuell kontroll.");
 
-  const { data: job } = await db
+  const { data: job, error: jobReadError } = await db
     .from("tow_jobs" as never)
     .select("id, tenant_id, incident_id, status")
     .eq("id", jobId)
     .maybeSingle();
+  if (jobReadError) throw new Error(jobReadError.message);
   const j = job as { id: string; tenant_id: string; incident_id: string; status: string } | null;
   if (!j) throw new Error("Uppdraget hittades inte.");
-  if (["completed", "invoiced", "closed", "cancelled"].includes(j.status)) {
-    throw new Error("Uppdraget är redan avslutat.");
-  }
 
-  await db.from("tow_job_offers" as never).update({ status: "cancelled" } as never).eq("tow_job_id", j.id).eq("status", "pending");
-  await db.from("tow_jobs" as never).update({ status: "completed" } as never).eq("id", j.id);
-  await db.from("tow_job_status_events" as never).insert({
-    tow_job_id: j.id,
-    from_status: j.status,
-    to_status: "completed",
-    actor_user_id: user.id,
-    reason: `manuellt slutförd av plattformsansvarig: ${reason}`,
+  const { data, error } = await db.rpc("escalate_tow_job_manual_review" as never, {
+    p_job: j.id,
+    p_tenant: j.tenant_id,
+    p_actor_user: user.id,
+    p_reason: `eskalerad av plattformsansvarig: ${reason}`,
+    p_review_reason: reason,
+    p_assign_to: user.id,
   } as never);
-  await db.from("incidents" as never).update({ status: "completed" } as never).eq("id", j.incident_id);
-  await db.from("incident_status_events" as never).insert({
-    incident_id: j.incident_id,
-    from_status: null,
-    to_status: "completed",
-    actor_user_id: user.id,
-    reason: `bärgningen slutförd manuellt: ${reason}`,
-  } as never);
-  await db.from("audit_logs" as never).insert({
-    tenant_id: j.tenant_id,
-    actor_user_id: user.id,
-    action: "status_change",
-    entity_type: "tow_job",
-    entity_id: j.id,
-    fields: ["status"],
-    metadata: { from: j.status, to: "completed", manual_override: true, reason },
-  } as never);
+  if (error) throw new Error(`Uppdraget kunde inte skickas till manuell kontroll: ${error.message}`);
+  const result = (data ?? {}) as { error?: string };
+  if (result.error === "already_closed") throw new Error("Uppdraget är redan avslutat.");
+  if (result.error === "status_not_reviewable") throw new Error("Uppdragets nuvarande status kan inte flyttas till manuell kontroll.");
+  if (result.error) throw new Error("Uppdraget kunde inte skickas till manuell kontroll.");
+
   revalidatePath(`/cases/${j.incident_id}`);
+  revalidatePath("/operations");
 }
 
 /** Superadmin: create the deterministic staging demo constellation. Do not run this in production. */
@@ -705,14 +813,17 @@ export async function createStagingDemo(_formData?: FormData): Promise<void> {
   }
   const { error } = await db.rpc("create_resqly_staging_demo" as never, {} as never);
   if (error) throw new Error(error.message);
-  await db.from("audit_logs" as never).insert({
+  await mustSucceed(
+    db.from("audit_logs" as never).insert({
     actor_user_id: user.id,
     action: "create",
     entity_type: "staging_demo",
     entity_id: "create_resqly_staging_demo",
     fields: ["tenants", "agreements", "vehicles", "fallback", "legal"],
     metadata: { app_env: appEnv },
-  } as never);
+  } as never),
+    "Databasåtgärden misslyckades",
+  );
   revalidatePath("/");
   revalidatePath("/readiness");
   revalidatePath("/agreements");

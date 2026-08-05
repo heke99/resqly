@@ -17,6 +17,7 @@ import { MapsClient, buildEtaSnapshot, haversineMeters } from "@resqly/maps";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
 import { enqueueWebhookEvent, escapeHtml, sendEmail } from "../services/notifications";
+import { apiActorFields } from "../services/audit";
 
 const acceptSchema = z.object({});
 const rejectSchema = z.object({ reason: z.string().optional() });
@@ -170,17 +171,18 @@ export async function acceptJobForDriver(
   // A mobile retry repairs a missing share but does not duplicate audit,
   // webhooks or customer messages when the share already existed.
   if (!existingShare) {
-    await ctx.repo.recordAudit(
-      buildCustomerShareAudit({
+    await ctx.repo.recordAudit({
+      ...buildCustomerShareAudit({
         tenantId: job.tenant_id,
-        actorUserId: ctx.driverUserId ?? null,
+        actorUserId: ctx.driverUserId ?? ctx.userId ?? null,
         driverId,
         towJobId: jobId,
         fields: [...SHAREABLE_CUSTOMER_FIELDS],
         reason: "driver accepted job",
         ip: ctx.ip,
       }),
-    );
+      ...apiActorFields(ctx),
+    });
     await enqueueWebhookEvent(ctx, "tow.driver_accepted", {
       tow_job_id: jobId,
       incident_id: job.incident_id,
@@ -260,6 +262,7 @@ async function snapshotAcceptedPrice(
     await ctx.repo.setTowJobPriceSnapshot(jobId, snapshot as unknown as Record<string, unknown>);
     await ctx.repo.recordAudit({
       tenant_id: job.tenant_id,
+      ...apiActorFields(ctx),
       action: "update",
       entity_type: "tow_job",
       entity_id: jobId,
@@ -352,7 +355,7 @@ export async function completeTowJobEvidenceUpload(
   });
   await ctx.repo.recordAudit({
     tenant_id: job.tenant_id,
-    actor_user_id: ctx.driverUserId ?? null,
+    ...apiActorFields(ctx),
     action: "create",
     entity_type: "tow_job_evidence",
     entity_id: row.id,
@@ -370,9 +373,15 @@ export async function rejectTowJob(
   const { reason } = rejectSchema.parse(body);
   const driver_id = requireAuthenticatedDriver(ctx);
   const job = await loadJobForContext(ctx, id);
-  await ctx.repo.setOfferStatus(id, driver_id, "rejected");
+  const rejected = await ctx.repo.rejectOffer(id, driver_id, reason ?? null);
+  if (!rejected) {
+    throw new AppError("conflict", "Offer is no longer pending", {
+      user_message: "Erbjudandet är inte längre tillgängligt.",
+    });
+  }
   await ctx.repo.recordAudit({
     tenant_id: job.tenant_id,
+    ...apiActorFields(ctx),
     action: "update",
     entity_type: "tow_job_offer",
     entity_id: id,
@@ -396,17 +405,11 @@ export async function updateTowJobStatus(
     from: job.status,
     to: input.status,
     reason: input.reason,
+    actorUserId: ctx.userId ?? ctx.driverUserId ?? null,
+    actorApiClientId: ctx.userId || ctx.driverUserId ? null : (ctx.apiClientId ?? null),
+    actorKind: ctx.userId || ctx.driverUserId ? "user" : ctx.apiClientId ? "api_client" : "system",
   });
-  await ctx.repo.setTowJobStatus(id, input.status);
-  await ctx.repo.addTowJobStatusEvent(event);
-  await ctx.repo.recordAudit({
-    tenant_id: job.tenant_id,
-    action: "status_change",
-    entity_type: "tow_job",
-    entity_id: id,
-    fields: ["status"],
-    metadata: { from: job.status, to: input.status },
-  });
+  await ctx.repo.transitionTowJobStatus(event);
   const eventByStatus: Record<string, string> = {
     driver_en_route: "tow.driver_en_route",
     driver_arrived: "tow.driver_arrived",
@@ -519,7 +522,7 @@ export async function completeTowJob(
   if (!finalized.already_finalized) {
     await ctx.repo.recordAudit({
       tenant_id: job.tenant_id,
-      actor_user_id: ctx.driverUserId ?? null,
+      ...apiActorFields(ctx),
       action: "status_change",
       entity_type: "tow_job",
       entity_id: id,

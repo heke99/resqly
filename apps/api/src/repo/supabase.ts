@@ -1,10 +1,11 @@
 import { allocateCaseNumber, type AppSupabaseClient } from "@resqly/database";
-import type { Coordinate, IncidentStatus, TowJobStatus } from "@resqly/types";
+import type { Coordinate, IncidentStatus } from "@resqly/types";
 import type { DispatchCandidate } from "@resqly/dispatch";
 import type {
   AcceptOfferResult,
   ApiClientRecord,
   ApiRepo,
+  ApiScope,
   BankidSessionRecord,
   CustomerContact,
   DispatchCandidateOptions,
@@ -42,69 +43,137 @@ export class SupabaseRepo implements ApiRepo {
   }
 
   async findApiClientByKeyHash(hash: string): Promise<ApiClientRecord | null> {
-    const { data } = await this.table("tenant_api_clients")
-      .select("id, tenant_id, active")
+    const { data, error } = await this.table("tenant_api_clients")
+      .select("id, tenant_id, active, scopes")
       .eq("api_key_hash", hash)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     if (!data) return null;
-    const row = data as { id: string; tenant_id: string; active: boolean };
-    return { id: row.id, tenantId: row.tenant_id, active: row.active };
+    const row = data as { id: string; tenant_id: string; active: boolean; scopes?: string[] | null };
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      active: row.active,
+      scopes: (row.scopes ?? []) as ApiScope[],
+    };
   }
 
   async logApiRequest(row: Record<string, unknown>): Promise<void> {
-    await this.table("api_request_logs").insert(row as never);
+    const { error } = await this.table("api_request_logs").insert(row as never);
+    if (error) throw new Error(error.message);
   }
   async recordAudit(row: Record<string, unknown>): Promise<void> {
-    await this.table("audit_logs").insert(row as never);
+    const { error } = await this.table("audit_logs").insert(row as never);
+    if (error) throw new Error(error.message);
   }
 
-  async createManualReview(row: {
+  async escalateTowJobManualReview(row: {
     tenant_id: string;
     incident_id: string | null;
     tow_job_id: string;
-    reason: string;
+    status_reason: string;
+    review_reason: string;
+    actor_user_id?: string | null;
+    actor_api_client_id?: string | null;
+    actor_kind: "user" | "api_client" | "worker";
+    actor_worker?: string | null;
   }): Promise<void> {
-    const { data: existing } = await this.table("manual_reviews")
-      .select("id")
-      .eq("tow_job_id", row.tow_job_id)
-      .in("status", ["open", "in_progress"])
-      .limit(1)
-      .maybeSingle();
-    if (existing) return;
-    const { error } = await this.table("manual_reviews").insert({ ...row, status: "open" } as never);
-    // A concurrent request may have inserted the same open review first.
-    if (error && (error as { code?: string }).code !== "23505") throw error;
+    const { data, error } = await this.db.rpc("escalate_tow_job_manual_review" as never, {
+      p_job: row.tow_job_id,
+      p_tenant: row.tenant_id,
+      p_actor_user: row.actor_user_id ?? null,
+      p_reason: row.status_reason,
+      p_review_reason: row.review_reason,
+      p_assign_to: null,
+      p_actor_worker: row.actor_worker ?? null,
+      p_actor_api_client: row.actor_api_client_id ?? null,
+    } as never);
+    if (error) throw new Error(error.message);
+    const result = (Array.isArray(data) ? data[0] : data) as { error?: string } | null;
+    if (result?.error) throw new Error(`manual review escalation failed: ${result.error}`);
   }
 
   async getTenant(id: string): Promise<TenantRecord | null> {
-    const { data } = await this.table("tenants")
+    const { data, error } = await this.table("tenants")
       .select("id, slug, name, type, case_number_prefix")
       .eq("id", id)
+      .eq("status", "active")
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as TenantRecord | null) ?? null;
   }
 
   async getTenantSettings(id: string): Promise<TenantSettingsRecord> {
-    const { data } = await this.table("tenant_settings").select("*").eq("tenant_id", id).maybeSingle();
+    const { data, error } = await this.table("tenant_settings").select("*").eq("tenant_id", id).maybeSingle();
+    if (error) throw new Error(error.message);
     return { ...DEFAULT_SETTINGS, ...((data as Partial<TenantSettingsRecord> | null) ?? {}) };
   }
   async getTenantBranding(id: string) {
-    const { data } = await this.table("tenant_branding").select("*").eq("tenant_id", id).maybeSingle();
+    const { data, error } = await this.table("tenant_branding").select("*").eq("tenant_id", id).maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as Record<string, unknown> | null) ?? null;
   }
   async getTenantThemeTokens(id: string) {
-    const { data } = await this.table("tenant_theme_tokens").select("*").eq("tenant_id", id).maybeSingle();
+    const { data, error } = await this.table("tenant_theme_tokens").select("*").eq("tenant_id", id).maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as Record<string, unknown> | null) ?? null;
   }
   async updateTenantBranding(id: string, patch: Record<string, unknown>) {
-    await this.table("tenant_branding").update(patch as never).eq("tenant_id", id);
+    const { error } = await this.table("tenant_branding").update(patch as never).eq("tenant_id", id);
+    if (error) throw new Error(error.message);
   }
   async updateTenantSettings(id: string, patch: Record<string, unknown>) {
-    await this.table("tenant_settings").update(patch as never).eq("tenant_id", id);
+    const { error } = await this.table("tenant_settings").update(patch as never).eq("tenant_id", id);
+    if (error) throw new Error(error.message);
   }
 
   async allocateCaseNumber(tenantId: string, scope: string): Promise<string> {
     return allocateCaseNumber(this.db, tenantId, scope);
+  }
+
+  async assertIncidentContext(input: {
+    tenantId: string;
+    customerUserId: string;
+    vehicleId: string | null;
+    insuranceCompanyId: string | null;
+  }): Promise<void> {
+    const { data: customer, error: customerError } = await this.table("user_profiles")
+      .select("id")
+      .eq("id", input.customerUserId)
+      .maybeSingle();
+    if (customerError) throw new Error(customerError.message);
+    if (!customer) throw new Error("customer_user_not_found");
+
+    if (input.vehicleId) {
+      const { data: vehicle, error: vehicleError } = await this.table("vehicles")
+        .select("id, owner_user_id")
+        .eq("id", input.vehicleId)
+        .maybeSingle();
+      if (vehicleError) throw new Error(vehicleError.message);
+      if (!vehicle) throw new Error("vehicle_not_found");
+      const ownerUserId = (vehicle as { owner_user_id?: string }).owner_user_id ?? null;
+      if (ownerUserId !== input.customerUserId) {
+        const { data: coOwner, error: coOwnerError } = await this.table("vehicle_owners")
+          .select("id")
+          .eq("vehicle_id", input.vehicleId)
+          .eq("user_id", input.customerUserId)
+          .maybeSingle();
+        if (coOwnerError) throw new Error(coOwnerError.message);
+        if (!coOwner) throw new Error("vehicle_not_owned_by_customer");
+      }
+    }
+
+    if (input.insuranceCompanyId) {
+      const { data: insurer, error: insurerError } = await this.table("insurance_companies")
+        .select("id, tenant_id, active")
+        .eq("id", input.insuranceCompanyId)
+        .maybeSingle();
+      if (insurerError) throw new Error(insurerError.message);
+      const row = insurer as { tenant_id?: string; active?: boolean } | null;
+      if (!row) throw new Error("insurance_company_not_found");
+      if (row.tenant_id !== input.tenantId) throw new Error("insurance_company_wrong_tenant");
+      if (row.active !== true) throw new Error("insurance_company_inactive");
+    }
   }
 
   async createIncident(row: Record<string, unknown>): Promise<IncidentRecord> {
@@ -119,30 +188,37 @@ export class SupabaseRepo implements ApiRepo {
     lng: number;
     address?: string | null;
   }): Promise<void> {
-    const { error } = await this.table("incident_locations").upsert({
+    const payload: Record<string, unknown> = {
       incident_id: row.incident_id,
       kind: row.kind,
       lat: row.lat,
       lng: row.lng,
-      address: row.address ?? null,
-    } as never, { onConflict: "incident_id,kind" } as never);
+    };
+    if (row.address !== undefined) payload.address = row.address;
+    const { error } = await this.table("incident_locations").upsert(
+      payload as never,
+      { onConflict: "incident_id,kind" } as never,
+    );
     if (error) throw new Error(error.message);
   }
   async getIncident(tenantId: string, id: string): Promise<IncidentRecord | null> {
-    const { data } = await this.table("incidents")
+    const { data, error } = await this.table("incidents")
       .select("*")
       .eq("tenant_id", tenantId)
       .eq("id", id)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as IncidentRecord | null) ?? null;
   }
   async setIncidentStatus(id: string, status: IncidentStatus) {
-    await this.table("incidents").update({ status } as never).eq("id", id);
+    const { error } = await this.table("incidents").update({ status } as never).eq("id", id);
+    if (error) throw new Error(error.message);
   }
   async setIncidentBankidVerified(id: string) {
-    await this.table("incidents")
+    const { error } = await this.table("incidents")
       .update({ bankid_verified: true, status: "bankid_verified" } as never)
       .eq("id", id);
+    if (error) throw new Error(error.message);
   }
   async addEvidence(row: Record<string, unknown>) {
     const { data, error } = await this.table("incident_evidence").insert(row as never).select("id").single();
@@ -161,17 +237,19 @@ export class SupabaseRepo implements ApiRepo {
     if (error) throw new Error(error.message);
   }
   async getBankidSessionByTicSessionId(sessionId: string): Promise<BankidSessionRecord | null> {
-    const { data } = await this.table("bankid_sessions")
+    const { data, error } = await this.table("bankid_sessions")
       .select("*")
       .eq("tic_session_id", sessionId)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as BankidSessionRecord | null) ?? null;
   }
   async getBankidSessionById(sessionId: string): Promise<BankidSessionRecord | null> {
-    const { data } = await this.table("bankid_sessions")
+    const { data, error } = await this.table("bankid_sessions")
       .select("*")
       .or(`id.eq.${sessionId},tic_session_id.eq.${sessionId}`)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as BankidSessionRecord | null) ?? null;
   }
   async recordBankidSignature(row: Record<string, unknown>) {
@@ -213,10 +291,11 @@ export class SupabaseRepo implements ApiRepo {
   }
 
   async getCustomerContact(incidentId: string): Promise<CustomerContact | null> {
-    const { data: incident } = await this.table("incidents")
+    const { data: incident, error: incidentError } = await this.table("incidents")
       .select("id, problem_type, description, customer_user_id, vehicle_id")
       .eq("id", incidentId)
       .maybeSingle();
+    if (incidentError) throw new Error(incidentError.message);
     if (!incident) return null;
     const inc = incident as {
       problem_type: string | null;
@@ -224,25 +303,36 @@ export class SupabaseRepo implements ApiRepo {
       customer_user_id: string;
       vehicle_id: string | null;
     };
-    const { data: profile } = await this.table("user_profiles")
+    const { data: profile, error: profileError } = await this.table("user_profiles")
       .select("full_name, phone, email")
       .eq("id", inc.customer_user_id)
       .maybeSingle();
-    const { data: vehicle } = inc.vehicle_id
-      ? await this.table("vehicles").select("registration_number").eq("id", inc.vehicle_id).maybeSingle()
-      : { data: null };
-    const { data: loc } = await this.table("incident_locations")
+    if (profileError) throw new Error(profileError.message);
+
+    let vehicle: unknown = null;
+    if (inc.vehicle_id) {
+      const { data, error } = await this.table("vehicles")
+        .select("registration_number")
+        .eq("id", inc.vehicle_id)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      vehicle = data;
+    }
+
+    const { data: loc, error: locationError } = await this.table("incident_locations")
       .select("lat, lng, address")
       .eq("incident_id", incidentId)
       .eq("kind", "pickup")
       .maybeSingle();
-    const { data: dest } = await this.table("incident_locations")
+    if (locationError) throw new Error(locationError.message);
+    const { data: dest, error: destinationError } = await this.table("incident_locations")
       .select("address")
       .eq("incident_id", incidentId)
       .eq("kind", "destination")
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (destinationError) throw new Error(destinationError.message);
     const p = (profile as { full_name?: string; phone?: string; email?: string } | null) ?? {};
     const l = (loc as { lat: number; lng: number; address: string | null } | null) ?? {
       lat: 0,
@@ -269,7 +359,7 @@ export class SupabaseRepo implements ApiRepo {
   }
 
   async getActivePriceList(towCompanyId: string): Promise<PriceListRecord | null> {
-    const { data } = await this.table("tow_price_lists")
+    const { data, error } = await this.table("tow_price_lists")
       .select(
         "start_fee_minor, per_km_minor, per_waiting_minute_minor, failed_trip_minor, on_call_surcharge_minor, heavy_tow_minor, minimum_price_minor, evening_night_surcharge_minor, weekend_surcharge_minor, cancellation_policy, currency",
       )
@@ -278,14 +368,16 @@ export class SupabaseRepo implements ApiRepo {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as PriceListRecord | null) ?? null;
   }
 
   async setTowJobPriceSnapshot(jobId: string, snapshot: Record<string, unknown>): Promise<void> {
-    await this.table("tow_jobs")
+    const { error } = await this.table("tow_jobs")
       .update({ price_snapshot: snapshot } as never)
       .eq("id", jobId)
       .is("price_snapshot", null);
+    if (error) throw new Error(error.message);
   }
 
   async createTowEvidenceUpload(path: string): Promise<{ path: string; token: string }> {
@@ -300,7 +392,7 @@ export class SupabaseRepo implements ApiRepo {
     const name = slash >= 0 ? path.slice(slash + 1) : path;
     const { data, error } = await this.db.storage.from("tow-evidence").list(folder, { search: name, limit: 20 });
     if (error) throw new Error(error.message);
-    const file = data?.find((entry) => entry.name === name);
+    const file = data?.find((entry: { name: string; metadata?: unknown }) => entry.name === name);
     if (!file) return null;
     const metadata = file.metadata as { size?: number; mimetype?: string; contentType?: string } | null;
     return {
@@ -322,10 +414,11 @@ export class SupabaseRepo implements ApiRepo {
     pickup: Coordinate | null;
     destination: Coordinate | null;
   }> {
-    const { data } = await this.table("incident_locations")
+    const { data, error } = await this.table("incident_locations")
       .select("kind, lat, lng, created_at")
       .eq("incident_id", incidentId)
       .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
     const rows = (data as Array<{ kind: string; lat: number | null; lng: number | null }> | null) ?? [];
     const coord = (kind: string): Coordinate | null => {
       const row = rows.find((r) => r.kind === kind && r.lat != null && r.lng != null);
@@ -334,19 +427,21 @@ export class SupabaseRepo implements ApiRepo {
     return { pickup: coord("pickup"), destination: coord("destination") };
   }
   async getTowJob(tenantId: string, id: string): Promise<TowJobRecord | null> {
-    const { data } = await this.table("tow_jobs")
+    const { data, error } = await this.table("tow_jobs")
       .select("*")
       .eq("tenant_id", tenantId)
       .eq("id", id)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as TowJobRecord | null) ?? null;
   }
   async getTowJobById(id: string): Promise<TowJobRecord | null> {
-    const { data } = await this.table("tow_jobs").select("*").eq("id", id).maybeSingle();
+    const { data, error } = await this.table("tow_jobs").select("*").eq("id", id).maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as TowJobRecord | null) ?? null;
   }
   async getActiveTowJobForIncident(tenantId: string, incidentId: string): Promise<TowJobRecord | null> {
-    const { data } = await this.table("tow_jobs")
+    const { data, error } = await this.table("tow_jobs")
       .select("*")
       .eq("tenant_id", tenantId)
       .eq("incident_id", incidentId)
@@ -354,6 +449,7 @@ export class SupabaseRepo implements ApiRepo {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as TowJobRecord | null) ?? null;
   }
 
@@ -384,47 +480,61 @@ export class SupabaseRepo implements ApiRepo {
   async listTowJobs(tenantId: string, opts: { status?: string; limit: number }) {
     let q = this.table("tow_jobs").select("*").eq("tenant_id", tenantId);
     if (opts.status) q = q.eq("status", opts.status);
-    const { data } = await q.limit(opts.limit);
+    const { data, error } = await q.limit(opts.limit);
+    if (error) throw new Error(error.message);
     return (data as TowJobRecord[] | null) ?? [];
   }
-  async setTowJobStatus(id: string, status: TowJobStatus) {
-    await this.table("tow_jobs").update({ status } as never).eq("id", id);
+  async transitionTowJobStatus(row: {
+    tow_job_id: string;
+    from_status: string | null;
+    to_status: string;
+    actor_user_id?: string | null;
+    actor_api_client_id?: string | null;
+    actor_worker?: string | null;
+    reason?: string | null;
+  }) {
+    const { data, error } = await this.db.rpc("transition_tow_job_status" as never, {
+      p_job: row.tow_job_id,
+      p_expected_from: row.from_status,
+      p_to_status: row.to_status,
+      p_actor_user: row.actor_user_id ?? null,
+      p_actor_api_client: row.actor_api_client_id ?? null,
+      p_actor_worker: row.actor_worker ?? null,
+      p_reason: row.reason ?? null,
+    } as never);
+    if (error) throw new Error(error.message);
+    const result = (Array.isArray(data) ? data[0] : data) as { error?: string; actual?: string } | null;
+    if (result?.error) throw new Error(`tow status transition failed: ${result.error}${result.actual ? ` (${result.actual})` : ""}`);
   }
-  async addTowJobStatusEvent(row: Record<string, unknown>) {
-    await this.table("tow_job_status_events").insert(row as never);
-  }
-  async assignTowJob(id: string, driverId: string, towCompanyId: string) {
-    await this.table("tow_jobs")
-      .update({ driver_id: driverId, tow_company_id: towCompanyId } as never)
-      .eq("id", id);
-    await this.table("tow_job_assignments").insert({
+  async assignTowJob(tenantId: string, id: string, driverId: string, towCompanyId: string, towVehicleId: string) {
+    const { error: updateError } = await this.table("tow_jobs")
+      .update({ driver_id: driverId, tow_company_id: towCompanyId, tow_vehicle_id: towVehicleId } as never)
+      .eq("id", id)
+      .eq("tenant_id", tenantId);
+    if (updateError) throw new Error(updateError.message);
+    const { error: assignmentError } = await this.table("tow_job_assignments").insert({
+      tenant_id: tenantId,
       tow_job_id: id,
       driver_id: driverId,
       tow_company_id: towCompanyId,
     } as never);
+    if (assignmentError) throw new Error(assignmentError.message);
   }
   async createOffers(rows: Array<Record<string, unknown>>) {
     const { error } = await this.table("tow_job_offers").upsert(rows as never, {
       onConflict: "tow_job_id,driver_id",
-      ignoreDuplicates: true,
     } as never);
     if (error) throw new Error(error.message);
   }
   async getOfferForDriver(jobId: string, driverId: string) {
-    const { data } = await this.table("tow_job_offers")
+    const { data, error } = await this.table("tow_job_offers")
       .select("status")
       .eq("tow_job_id", jobId)
       .eq("driver_id", driverId)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as { status: string } | null) ?? null;
   }
-  async setOfferStatus(jobId: string, driverId: string, status: string) {
-    await this.table("tow_job_offers")
-      .update({ status } as never)
-      .eq("tow_job_id", jobId)
-      .eq("driver_id", driverId);
-  }
-
   async getDispatchCandidates(
     pickup: Coordinate,
     radiusKm: number,
@@ -496,42 +606,51 @@ export class SupabaseRepo implements ApiRepo {
   }
 
   async getOfferById(id: string): Promise<OfferRecord | null> {
-    const { data } = await this.table("tow_job_offers")
+    const { data, error } = await this.table("tow_job_offers")
       .select("id, tow_job_id, driver_id, tow_company_id, tow_vehicle_id, tenant_id, status, rank, expires_at")
       .eq("id", id)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as OfferRecord | null) ?? null;
   }
 
-  async rejectOffer(jobId: string, driverId: string, reason: string | null): Promise<void> {
-    await this.table("tow_job_offers")
+  async rejectOffer(jobId: string, driverId: string, reason: string | null): Promise<boolean> {
+    const { data, error } = await this.table("tow_job_offers")
       .update({ status: "rejected", rejected_at: new Date().toISOString(), rejection_reason: reason } as never)
       .eq("tow_job_id", jobId)
-      .eq("driver_id", driverId);
+      .eq("driver_id", driverId)
+      .eq("status", "pending")
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return Boolean(data);
   }
 
   async getDriverProfile(driverId: string): Promise<DriverProfileRecord | null> {
-    const { data } = await this.table("tow_drivers")
+    const { data, error } = await this.table("tow_drivers")
       .select("id, tenant_id, tow_company_id, user_id, full_name, is_online, status, duty_status")
       .eq("id", driverId)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as DriverProfileRecord | null) ?? null;
   }
 
   async setDriverOnline(driverId: string, online: boolean): Promise<void> {
-    await this.table("tow_drivers")
+    const { error } = await this.table("tow_drivers")
       .update({
         is_online: online,
         duty_status: online ? "on_duty" : "off_duty",
         last_seen_at: new Date().toISOString(),
       } as never)
       .eq("id", driverId);
+    if (error) throw new Error(error.message);
   }
 
   async updateDriverLocation(driverId: string, lat: number, lng: number): Promise<void> {
-    await this.table("tow_drivers")
+    const { error } = await this.table("tow_drivers")
       .update({ last_lat: lat, last_lng: lng, last_seen_at: new Date().toISOString() } as never)
       .eq("id", driverId);
+    if (error) throw new Error(error.message);
   }
 
   async upsertDriverDevice(
@@ -539,7 +658,7 @@ export class SupabaseRepo implements ApiRepo {
     userId: string,
     device: { expo_push_token: string; platform: string; device_name?: string | null },
   ): Promise<void> {
-    await this.table("driver_devices").upsert(
+    const { error } = await this.table("driver_devices").upsert(
       {
         driver_id: driverId,
         user_id: userId,
@@ -550,35 +669,40 @@ export class SupabaseRepo implements ApiRepo {
       } as never,
       { onConflict: "expo_push_token" } as never,
     );
+    if (error) throw new Error(error.message);
   }
 
   async listDriverOffers(driverId: string) {
-    const { data } = await this.table("tow_job_offers")
+    const { data, error } = await this.table("tow_job_offers")
       .select("id, tow_job_id, status, rank, expires_at")
       .eq("driver_id", driverId)
       .eq("status", "pending")
       .order("rank", { ascending: true });
+    if (error) throw new Error(error.message);
     const offers = (data as Array<{ id: string; tow_job_id: string; status: string; rank: number; expires_at: string }> | null) ?? [];
     const result = [] as Awaited<ReturnType<ApiRepo["listDriverOffers"]>>;
     for (const o of offers) {
-      const { data: job } = await this.table("tow_jobs")
+      const { data: job, error: jobError } = await this.table("tow_jobs")
         .select("priority, payer_type, incident_id")
         .eq("id", o.tow_job_id)
         .maybeSingle();
+      if (jobError) throw new Error(jobError.message);
       const j = job as { priority: string; payer_type: string; incident_id: string } | null;
       let problemType: string | null = null;
       let approxArea: string | null = null;
       if (j) {
-        const { data: inc } = await this.table("incidents")
+        const { data: inc, error: incidentError } = await this.table("incidents")
           .select("problem_type")
           .eq("id", j.incident_id)
           .maybeSingle();
+        if (incidentError) throw new Error(incidentError.message);
         problemType = (inc as { problem_type: string | null } | null)?.problem_type ?? null;
-        const { data: loc } = await this.table("incident_locations")
+        const { data: loc, error: locationError } = await this.table("incident_locations")
           .select("lat, lng")
           .eq("incident_id", j.incident_id)
           .eq("kind", "pickup")
           .maybeSingle();
+        if (locationError) throw new Error(locationError.message);
         const l = loc as { lat: number; lng: number } | null;
         approxArea = l ? `${l.lat.toFixed(1)}, ${l.lng.toFixed(1)}` : null;
       }
@@ -602,19 +726,21 @@ export class SupabaseRepo implements ApiRepo {
     const statuses = opts?.history
       ? ["completed", "invoiced", "closed", "cancelled", "failed"]
       : ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"];
-    const { data } = await this.table("tow_jobs")
+    const { data, error } = await this.table("tow_jobs")
       .select("*")
       .eq("driver_id", driverId)
       .in("status", statuses as never)
       .order("created_at", { ascending: false })
       .limit(opts?.history ? 50 : 20);
+    if (error) throw new Error(error.message);
     return (data as TowJobRecord[] | null) ?? [];
   }
 
   async listDriverDevices(driverId: string): Promise<DriverDeviceRecord[]> {
-    const { data } = await this.table("driver_devices")
+    const { data, error } = await this.table("driver_devices")
       .select("expo_push_token, platform")
       .eq("driver_id", driverId);
+    if (error) throw new Error(error.message);
     return (data as DriverDeviceRecord[] | null) ?? [];
   }
 
@@ -622,33 +748,40 @@ export class SupabaseRepo implements ApiRepo {
     const patch: Record<string, unknown> = { push_status: status };
     if (status === "sent") patch.push_sent_at = new Date().toISOString();
     if (error) patch.push_error = error;
-    await this.table("tow_job_offers").update(patch as never).eq("tow_job_id", jobId).eq("driver_id", driverId);
+    const { error: updateError } = await this.table("tow_job_offers")
+      .update(patch as never)
+      .eq("tow_job_id", jobId)
+      .eq("driver_id", driverId);
+    if (updateError) throw new Error(updateError.message);
   }
 
   async recordNotificationDelivery(row: Record<string, unknown>): Promise<void> {
     // A dedupe-key conflict means the notification was already recorded —
     // silently skip so retries stay idempotent.
-    await this.table("notification_deliveries").insert(row as never);
+    const { error } = await this.table("notification_deliveries").insert(row as never);
+    if (error && error.code !== "23505") throw new Error(error.message);
   }
 
   async hasNotificationDelivery(dedupeKey: string): Promise<boolean> {
-    const { data } = await this.table("notification_deliveries")
+    const { data, error } = await this.table("notification_deliveries")
       .select("id")
       .eq("dedupe_key", dedupeKey)
       .limit(1)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return Boolean(data);
   }
 
   async enqueueWebhookEvent(tenantId: string, event: string, payload: Record<string, unknown>): Promise<void> {
-    const { data } = await this.table("tenant_webhooks")
+    const { data, error } = await this.table("tenant_webhooks")
       .select("id")
       .eq("tenant_id", tenantId)
       .eq("active", true)
       .contains("events", [event] as never);
+    if (error) throw new Error(error.message);
     const hooks = (data as Array<{ id: string }> | null) ?? [];
     if (hooks.length === 0) return;
-    await this.table("webhook_deliveries").insert(
+    const { error: deliveryError } = await this.table("webhook_deliveries").insert(
       hooks.map((hook) => ({
         tenant_id: tenantId,
         webhook_id: hook.id,
@@ -659,43 +792,54 @@ export class SupabaseRepo implements ApiRepo {
         next_attempt_at: new Date().toISOString(),
       })) as never,
     );
+    if (deliveryError) throw new Error(deliveryError.message);
   }
 
   async recordUsageEvent(tenantId: string, kind: string, quantity = 1): Promise<void> {
-    await this.table("billing_usage_events").insert({ tenant_id: tenantId, kind, quantity } as never);
+    const { error } = await this.table("billing_usage_events").insert({ tenant_id: tenantId, kind, quantity } as never);
+    if (error) throw new Error(error.message);
   }
 
   async loadRoleContext(userId: string): Promise<RoleContext | null> {
-    const { data: profile } = await this.table("user_profiles")
+    const { data: profile, error: profileError } = await this.table("user_profiles")
       .select("id, email, full_name, is_platform_admin")
       .eq("id", userId)
       .maybeSingle();
+    if (profileError) throw new Error(profileError.message);
     if (!profile) return null;
     const p = profile as { id: string; email: string | null; full_name: string | null; is_platform_admin: boolean };
 
-    const { data: memberships } = await this.table("tenant_users")
+    const { data: memberships, error: membershipError } = await this.table("tenant_users")
       .select("tenant_id, status")
       .eq("user_id", userId)
       .eq("status", "active");
+    if (membershipError) throw new Error(membershipError.message);
     const tenantIds = ((memberships as Array<{ tenant_id: string }> | null) ?? []).map((m) => m.tenant_id);
 
     const tenants: RoleContextTenant[] = [];
     for (const tid of tenantIds) {
-      const { data: t } = await this.table("tenants").select("id, type, name").eq("id", tid).maybeSingle();
+      const { data: t, error: tenantError } = await this.table("tenants")
+        .select("id, type, name")
+        .eq("id", tid)
+        .eq("status", "active")
+        .maybeSingle();
+      if (tenantError) throw new Error(tenantError.message);
       const tt = t as { id: string; type: string; name: string } | null;
       if (!tt) continue;
-      const { data: roleRows } = await this.table("user_roles")
+      const { data: roleRows, error: roleError } = await this.table("user_roles")
         .select("role_key")
         .eq("user_id", userId)
         .eq("tenant_id", tid);
+      if (roleError) throw new Error(roleError.message);
       const roles = ((roleRows as Array<{ role_key: string }> | null) ?? []).map((r) => r.role_key);
       tenants.push({ tenant_id: tt.id, tenant_type: tt.type, tenant_name: tt.name, roles });
     }
 
-    const { data: driverRow } = await this.table("tow_drivers")
+    const { data: driverRow, error: driverError } = await this.table("tow_drivers")
       .select("id, tow_company_id, is_online, status")
       .eq("user_id", userId)
       .maybeSingle();
+    if (driverError) throw new Error(driverError.message);
     const driver = driverRow
       ? {
           driver_id: (driverRow as { id: string }).id,
@@ -705,12 +849,14 @@ export class SupabaseRepo implements ApiRepo {
         }
       : null;
 
-    const { count: vehicleCount } = await this.table("vehicles")
+    const { count: vehicleCount, error: vehicleCountError } = await this.table("vehicles")
       .select("id", { count: "exact", head: true } as never)
       .eq("owner_user_id", userId);
-    const { count: incidentCount } = await this.table("incidents")
+    if (vehicleCountError) throw new Error(vehicleCountError.message);
+    const { count: incidentCount, error: incidentCountError } = await this.table("incidents")
       .select("id", { count: "exact", head: true } as never)
       .eq("customer_user_id", userId);
+    if (incidentCountError) throw new Error(incidentCountError.message);
     const isCustomer = (vehicleCount ?? 0) > 0 || (incidentCount ?? 0) > 0;
 
     const insuranceAdmin = tenants.some((t) => t.tenant_type === "insurance_company");
@@ -749,32 +895,37 @@ export class SupabaseRepo implements ApiRepo {
   }
 
   async getCustomerShare(jobId: string, driverId: string): Promise<{ id: string } | null> {
-    const { data } = await this.table("tow_job_customer_shares")
+    const { data, error } = await this.table("tow_job_customer_shares")
       .select("id")
       .eq("tow_job_id", jobId)
       .eq("driver_id", driverId)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as { id: string } | null) ?? null;
   }
 
   async addEtaSnapshot(row: Record<string, unknown>) {
-    await this.table("tow_job_eta_snapshots").insert(row as never);
+    const { error } = await this.table("tow_job_eta_snapshots").insert(row as never);
+    if (error) throw new Error(error.message);
   }
   async getLatestEta(jobId: string): Promise<EtaSnapshotRecord | null> {
-    const { data } = await this.table("tow_job_eta_snapshots")
+    const { data, error } = await this.table("tow_job_eta_snapshots")
       .select("*")
       .eq("tow_job_id", jobId)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as EtaSnapshotRecord | null) ?? null;
   }
 
   async createCompletionReport(row: Record<string, unknown>) {
-    await this.table("tow_job_completion_reports").insert(row as never);
+    const { error } = await this.table("tow_job_completion_reports").insert(row as never);
+    if (error) throw new Error(error.message);
   }
   async createInvoice(row: Record<string, unknown>) {
-    await this.table("tow_job_invoices").insert(row as never);
+    const { error } = await this.table("tow_job_invoices").insert(row as never);
+    if (error) throw new Error(error.message);
   }
   async finalizeTowJob(
     jobId: string,
@@ -798,17 +949,19 @@ export class SupabaseRepo implements ApiRepo {
     };
   }
   async getDriverIdForUser(userId: string): Promise<string | null> {
-    const { data } = await this.table("tow_drivers").select("id").eq("user_id", userId).maybeSingle();
+    const { data, error } = await this.table("tow_drivers").select("id").eq("user_id", userId).maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as { id: string } | null)?.id ?? null;
   }
 
   async findIdempotentResponse(scope: string, action: string, key: string) {
-    const { data } = await this.table("request_idempotency_keys")
+    const { data, error } = await this.table("request_idempotency_keys")
       .select("resource_id, response")
       .eq("scope", scope)
       .eq("action", action)
       .eq("idempotency_key", key)
       .maybeSingle();
+    if (error) throw new Error(error.message);
     return (data as { resource_id: string | null; response: unknown } | null) ?? null;
   }
   async storeIdempotentResponse(
@@ -818,7 +971,7 @@ export class SupabaseRepo implements ApiRepo {
     resourceId: string | null,
     response: unknown,
   ): Promise<void> {
-    await this.table("request_idempotency_keys").upsert(
+    const { error } = await this.table("request_idempotency_keys").upsert(
       {
         scope,
         action,
@@ -828,5 +981,6 @@ export class SupabaseRepo implements ApiRepo {
       } as never,
       { onConflict: "scope,action,idempotency_key", ignoreDuplicates: true } as never,
     );
+    if (error) throw new Error(error.message);
   }
 }

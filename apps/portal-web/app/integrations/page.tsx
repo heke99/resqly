@@ -11,6 +11,7 @@ type Row = Record<string, unknown>;
 const apiColumns: Column<Row>[] = [
   { key: "name", header: "Namn", render: (r) => String(r.name ?? "") },
   { key: "last4", header: "Nyckel", render: (r) => `••••${String(r.key_last4 ?? "")}` },
+  { key: "scopes", header: "Behörigheter", render: (r) => (Array.isArray(r.scopes) ? r.scopes.join(", ") : "") },
   { key: "active", header: "Aktiv", render: (r) => (r.active ? "Ja" : "Nej") },
 ];
 
@@ -58,6 +59,24 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
             <input type="hidden" name="tenant_id" value={tenant.id} />
             <label htmlFor="name">Namn</label>
             <input id="name" name="name" placeholder="Skadesystem-integration" />
+            <fieldset style={{ border: 0, padding: 0, marginTop: 16 }}>
+              <legend style={{ fontWeight: 600, marginBottom: 8 }}>Behörigheter</legend>
+              {[
+                ["incidents:read", "Läsa ärenden"],
+                ["incidents:write", "Skapa och uppdatera ärenden"],
+                ["tow:read", "Läsa bärgningsuppdrag"],
+                ["tow:write", "Uppdatera bärgningsuppdrag"],
+                ["eta:read", "Beräkna och läsa ETA"],
+                ["dispatch:write", "Starta dispatch"],
+                ["tenant:read", "Läsa organisationsinställningar"],
+                ["tenant:write", "Ändra organisationsinställningar"],
+              ].map(([value, label]) => (
+                <label key={value} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                  <input type="checkbox" name="scopes" value={value} defaultChecked={value !== "tenant:write"} />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </fieldset>
             <div style={{ marginTop: 16 }}><Button type="submit">Skapa nyckel</Button></div>
           </form>
         </Card>

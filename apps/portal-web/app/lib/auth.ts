@@ -44,7 +44,8 @@ async function session(): Promise<PortalSession> {
   const metadataName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name.trim() : "";
   const profilePatch: Record<string, unknown> = { id: user.id, email };
   if (metadataName) profilePatch.full_name = metadataName;
-  await db.from("user_profiles" as never).upsert(profilePatch as never);
+  const { error: profileError } = await db.from("user_profiles" as never).upsert(profilePatch as never);
+  if (profileError) throw new Error(`Användarprofilen kunde inte sparas: ${profileError.message}`);
   return { db, user };
 }
 
@@ -53,16 +54,19 @@ export async function getPortalTenants(): Promise<{ db: AppSupabaseClient; userI
   const { data: memberships, error } = await db
     .from("tenant_users" as never)
     .select("tenant_id")
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("status", "active");
   if (error) throw new Error(error.message);
 
   const tenantIds = ((memberships as Array<{ tenant_id: string }> | null) ?? []).map((m) => m.tenant_id);
   if (tenantIds.length === 0) return { db, userId: user.id, tenants: [] };
 
-  const { data: tenants } = await db
+  const { data: tenants, error: tenantError } = await db
     .from("tenants" as never)
     .select("id, name, slug, type, case_number_prefix")
-    .in("id", tenantIds);
+    .in("id", tenantIds)
+    .eq("status", "active");
+  if (tenantError) throw new Error(tenantError.message);
 
   return {
     db,
@@ -125,23 +129,27 @@ export async function getOptionalTenantContext(): Promise<{ tenant: PortalTenant
     if (!db) return { tenant: null, tenants: [] };
     const { data, error } = await db.auth.getUser(accessToken);
     if (error || !data.user) return { tenant: null, tenants: [] };
-    const { data: memberships } = await db
+    const { data: memberships, error: membershipError } = await db
       .from("tenant_users" as never)
       .select("tenant_id")
       .eq("user_id", data.user.id)
       .eq("status", "active");
+    if (membershipError) throw membershipError;
     const ids = ((memberships as Array<{ tenant_id: string }> | null) ?? []).map((m) => m.tenant_id);
     if (ids.length === 0) return { tenant: null, tenants: [] };
-    const { data: tenants } = await db
+    const { data: tenants, error: tenantError } = await db
       .from("tenants" as never)
       .select("id, name, slug, type, case_number_prefix")
-      .in("id", ids);
+      .in("id", ids)
+      .eq("status", "active");
+    if (tenantError) throw tenantError;
     const list = (tenants as PortalTenant[] | null) ?? [];
     const store = await cookies();
     const cookieTenant = store.get(PORTAL_TENANT_COOKIE)?.value ?? null;
     const active = (cookieTenant ? list.find((t) => t.id === cookieTenant) : undefined) ?? list[0] ?? null;
     return { tenant: active, tenants: list };
-  } catch {
+  } catch (error) {
+    console.error("[portal tenant context] failed", error);
     return { tenant: null, tenants: [] };
   }
 }

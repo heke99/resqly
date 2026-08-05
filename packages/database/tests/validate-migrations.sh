@@ -108,6 +108,63 @@ begin
   if not exists (select 1 from pg_indexes where schemaname='public' and indexname='uq_bankid_signatures_order_ref') then
     raise exception 'BankID signature uniqueness index missing';
   end if;
+  if has_function_privilege('authenticated', 'public.cancel_incident_workflow(uuid,uuid,text,boolean)', 'EXECUTE') then
+    raise exception 'authenticated can cancel incident workflow directly';
+  end if;
+  if not has_function_privilege('service_role', 'public.cancel_incident_workflow(uuid,uuid,text,boolean)', 'EXECUTE') then
+    raise exception 'service_role cannot cancel incident workflow';
+  end if;
+  if has_function_privilege('authenticated', 'public.escalate_tow_job_manual_review(uuid,uuid,uuid,text,text,uuid,text,uuid)', 'EXECUTE') then
+    raise exception 'authenticated can escalate tow jobs to manual review directly';
+  end if;
+  if not has_function_privilege('service_role', 'public.escalate_tow_job_manual_review(uuid,uuid,uuid,text,text,uuid,text,uuid)', 'EXECUTE') then
+    raise exception 'service_role cannot escalate tow jobs to manual review';
+  end if;
+  if has_function_privilege('authenticated', 'public.transition_incident_status(uuid,uuid,text,uuid,text)', 'EXECUTE') then
+    raise exception 'authenticated can transition incident status directly';
+  end if;
+  if not has_function_privilege('service_role', 'public.transition_incident_status(uuid,uuid,text,uuid,text)', 'EXECUTE') then
+    raise exception 'service_role cannot transition incident status';
+  end if;
+  if has_function_privilege('authenticated', 'public.transition_tow_job_status(uuid,text,text,uuid,uuid,text,text)', 'EXECUTE') then
+    raise exception 'authenticated can transition tow job status directly';
+  end if;
+  if not has_function_privilege('service_role', 'public.transition_tow_job_status(uuid,text,text,uuid,uuid,text,text)', 'EXECUTE') then
+    raise exception 'service_role cannot transition tow job status';
+  end if;
+  if has_function_privilege('authenticated', 'public.replace_tow_price_list(uuid,uuid,uuid,jsonb)', 'EXECUTE') then
+    raise exception 'authenticated can replace tow price lists directly';
+  end if;
+  if not has_function_privilege('service_role', 'public.replace_tow_price_list(uuid,uuid,uuid,jsonb)', 'EXECUTE') then
+    raise exception 'service_role cannot replace tow price lists';
+  end if;
+  if not exists (select 1 from pg_indexes where schemaname='public' and indexname='uq_single_private_marketplace_operator') then
+    raise exception 'private marketplace operator uniqueness index missing';
+  end if;
+  if not exists (select 1 from pg_indexes where schemaname='public' and indexname='uq_vehicle_owner_registration_normalized') then
+    raise exception 'vehicle owner registration uniqueness index missing';
+  end if;
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'tenant_api_clients'
+      and column_name = 'scopes'
+      and data_type = 'ARRAY'
+  ) then
+    raise exception 'tenant API client scopes column missing';
+  end if;
+  if not exists (
+    select 1
+    from pg_constraint c
+    join pg_class r on r.oid = c.conrelid
+    join pg_namespace n on n.oid = r.relnamespace
+    where n.nspname = 'public'
+      and r.relname = 'tenant_api_clients'
+      and c.conname = 'tenant_api_clients_scopes_allowed'
+  ) then
+    raise exception 'tenant API client scopes constraint missing';
+  end if;
 end $$;
 
 select 'migration chain OK' as result;

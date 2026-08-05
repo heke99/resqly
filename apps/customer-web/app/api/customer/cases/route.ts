@@ -34,12 +34,13 @@ export async function POST(request: Request) {
     return jsonError(400, "Du behöver godkänna hur dina uppgifter delas innan ärendet kan skapas.");
   }
 
-  const { data: vehicle } = await db
+  const { data: vehicle, error: vehicleError } = await db
     .from("vehicles" as never)
     .select("id, owner_user_id, registration_number")
     .eq("id", vehicleId)
     .eq("owner_user_id", user.id)
     .maybeSingle();
+  if (vehicleError) return jsonError(503, "Fordonet kunde inte kontrolleras just nu.");
   if (!vehicle) return jsonError(404, "Fordonet hittades inte.");
 
   let tenantId: string | null = null;
@@ -51,31 +52,34 @@ export async function POST(request: Request) {
       return jsonError(400, "Skadeärenden kräver koppling till försäkringsbolag.");
     }
     // Direct/private towing is handled by the marketplace operator tenant.
-    const { data: marketplaceTenant } = await db
+    const { data: marketplaceTenant, error: marketplaceError } = await db
       .from("tenants" as never)
       .select("id")
       .eq("type", "platform_internal")
       .eq("status", "active")
-      .limit(1)
+      .eq("private_marketplace_operator", true)
       .maybeSingle();
+    if (marketplaceError) return jsonError(503, "Privat bärgning kunde inte kontrolleras just nu.");
     tenantId = (marketplaceTenant as { id?: string } | null)?.id ?? null;
     if (!tenantId) {
       return jsonError(409, "Privat bärgning är inte aktiverad ännu.");
     }
-    const { data: settings } = await db
+    const { data: settings, error: settingsError } = await db
       .from("tenant_settings" as never)
       .select("bankid_required_for_tow")
       .eq("tenant_id", tenantId)
       .maybeSingle();
+    if (settingsError) return jsonError(503, "Organisationens regler kunde inte läsas just nu.");
     requiresBankid = (settings as { bankid_required_for_tow?: boolean } | null)?.bankid_required_for_tow === true;
   } else {
-    const { data: policy } = await db
+    const { data: policy, error: policyError } = await db
       .from("vehicle_insurance_policies" as never)
       .select("id, insurance_company_id, tenant_id, policy_number")
       .eq("vehicle_id", vehicleId)
       .eq("customer_user_id", user.id)
       .eq("is_active", true)
       .maybeSingle();
+    if (policyError) return jsonError(503, "Försäkringskopplingen kunde inte läsas just nu.");
     const activePolicy = policy as { id: string; insurance_company_id: string; tenant_id: string | null } | null;
     if (!activePolicy?.insurance_company_id)
       return jsonError(409, "Koppla fordonet till ett försäkringsbolag först, eller välj privat bärgning.");
@@ -83,20 +87,22 @@ export async function POST(request: Request) {
 
     tenantId = activePolicy.tenant_id;
     if (!tenantId) {
-      const { data: insurer } = await db
+      const { data: insurer, error: insurerError } = await db
         .from("insurance_companies" as never)
         .select("tenant_id")
         .eq("id", activePolicy.insurance_company_id)
         .maybeSingle();
+      if (insurerError) return jsonError(503, "Försäkringsbolagets organisation kunde inte läsas.");
       tenantId = (insurer as { tenant_id?: string } | null)?.tenant_id ?? null;
     }
     if (!tenantId) return jsonError(409, "Försäkringsbolaget saknar aktiv organisationskoppling.");
 
-    const { data: settings } = await db
+    const { data: settings, error: settingsError } = await db
       .from("tenant_settings" as never)
       .select("bankid_required_for_claims, bankid_required_for_tow")
       .eq("tenant_id", tenantId)
       .maybeSingle();
+    if (settingsError) return jsonError(503, "Försäkringsbolagets regler kunde inte läsas just nu.");
     const s = (settings as { bankid_required_for_claims?: boolean; bankid_required_for_tow?: boolean } | null) ?? {};
     requiresBankid = type === "damage_claim" ? s.bankid_required_for_claims !== false : s.bankid_required_for_tow !== false;
   }
@@ -108,7 +114,8 @@ export async function POST(request: Request) {
   if (rpcErr) return jsonError(503, "Ärendet kunde inte skapas just nu. Försök igen om en stund.");
 
   const initialStatus = requiresBankid ? "awaiting_bankid" : "submitted";
-  const combinedDescription = manualAddress && !coords?.lat
+  const hasCoordinates = typeof coords?.lat === "number" && typeof coords?.lng === "number";
+  const combinedDescription = manualAddress && !hasCoordinates
     ? [description, `Upphämtningsadress (angiven av kund): ${manualAddress}`].filter(Boolean).join("\n")
     : description;
   const { data: incident, error } = await db
@@ -126,88 +133,97 @@ export async function POST(request: Request) {
       requires_bankid: requiresBankid,
       bankid_verified: false,
       case_number: caseNo as unknown as string,
+      created_by_user_id: user.id,
     } as never)
     .select("id")
     .single();
   if (error) return jsonError(400, "Ärendet kunde inte skapas. Försök igen.");
   const incidentId = (incident as { id: string }).id;
 
-  await db.from("incident_status_events" as never).insert({
-    incident_id: incidentId,
-    from_status: null,
-    to_status: initialStatus,
-    actor_user_id: user.id,
-    reason: "Skapat av kund",
-  } as never);
-
-  // Versioned consent trail: what data sharing the customer accepted, with
-  // text hash + version. BankID (when required) is the verification on top.
-  const consentKinds: ConsentKind[] =
-    mode === "private"
-      ? ["share_with_tow_partner"]
-      : type === "damage_claim"
-        ? ["claim_submission", "share_with_insurer"]
-        : ["share_with_insurer", "share_with_tow_partner"];
-  for (const kind of consentKinds) {
-    await recordConsent(db, {
-      tenantId,
-      userId: user.id,
-      kind,
-      incidentId,
-      vehicleId,
-      request,
-      metadata: { case_type: type, mode },
-    });
-  }
-
-  if (coords?.lat && coords?.lng) {
-    await db.from("incident_locations" as never).insert({
+  try {
+    const { error: statusEventError } = await db.from("incident_status_events" as never).insert({
       incident_id: incidentId,
-      kind: "pickup",
-      lat: coords.lat,
-      lng: coords.lng,
-      address: manualAddress,
+      from_status: null,
+      to_status: initialStatus,
+      actor_user_id: user.id,
+      actor_kind: "user",
+      reason: "Skapat av kund",
     } as never);
-  } else if (manualAddress) {
-    // GPS denied/unavailable: geocode the manual address server-side when the
-    // map service is configured; otherwise the address stays on the case and
-    // the tow request is routed to manual help instead of failing.
-    const geocoded = await tryGeocode(manualAddress);
-    if (geocoded) {
-      await db.from("incident_locations" as never).insert({
+    if (statusEventError) throw new Error(statusEventError.message);
+
+    // Versioned consent trail: what data sharing the customer accepted, with
+    // text hash + version. BankID (when required) is the verification on top.
+    const consentKinds: ConsentKind[] =
+      mode === "private"
+        ? ["share_with_tow_partner"]
+        : type === "damage_claim"
+          ? ["claim_submission", "share_with_insurer"]
+          : ["share_with_insurer", "share_with_tow_partner"];
+    for (const kind of consentKinds) {
+      await recordConsent(db, {
+        tenantId,
+        userId: user.id,
+        kind,
+        incidentId,
+        vehicleId,
+        request,
+        metadata: { case_type: type, mode },
+      });
+    }
+
+    if (hasCoordinates) {
+      const { error: locationError } = await db.from("incident_locations" as never).insert({
         incident_id: incidentId,
         kind: "pickup",
-        lat: geocoded.lat,
-        lng: geocoded.lng,
+        lat: coords.lat,
+        lng: coords.lng,
         address: manualAddress,
-        manually_adjusted: true,
       } as never);
+      if (locationError) throw new Error(locationError.message);
+    } else if (manualAddress) {
+      const geocoded = await tryGeocode(manualAddress);
+      if (geocoded) {
+        const { error: locationError } = await db.from("incident_locations" as never).insert({
+          incident_id: incidentId,
+          kind: "pickup",
+          lat: geocoded.lat,
+          lng: geocoded.lng,
+          address: manualAddress,
+          manually_adjusted: true,
+        } as never);
+        if (locationError) throw new Error(locationError.message);
+      }
     }
-  }
 
-  // Destination ("where should the vehicle go?") for towing cases. Stored
-  // even without coordinates so drivers always see the address; geocoded
-  // when the maps service is configured (used for private price estimates).
-  if (destinationAddress && TOWING_TYPES.has(type)) {
-    const geocodedDest = await tryGeocode(destinationAddress);
-    await db.from("incident_locations" as never).insert({
-      incident_id: incidentId,
-      kind: "destination",
-      lat: geocodedDest?.lat ?? null,
-      lng: geocodedDest?.lng ?? null,
-      address: destinationAddress,
+    if (destinationAddress && TOWING_TYPES.has(type)) {
+      const geocodedDest = await tryGeocode(destinationAddress);
+      const { error: destinationError } = await db.from("incident_locations" as never).insert({
+        incident_id: incidentId,
+        kind: "destination",
+        lat: geocodedDest?.lat ?? null,
+        lng: geocodedDest?.lng ?? null,
+        address: destinationAddress,
+      } as never);
+      if (destinationError) throw new Error(destinationError.message);
+    }
+
+    const { error: auditError } = await db.from("audit_logs" as never).insert({
+      tenant_id: tenantId,
+      actor_user_id: user.id,
+      actor_kind: "user",
+      action: "create",
+      entity_type: "incident",
+      entity_id: incidentId,
+      fields: ["vehicle_id", "insurance_company_id", "case_number", "status"],
+      metadata: { mode },
     } as never);
+    if (auditError) throw new Error(auditError.message);
+  } catch {
+    await db.from("customer_consent_acceptances" as never).delete().eq("incident_id", incidentId).eq("user_id", user.id);
+    await db.from("audit_logs" as never).delete().eq("entity_id", incidentId).eq("actor_user_id", user.id);
+    await db.from("incidents" as never).delete().eq("id", incidentId).eq("customer_user_id", user.id);
+    return jsonError(503, "Ärendet kunde inte sparas med full spårbarhet. Försök igen.");
   }
-
-  await db.from("audit_logs" as never).insert({
-    tenant_id: tenantId,
-    actor_user_id: user.id,
-    action: "create",
-    entity_type: "incident",
-    entity_id: incidentId,
-    fields: ["vehicle_id", "insurance_company_id", "case_number", "status"],
-    metadata: { mode },
-  } as never);
 
   await sendCustomerEmail(db, {
     tenantId,

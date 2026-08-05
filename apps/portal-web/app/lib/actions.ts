@@ -37,6 +37,22 @@ function assertTenant(expected: string, actual: string) {
   if (expected !== actual) throw new Error("Du har inte åtkomst till den här organisationen.");
 }
 
+function assertDbWrite(error: { message?: string } | null | undefined, context: string): void {
+  if (error) throw new Error(`${context}: ${error.message ?? "okänt databasfel"}`);
+}
+
+
+const ALLOWED_API_SCOPES = new Set([
+  "incidents:read",
+  "incidents:write",
+  "tow:read",
+  "tow:write",
+  "eta:read",
+  "dispatch:write",
+  "tenant:read",
+  "tenant:write",
+]);
+
 async function createOneTimeReveal(
   client: Awaited<ReturnType<typeof portalDb>>["db"],
   tenantId: string,
@@ -82,31 +98,19 @@ async function setIncidentStatus(
   permission: PermissionKey,
 ) {
   const { db: client, tenant, userId } = await portalDb(tenantId, permission);
-  const { data: current } = await client
-    .from("incidents" as never)
-    .select("status, tenant_id")
-    .eq("id", incidentId)
-    .maybeSingle();
-  const from = (current as { status?: string } | null)?.status ?? null;
-  const currentTenantId = (current as { tenant_id?: string } | null)?.tenant_id ?? null;
-  if (!currentTenantId) throw new Error("Ärendet hittades inte.");
-  assertTenant(tenant.id, currentTenantId);
-  await client.from("incidents" as never).update({ status } as never).eq("id", incidentId).eq("tenant_id", tenant.id);
-  await client.from("incident_status_events" as never).insert({
-    incident_id: incidentId,
-    from_status: from,
-    to_status: status,
-    reason: reason ?? null,
+  assertTenant(tenant.id, tenantId);
+  const { data, error } = await client.rpc("transition_incident_status" as never, {
+    p_incident: incidentId,
+    p_tenant: tenantId,
+    p_to_status: status,
+    p_actor_user: userId,
+    p_reason: reason ?? null,
   } as never);
-  await client.from("audit_logs" as never).insert({
-    tenant_id: currentTenantId,
-    actor_user_id: userId,
-    action: "status_change",
-    entity_type: "incident",
-    entity_id: incidentId,
-    fields: ["status"],
-    metadata: { from, to: status },
-  } as never);
+  if (error) throw new Error(`Ärendestatus kunde inte ändras: ${error.message}`);
+  const result = (data ?? {}) as { error?: string };
+  if (result.error === "not_found") throw new Error("Ärendet hittades inte.");
+  if (result.error === "tenant_mismatch") throw new Error("Ärendet tillhör inte den här organisationen.");
+  if (result.error) throw new Error("Ärendestatus kunde inte ändras.");
   revalidatePath(`/cases/${incidentId}`);
 }
 
@@ -140,7 +144,7 @@ export async function requestMoreInfo(formData: FormData): Promise<void> {
 
 export async function updateSettings(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId, "white_label.manage");
+  const { db: client, tenant, userId } = await portalDb(tenantId, "white_label.manage");
   assertTenant(tenant.id, tenantId);
   const strategy = String(formData.get("default_dispatch_strategy") ?? "");
   const radius = Number(formData.get("max_dispatch_radius_km") ?? "");
@@ -153,16 +157,29 @@ export async function updateSettings(formData: FormData): Promise<void> {
   const hourlyCost = Number(formData.get("stats_admin_hourly_cost_sek") ?? "");
   if (Number.isFinite(hourlyCost) && hourlyCost >= 0) patch.stats_admin_hourly_cost_minor = Math.round(hourlyCost * 100);
   if (Object.keys(patch).length) {
-    await client.from("tenant_settings" as never).update(patch as never).eq("tenant_id", tenantId);
+    const { error } = await client.from("tenant_settings" as never).update(patch as never).eq("tenant_id", tenantId);
+    assertDbWrite(error, "Organisationsinställningarna kunde inte sparas");
   }
   const productName = String(formData.get("product_name") ?? "");
   const color = String(formData.get("color_primary") ?? "");
   if (productName) {
-    await client.from("tenant_branding" as never).update({ product_name: productName } as never).eq("tenant_id", tenantId);
+    const { error } = await client.from("tenant_branding" as never).update({ product_name: productName } as never).eq("tenant_id", tenantId);
+    assertDbWrite(error, "Produktnamnet kunde inte sparas");
   }
   if (color) {
-    await client.from("tenant_theme_tokens" as never).update({ color_primary: color } as never).eq("tenant_id", tenantId);
+    const { error } = await client.from("tenant_theme_tokens" as never).update({ color_primary: color } as never).eq("tenant_id", tenantId);
+    assertDbWrite(error, "Temafärgen kunde inte sparas");
   }
+  const { error: auditError } = await client.from("audit_logs" as never).insert({
+    tenant_id: tenantId,
+    actor_user_id: userId,
+    actor_kind: "user",
+    action: "update",
+    entity_type: "tenant_configuration",
+    entity_id: tenantId,
+    fields: [...Object.keys(patch), ...(productName ? ["product_name"] : []), ...(color ? ["color_primary"] : [])],
+  } as never);
+  assertDbWrite(auditError, "Ändringen sparades men revisionsloggen kunde inte skrivas");
   revalidatePath("/settings");
 }
 
@@ -181,7 +198,7 @@ interface AdminAuthError {
  */
 export async function createDriver(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId, "drivers.manage");
+  const { db: client, tenant, userId: actorUserId } = await portalDb(tenantId, "drivers.manage");
   assertTenant(tenant.id, tenantId);
   if (tenant.type !== "tow_company") throw new Error("Endast bärgningsbolag kan skapa förare.");
 
@@ -203,6 +220,7 @@ export async function createDriver(formData: FormData): Promise<void> {
   if (rawPhone && !phone) throw new Error("Ange ett giltigt telefonnummer.");
   if (sendInvite && !email) throw new Error("E-post krävs när en inbjudan ska skickas.");
 
+  let createdDriverId: string | null = null;
   if (email && sendInvite) {
     const admin = client.auth.admin as unknown as {
       inviteUserByEmail(
@@ -246,7 +264,7 @@ export async function createDriver(formData: FormData): Promise<void> {
     }
     if (!userId) throw new Error("Inbjudan skickades inte och inget användarkonto kunde länkas.");
 
-    const { error: provisionError } = await client.rpc("provision_tow_driver" as never, {
+    const { data: provisionedDriver, error: provisionError } = await client.rpc("provision_tow_driver" as never, {
       p_tenant_id: tenantId,
       p_tow_company_id: companyId,
       p_user_id: userId,
@@ -258,8 +276,9 @@ export async function createDriver(formData: FormData): Promise<void> {
       if (newlyInvited) await admin.deleteUser(userId).catch(() => ({ error: null }));
       throw new Error(`Förarkontot kunde inte kopplas till bolaget: ${provisionError.message}`);
     }
+    createdDriverId = typeof provisionedDriver === "string" ? provisionedDriver : null;
   } else {
-    const { error } = await client.from("tow_drivers" as never).insert({
+    const { data: createdDriver, error } = await client.from("tow_drivers" as never).insert({
       tenant_id: tenantId,
       tow_company_id: companyId,
       user_id: null,
@@ -267,9 +286,32 @@ export async function createDriver(formData: FormData): Promise<void> {
       phone,
       email,
       duty_status: "off_duty",
-    } as never);
-    if (error) throw new Error(`Föraren kunde inte skapas: ${error.message}`);
+      created_by_user_id: actorUserId,
+    } as never).select("id").single();
+    if (error || !createdDriver) throw new Error(`Föraren kunde inte skapas: ${error?.message ?? "okänt fel"}`);
+    createdDriverId = (createdDriver as { id: string }).id;
   }
+
+  if (!createdDriverId) throw new Error("Förarprofilen skapades men kunde inte identifieras.");
+  if (email && sendInvite) {
+    const { error: creatorError } = await client
+      .from("tow_drivers" as never)
+      .update({ created_by_user_id: actorUserId } as never)
+      .eq("id", createdDriverId)
+      .eq("tenant_id", tenantId);
+    if (creatorError) throw new Error(`Förarens skaparkoppling kunde inte sparas: ${creatorError.message}`);
+  }
+  const { error: auditError } = await client.from("audit_logs" as never).insert({
+    tenant_id: tenantId,
+    actor_user_id: actorUserId,
+    actor_kind: "user",
+    action: "create",
+    entity_type: "tow_driver",
+    entity_id: createdDriverId,
+    fields: ["full_name", "phone", "email", "invitation"],
+    metadata: { invitation_requested: sendInvite, email },
+  } as never);
+  assertDbWrite(auditError, "Föraren skapades men revisionsloggen kunde inte skrivas");
 
   revalidatePath("/drivers");
   revalidatePath("/readiness");
@@ -277,33 +319,55 @@ export async function createDriver(formData: FormData): Promise<void> {
 
 export async function createTowVehicle(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId, "vehicles.manage");
+  const { db: client, tenant, userId } = await portalDb(tenantId, "vehicles.manage");
   assertTenant(tenant.id, tenantId);
-  const { data: company } = await client
+  const { data: company, error: companyError } = await client
     .from("tow_companies" as never)
     .select("id")
     .eq("tenant_id", tenantId)
     .maybeSingle();
+  assertDbWrite(companyError, "Bärgningsbolaget kunde inte läsas");
   const companyId = (company as { id?: string } | null)?.id;
   if (!companyId) throw new Error("Organisationen är inte ett bärgningsbolag.");
-  const { data: vehicle } = await client
+  const registrationNumber = String(formData.get("registration_number") ?? "").trim().toUpperCase();
+  if (!registrationNumber) throw new Error("Ange registreringsnummer.");
+  const { data: vehicle, error: vehicleError } = await client
     .from("tow_vehicles" as never)
     .insert({
       tenant_id: tenantId,
       tow_company_id: companyId,
-      registration_number: String(formData.get("registration_number") ?? ""),
+      registration_number: registrationNumber,
       vehicle_type: String(formData.get("vehicle_type") ?? "flatbed"),
       max_weight_kg: Number(formData.get("max_weight_kg") ?? "") || null,
+      created_by_user_id: userId,
     } as never)
     .select("id")
     .single();
+  if (vehicleError || !vehicle) throw new Error(`Fordonet kunde inte skapas: ${vehicleError?.message ?? "okänt fel"}`);
   const vehicleId = (vehicle as unknown as { id: string }).id;
-  await client.from("tow_vehicle_capabilities" as never).insert({
+  const { error: capabilitiesError } = await client.from("tow_vehicle_capabilities" as never).insert({
     tow_vehicle_id: vehicleId,
     can_handle_ev: formData.get("can_handle_ev") === "on",
     has_flatbed: formData.get("has_flatbed") === "on",
     has_winch: formData.get("has_winch") === "on",
   } as never);
+  if (capabilitiesError) {
+    const { error: cleanupError } = await client.from("tow_vehicles" as never).delete().eq("id", vehicleId).eq("tenant_id", tenantId);
+    if (cleanupError) {
+      throw new Error(`Fordonsfunktionerna kunde inte sparas (${capabilitiesError.message}) och den ofullständiga fordonsraden kunde inte tas bort (${cleanupError.message}).`);
+    }
+    throw new Error(`Fordonsfunktionerna kunde inte sparas: ${capabilitiesError.message}`);
+  }
+  const { error: auditError } = await client.from("audit_logs" as never).insert({
+    tenant_id: tenantId,
+    actor_user_id: userId,
+    actor_kind: "user",
+    action: "create",
+    entity_type: "tow_vehicle",
+    entity_id: vehicleId,
+    fields: ["registration_number", "vehicle_type", "max_weight_kg", "capabilities"],
+  } as never);
+  assertDbWrite(auditError, "Fordonet skapades men revisionsloggen kunde inte skrivas");
   revalidatePath("/vehicles");
 }
 
@@ -327,23 +391,46 @@ export async function createWebhook(formData: FormData): Promise<void> {
   const invalid = events.filter((event) => !allowedEvents.has(event));
   if (invalid.length) throw new Error(`Okända händelser: ${invalid.join(", ")}`);
   const secret = randomBytes(32).toString("base64url");
-  const { error } = await client.from("tenant_webhooks" as never).insert({
+  const { data: webhook, error } = await client.from("tenant_webhooks" as never).insert({
     tenant_id: tenantId,
     url,
     events,
     secret,
-  } as never);
-  if (error) throw new Error(`Integrationen kunde inte skapas: ${error.message}`);
-  const revealToken = await createOneTimeReveal(client, tenantId, userId, "webhook_secret", secret);
+    created_by_user_id: userId,
+  } as never).select("id").single();
+  if (error || !webhook) throw new Error(`Integrationen kunde inte skapas: ${error?.message ?? "okänt fel"}`);
+  const webhookId = (webhook as { id: string }).id;
+  let revealToken: string | null = null;
+  try {
+    revealToken = await createOneTimeReveal(client, tenantId, userId, "webhook_secret", secret);
+    const { error: auditError } = await client.from("audit_logs" as never).insert({
+      tenant_id: tenantId,
+      actor_user_id: userId,
+      actor_kind: "user",
+      action: "create",
+      entity_type: "tenant_webhook",
+      entity_id: webhookId,
+      fields: ["url", "events"],
+    } as never);
+    assertDbWrite(auditError, "Webhooken skapades men revisionsloggen kunde inte skrivas");
+  } catch (creationError) {
+    if (revealToken) {
+      await client.from("one_time_secret_reveals" as never).delete().eq("tenant_id", tenantId).eq("token_hash", sha256Hex(revealToken));
+    }
+    await client.from("tenant_webhooks" as never).delete().eq("id", webhookId).eq("tenant_id", tenantId);
+    throw creationError;
+  }
+  if (!revealToken) throw new Error("Webhook-hemligheten kunde inte förberedas för visning.");
   redirect(`/integrations?reveal=${encodeURIComponent(revealToken)}`);
 }
 
 async function towCompanyIdFor(client: Awaited<ReturnType<typeof portalDb>>["db"], tenantId: string): Promise<string> {
-  const { data: company } = await client
+  const { data: company, error } = await client
     .from("tow_companies" as never)
     .select("id")
     .eq("tenant_id", tenantId)
     .maybeSingle();
+  assertDbWrite(error, "Bärgningsbolaget kunde inte läsas");
   const companyId = (company as { id?: string } | null)?.id;
   if (!companyId) throw new Error("Organisationen är inte ett bärgningsbolag.");
   return companyId;
@@ -351,7 +438,7 @@ async function towCompanyIdFor(client: Awaited<ReturnType<typeof portalDb>>["db"
 
 export async function saveMarketplaceSettings(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId, "white_label.manage");
+  const { db: client, tenant, userId } = await portalDb(tenantId, "white_label.manage");
   assertTenant(tenant.id, tenantId);
   const companyId = await towCompanyIdFor(client, tenantId);
   const row = {
@@ -361,9 +448,20 @@ export async function saveMarketplaceSettings(formData: FormData): Promise<void>
     active: formData.get("active") === "on",
     min_price_minor: Math.max(0, Math.round(Number(formData.get("min_price_sek") ?? "0") * 100) || 0),
   };
-  await client
+  const { error } = await client
     .from("tow_company_marketplace_settings" as never)
     .upsert(row as never, { onConflict: "tow_company_id" } as never);
+  assertDbWrite(error, "Marknadsplatsinställningarna kunde inte sparas");
+  const { error: auditError } = await client.from("audit_logs" as never).insert({
+    tenant_id: tenantId,
+    actor_user_id: userId,
+    actor_kind: "user",
+    action: "upsert",
+    entity_type: "tow_company_marketplace_settings",
+    entity_id: companyId,
+    fields: ["accepts_direct_orders", "private_customer_enabled", "active", "min_price_minor"],
+  } as never);
+  assertDbWrite(auditError, "Marknadsplatsinställningarna sparades men revisionsloggen kunde inte skrivas");
   revalidatePath("/marketplace");
 }
 
@@ -401,25 +499,13 @@ export async function savePriceList(formData: FormData): Promise<void> {
     active: true,
   };
 
-  await client
-    .from("tow_price_lists" as never)
-    .update({ active: false } as never)
-    .eq("tow_company_id", companyId)
-    .eq("active", true);
-  await client.from("tow_price_lists" as never).insert(row as never);
-  await client.from("audit_logs" as never).insert({
-    tenant_id: tenantId,
-    actor_user_id: userId,
-    action: "update",
-    entity_type: "tow_price_list",
-    entity_id: companyId,
-    fields: ["start_fee_minor", "per_km_minor", "minimum_price_minor", "surcharges", "cancellation_policy"],
-    metadata: {
-      start_fee_minor: row.start_fee_minor,
-      per_km_minor: row.per_km_minor,
-      minimum_price_minor: row.minimum_price_minor,
-    },
+  const { error: priceError } = await client.rpc("replace_tow_price_list" as never, {
+    p_tenant: tenantId,
+    p_tow_company: companyId,
+    p_actor_user: userId,
+    p_price: row,
   } as never);
+  if (priceError) throw new Error(`Prislistan kunde inte sparas: ${priceError.message}`);
   revalidatePath("/pricing");
 }
 
@@ -432,12 +518,13 @@ export async function saveAgreement(formData: FormData): Promise<void> {
   const insurerTenantId = String(formData.get("insurance_tenant_id") ?? "");
   if (!insurerTenantId) throw new Error("Välj ett försäkringsbolag.");
 
-  const { data: insurer } = await client
+  const { data: insurer, error: insurerError } = await client
     .from("tenants" as never)
     .select("id, type, status")
     .eq("id", insurerTenantId)
     .eq("type", "insurance_company")
     .maybeSingle();
+  assertDbWrite(insurerError, "Försäkringsbolaget kunde inte läsas");
   if (!insurer || (insurer as { status?: string }).status !== "active") {
     throw new Error("Försäkringsbolaget är inte aktivt eller kunde inte hittas.");
   }
@@ -464,7 +551,7 @@ export async function saveAgreement(formData: FormData): Promise<void> {
     }
     const { error } = await client
       .from("tow_company_insurance_agreements" as never)
-      .update({ ...requestFields, status: "pending", active_from: null, active_to: null } as never)
+      .update({ ...requestFields, status: "pending", active_from: null, active_to: null, requested_by_user_id: userId } as never)
       .eq("id", current.id)
       .eq("status", "pending");
     if (error) throw new Error(`Avtalsförfrågan kunde inte uppdateras: ${error.message}`);
@@ -479,6 +566,7 @@ export async function saveAgreement(formData: FormData): Promise<void> {
         status: "pending",
         active_from: null,
         ...requestFields,
+        requested_by_user_id: userId,
       } as never)
       .select("id")
       .single();
@@ -486,15 +574,17 @@ export async function saveAgreement(formData: FormData): Promise<void> {
     agreementId = (saved as { id: string }).id;
   }
 
-  await client.from("audit_logs" as never).insert({
+  const { error: auditError } = await client.from("audit_logs" as never).insert({
     tenant_id: tenantId,
     actor_user_id: userId,
+    actor_kind: "user",
     action: auditAction,
     entity_type: "tow_company_insurance_agreement_request",
     entity_id: agreementId,
     fields: ["insurance_tenant_id", "status", "priority", "sla_minutes", "pricing_model"],
     metadata: { status: "pending", insurance_tenant_id: insurerTenantId },
   } as never);
+  assertDbWrite(auditError, "Avtalsförfrågan sparades men revisionsloggen kunde inte skrivas");
   revalidatePath("/agreements");
   revalidatePath("/partners");
 }
@@ -532,19 +622,21 @@ export async function updateAgreementStatus(formData: FormData): Promise<void> {
       : { status: nextStatus };
   const { error } = await client
     .from("tow_company_insurance_agreements" as never)
-    .update(patch as never)
+    .update({ ...patch, decided_by_user_id: userId } as never)
     .eq("id", agreementId);
   if (error) throw new Error(`Avtalsstatus kunde inte ändras: ${error.message}`);
 
-  await client.from("audit_logs" as never).insert({
+  const { error: auditError } = await client.from("audit_logs" as never).insert({
     tenant_id: agreement.insurance_tenant_id,
     actor_user_id: userId,
+    actor_kind: "user",
     action: "status_change",
     entity_type: "tow_company_insurance_agreement",
     entity_id: agreementId,
     fields: ["status", "active_from", "active_to"],
     metadata: { from: agreement.status, to: nextStatus },
   } as never);
+  assertDbWrite(auditError, "Avtalsstatusen sparades men revisionsloggen kunde inte skrivas");
   revalidatePath("/partners");
   revalidatePath("/readiness");
   revalidatePath("/agreements");
@@ -552,16 +644,53 @@ export async function updateAgreementStatus(formData: FormData): Promise<void> {
 
 export async function setDriverVehicle(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
-  const { db: client, tenant } = await portalDb(tenantId, "drivers.manage");
+  const { db: client, tenant, userId } = await portalDb(tenantId, "drivers.manage");
   assertTenant(tenant.id, tenantId);
   const driverId = String(formData.get("driver_id") ?? "");
   const vehicleId = String(formData.get("vehicle_id") ?? "") || null;
   if (!driverId) throw new Error("Välj en förare.");
-  await client
+
+  const { data: driver, error: driverError } = await client
+    .from("tow_drivers" as never)
+    .select("id, tenant_id, tow_company_id, current_vehicle_id")
+    .eq("id", driverId)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (driverError) throw new Error(`Föraren kunde inte läsas: ${driverError.message}`);
+  const current = driver as { tow_company_id: string; current_vehicle_id: string | null } | null;
+  if (!current) throw new Error("Föraren tillhör inte den här organisationen.");
+
+  if (vehicleId) {
+    const { data: vehicle, error: vehicleError } = await client
+      .from("tow_vehicles" as never)
+      .select("id")
+      .eq("id", vehicleId)
+      .eq("tenant_id", tenantId)
+      .eq("tow_company_id", current.tow_company_id)
+      .maybeSingle();
+    if (vehicleError) throw new Error(`Fordonet kunde inte läsas: ${vehicleError.message}`);
+    if (!vehicle) throw new Error("Fordonet tillhör inte samma bärgningsbolag som föraren.");
+  }
+
+  const { error } = await client
     .from("tow_drivers" as never)
     .update({ current_vehicle_id: vehicleId } as never)
     .eq("id", driverId)
-    .eq("tenant_id", tenantId);
+    .eq("tenant_id", tenantId)
+    .eq("tow_company_id", current.tow_company_id);
+  if (error) throw new Error(`Fordonet kunde inte kopplas till föraren: ${error.message}`);
+
+  const { error: auditError } = await client.from("audit_logs" as never).insert({
+    tenant_id: tenantId,
+    actor_user_id: userId,
+    actor_kind: "user",
+    action: "update",
+    entity_type: "tow_driver_vehicle",
+    entity_id: driverId,
+    fields: ["current_vehicle_id"],
+    metadata: { from: current.current_vehicle_id, to: vehicleId },
+  } as never);
+  assertDbWrite(auditError, "Fordonskopplingen sparades men revisionsloggen kunde inte skrivas");
   revalidatePath("/drivers");
 }
 
@@ -570,24 +699,44 @@ export async function createApiKey(formData: FormData): Promise<void> {
   const tenantId = String(formData.get("tenant_id"));
   const { db: client, tenant, userId } = await portalDb(tenantId, "api_keys.manage");
   assertTenant(tenant.id, tenantId);
-  const name = String(formData.get("name") ?? "API client");
+  const name = String(formData.get("name") ?? "API client").trim() || "API client";
+  const scopes = [...new Set(formData.getAll("scopes").map(String))].filter((scope) => ALLOWED_API_SCOPES.has(scope));
+  if (scopes.length === 0) throw new Error("Välj minst en behörighet för API-nyckeln.");
   const { key, last4 } = newApiKey("rk_live");
-  await client.from("tenant_api_clients" as never).insert({
+  const { data: created, error: createError } = await client.from("tenant_api_clients" as never).insert({
     tenant_id: tenantId,
     name,
     api_key_hash: sha256Hex(key),
     key_last4: last4,
-  } as never);
-  await client.from("audit_logs" as never).insert({
-    tenant_id: tenantId,
-    actor_user_id: userId,
-    action: "create",
-    entity_type: "api_key",
-    entity_id: name,
-    fields: ["name", "key_last4"],
-    metadata: { key_last4: last4, raw_key_shown_once: true },
-  } as never);
-  const revealToken = await createOneTimeReveal(client, tenantId, userId, "api_key", key);
+    created_by_user_id: userId,
+    scopes,
+  } as never).select("id").single();
+  assertDbWrite(createError, "API-nyckeln kunde inte skapas");
+  const apiClientId = (created as { id?: string } | null)?.id;
+  if (!apiClientId) throw new Error("API-nyckeln skapades utan ett identifierbart klient-id.");
+
+  let revealToken: string | null = null;
+  try {
+    revealToken = await createOneTimeReveal(client, tenantId, userId, "api_key", key);
+    const { error: auditError } = await client.from("audit_logs" as never).insert({
+      tenant_id: tenantId,
+      actor_user_id: userId,
+      actor_kind: "user",
+      action: "create",
+      entity_type: "api_key",
+      entity_id: apiClientId,
+      fields: ["name", "key_last4", "scopes"],
+      metadata: { key_last4: last4, scopes, raw_key_shown_once: true },
+    } as never);
+    assertDbWrite(auditError, "API-nyckeln skapades men revisionsloggen kunde inte skrivas");
+  } catch (creationError) {
+    if (revealToken) {
+      await client.from("one_time_secret_reveals" as never).delete().eq("tenant_id", tenantId).eq("token_hash", sha256Hex(revealToken));
+    }
+    await client.from("tenant_api_clients" as never).delete().eq("id", apiClientId).eq("tenant_id", tenantId);
+    throw creationError;
+  }
+  if (!revealToken) throw new Error("API-nyckeln kunde inte förberedas för visning.");
   redirect(`/integrations?reveal=${encodeURIComponent(revealToken)}`);
 }
 
@@ -622,16 +771,17 @@ export async function saveLegalVersion(formData: FormData): Promise<void> {
   if (!kind || !title || !body) throw new Error("Typ, rubrik och text krävs.");
 
   if (status === "active") {
-    await client
+    const { error: archiveError } = await client
       .from("tenant_legal_text_versions" as never)
       .update({ status: "archived", active_to: new Date().toISOString() } as never)
       .eq("tenant_id", tenantId)
       .eq("locale", "sv-SE")
       .eq("kind", kind)
       .eq("status", "active");
+    assertDbWrite(archiveError, "Tidigare aktiv juridisk text kunde inte arkiveras");
   }
 
-  await client.from("tenant_legal_text_versions" as never).upsert(
+  const { error: upsertError } = await client.from("tenant_legal_text_versions" as never).upsert(
     {
       tenant_id: tenantId,
       locale: "sv-SE",
@@ -645,7 +795,8 @@ export async function saveLegalVersion(formData: FormData): Promise<void> {
     } as never,
     { onConflict: "tenant_id,locale,kind,version" } as never,
   );
-  await client.from("audit_logs" as never).insert({
+  assertDbWrite(upsertError, "Den juridiska texten kunde inte sparas");
+  const { error: auditError } = await client.from("audit_logs" as never).insert({
     tenant_id: tenantId,
     actor_user_id: userId,
     action: "upsert",
@@ -654,6 +805,7 @@ export async function saveLegalVersion(formData: FormData): Promise<void> {
     fields: ["kind", "version", "status", "body_hash"],
     metadata: { kind, version, status, body_hash: sha256(body) },
   } as never);
+  assertDbWrite(auditError, "Den juridiska texten sparades men revisionsloggen kunde inte skrivas");
   revalidatePath("/legal");
   revalidatePath("/readiness");
 }
@@ -669,7 +821,7 @@ export async function saveFallbackRule(formData: FormData): Promise<void> {
   } catch {
     throw new Error("Driftkontakter måste vara giltig JSON.");
   }
-  await client.from("tenant_notification_fallback_rules" as never).upsert(
+  const { error: fallbackError } = await client.from("tenant_notification_fallback_rules" as never).upsert(
     {
       tenant_id: tenantId,
       job_scope: String(formData.get("job_scope") ?? "insurance"),
@@ -685,7 +837,8 @@ export async function saveFallbackRule(formData: FormData): Promise<void> {
     } as never,
     { onConflict: "tenant_id,job_scope" } as never,
   );
-  await client.from("audit_logs" as never).insert({
+  assertDbWrite(fallbackError, "Reservrutinen kunde inte sparas");
+  const { error: auditError } = await client.from("audit_logs" as never).insert({
     tenant_id: tenantId,
     actor_user_id: userId,
     action: "upsert",
@@ -693,6 +846,7 @@ export async function saveFallbackRule(formData: FormData): Promise<void> {
     entity_id: String(formData.get("job_scope") ?? "insurance"),
     fields: ["push_timeout_seconds", "sms_fallback_enabled", "operational_contacts"],
   } as never);
+  assertDbWrite(auditError, "Reservrutinen sparades men revisionsloggen kunde inte skrivas");
   revalidatePath("/notifications");
   revalidatePath("/readiness");
 }
@@ -710,7 +864,7 @@ export async function saveVehiclePermission(formData: FormData): Promise<void> {
   const allowedStatuses = new Set(["active", "pending", "suspended", "terminated"]);
   if (!agreementId || !towVehicleId || !allowedStatuses.has(status)) throw new Error("Avtal, bärgningsbil och giltig status krävs.");
 
-  const [{ data: agreement }, { data: vehicle }] = await Promise.all([
+  const [{ data: agreement, error: agreementError }, { data: vehicle, error: vehicleError }] = await Promise.all([
     client
       .from("tow_company_insurance_agreements" as never)
       .select("id, insurance_tenant_id, tow_company_id, status")
@@ -722,6 +876,8 @@ export async function saveVehiclePermission(formData: FormData): Promise<void> {
       .eq("id", towVehicleId)
       .maybeSingle(),
   ]);
+  assertDbWrite(agreementError, "Avtalet kunde inte läsas");
+  assertDbWrite(vehicleError, "Bärgningsbilen kunde inte läsas");
   const agreementRow = agreement as { insurance_tenant_id?: string; tow_company_id?: string; status?: string } | null;
   const vehicleRow = vehicle as { tow_company_id?: string } | null;
   if (!agreementRow) throw new Error("Avtalet kunde inte hittas.");
@@ -736,7 +892,7 @@ export async function saveVehiclePermission(formData: FormData): Promise<void> {
   }
 
   const now = new Date().toISOString();
-  await client.from("tow_vehicle_insurance_permissions" as never).upsert(
+  const { error: permissionError } = await client.from("tow_vehicle_insurance_permissions" as never).upsert(
     {
       insurance_agreement_id: agreementId,
       tow_vehicle_id: towVehicleId,
@@ -747,7 +903,8 @@ export async function saveVehiclePermission(formData: FormData): Promise<void> {
     } as never,
     { onConflict: "insurance_agreement_id,tow_vehicle_id" } as never,
   );
-  await client.from("audit_logs" as never).insert({
+  assertDbWrite(permissionError, "Fordonsgodkännandet kunde inte sparas");
+  const { error: auditError } = await client.from("audit_logs" as never).insert({
     tenant_id: tenantId,
     actor_user_id: userId,
     action: "upsert",
@@ -756,6 +913,7 @@ export async function saveVehiclePermission(formData: FormData): Promise<void> {
     fields: ["status", "active_from", "active_to", "notes"],
     metadata: { agreement_id: agreementId, status },
   } as never);
+  assertDbWrite(auditError, "Fordonsgodkännandet sparades men revisionsloggen kunde inte skrivas");
   revalidatePath("/partners");
   revalidatePath("/readiness");
 }

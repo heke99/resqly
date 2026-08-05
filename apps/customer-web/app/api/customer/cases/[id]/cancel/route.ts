@@ -34,12 +34,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim().slice(0, 300) : null;
   if (!reason) return jsonError(400, "Ange varför du vill avbryta ärendet.");
 
-  const { data: incident } = await db
+  const { data: incident, error: incidentError } = await db
     .from("incidents" as never)
     .select("id, tenant_id, status, customer_user_id")
     .eq("id", id)
     .eq("customer_user_id", user.id)
     .maybeSingle();
+  if (incidentError) return jsonError(503, "Ärendet kunde inte hämtas just nu. Försök igen.");
   const inc = incident as { id: string; tenant_id: string; status: string } | null;
   if (!inc) return jsonError(404, "Ärendet hittades inte.");
   if (inc.status === "cancelled") return NextResponse.json({ status: "cancelled" });
@@ -47,7 +48,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return jsonError(409, "Ärendet kan inte längre avbrytas här. Kontakta supporten så hjälper vi dig.");
   }
 
-  const { data: job } = await db
+  const { data: job, error: jobError } = await db
     .from("tow_jobs" as never)
     .select("id, status, driver_id")
     .eq("incident_id", inc.id)
@@ -55,50 +56,35 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (jobError) return jsonError(503, "Bärgningsstatus kunde inte hämtas just nu. Försök igen.");
   const liveJob = job as { id: string; status: string } | null;
 
   if (liveJob && JOB_LOCKED_STATUSES.has(liveJob.status)) {
     return jsonError(409, "En bärgare är redan på väg. Kontakta supporten för att avbryta.");
   }
 
-  if (liveJob) {
-    // Cancel any pending offers so drivers stop seeing the job.
-    await db
-      .from("tow_job_offers" as never)
-      .update({ status: "cancelled" } as never)
-      .eq("tow_job_id", liveJob.id)
-      .eq("status", "pending");
-    await db.from("tow_jobs" as never).update({ status: "cancelled" } as never).eq("id", liveJob.id);
-    await db.from("tow_job_status_events" as never).insert({
-      tow_job_id: liveJob.id,
-      from_status: liveJob.status,
-      to_status: "cancelled",
-      actor_user_id: user.id,
-      reason: `avbruten av kund: ${reason}`,
-    } as never);
+  const { data: cancelResult, error: cancelError } = await db.rpc(
+    "cancel_incident_workflow" as never,
+    {
+      p_incident: inc.id,
+      p_actor_user: user.id,
+      p_reason: reason,
+      p_customer_only: true,
+    } as never,
+  );
+  if (cancelError) return jsonError(503, "Ärendet kunde inte avbrytas just nu. Försök igen.");
+  const result = (cancelResult ?? {}) as {
+    error?: string;
+    status?: string;
+    tow_job_cancelled?: boolean;
+  };
+  if (result.error === "tow_job_locked" || result.error === "incident_locked") {
+    return jsonError(409, "Ärendet kan inte längre avbrytas här. Kontakta supporten så hjälper vi dig.");
   }
-
-  await db
-    .from("incidents" as never)
-    .update({ status: "cancelled" } as never)
-    .eq("id", inc.id)
-    .eq("customer_user_id", user.id);
-  await db.from("incident_status_events" as never).insert({
-    incident_id: inc.id,
-    from_status: inc.status,
-    to_status: "cancelled",
-    actor_user_id: user.id,
-    reason,
-  } as never);
-  await db.from("audit_logs" as never).insert({
-    tenant_id: inc.tenant_id,
-    actor_user_id: user.id,
-    action: "status_change",
-    entity_type: "incident",
-    entity_id: inc.id,
-    fields: ["status"],
-    metadata: { from: inc.status, to: "cancelled", by: "customer", tow_job_cancelled: liveJob?.id ?? null },
-  } as never);
+  if (result.error === "not_found" || result.error === "forbidden") {
+    return jsonError(404, "Ärendet hittades inte.");
+  }
+  if (result.error) return jsonError(409, "Ärendet kunde inte avbrytas.");
 
   await sendCustomerEmail(db, {
     tenantId: inc.tenant_id,
@@ -109,5 +95,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     dedupeKey: `email:case_cancelled:${inc.id}`,
   });
 
-  return NextResponse.json({ status: "cancelled", tow_job_cancelled: Boolean(liveJob) });
+  return NextResponse.json({ status: "cancelled", tow_job_cancelled: result.tow_job_cancelled === true });
 }

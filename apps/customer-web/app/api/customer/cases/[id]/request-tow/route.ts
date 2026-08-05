@@ -72,12 +72,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return jsonError(409, "Fyll i fullständigt namn och ett giltigt mobilnummer i din profil innan du begär bärgning.");
   }
 
-  const { data: incident } = await db
+  const { data: incident, error: incidentError } = await db
     .from("incidents" as never)
     .select("id, tenant_id, type, status, requires_bankid, bankid_verified, customer_user_id, insurance_company_id, problem_type, case_number")
     .eq("id", id)
     .eq("customer_user_id", user.id)
     .maybeSingle();
+  if (incidentError) return jsonError(503, "Ärendet kunde inte läsas just nu.");
   const inc = incident as {
     id: string;
     tenant_id: string;
@@ -90,6 +91,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     case_number: string | null;
   } | null;
   if (!inc) return jsonError(404, "Ärendet hittades inte.");
+  if (["completed", "closed", "cancelled", "rejected"].includes(inc.status)) {
+    return jsonError(409, "Det går inte att begära bärgning för ett avslutat eller avvisat ärende.");
+  }
   if (inc.requires_bankid && !inc.bankid_verified) {
     return jsonError(409, "BankID-verifiering krävs innan bärgning kan begäras.");
   }
@@ -108,17 +112,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     ? body.pickup as { lat?: unknown; lng?: unknown }
     : null;
   if (Number.isFinite(Number(bodyPickup?.lat)) && Number.isFinite(Number(bodyPickup?.lng))) {
-    const { error } = await db.from("incident_locations" as never).upsert({
+    const pickupUpdate: Record<string, unknown> = {
       incident_id: inc.id,
       kind: "pickup",
       lat: Number(bodyPickup!.lat),
       lng: Number(bodyPickup!.lng),
-      address: stringOrNull(body.address),
-    } as never, { onConflict: "incident_id,kind" } as never);
+    };
+    const suppliedAddress = stringOrNull(body.address);
+    if (suppliedAddress) pickupUpdate.address = suppliedAddress;
+    const { error } = await db.from("incident_locations" as never).upsert(
+      pickupUpdate as never,
+      { onConflict: "incident_id,kind" } as never,
+    );
     if (error) return jsonError(503, "Upphämtningsplatsen kunde inte sparas. Försök igen.");
   }
 
-  const { data: locRow } = await db
+  const { data: locRow, error: locationReadError } = await db
     .from("incident_locations" as never)
     .select("lat, lng, address")
     .eq("incident_id", inc.id)
@@ -126,9 +135,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (locationReadError) return jsonError(503, "Upphämtningsplatsen kunde inte läsas just nu.");
   const location = pickLocation(body, locRow as { lat?: number | null; lng?: number | null } | null);
 
-  const { data: existingRow } = await db
+  const { data: existingRow, error: existingJobError } = await db
     .from("tow_jobs" as never)
     .select("id, status, payer_type, priority")
     .eq("tenant_id", inc.tenant_id)
@@ -137,6 +147,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (existingJobError) return jsonError(503, "Bärgningsuppdraget kunde inte kontrolleras just nu.");
   let job = existingRow as TowJobRow | null;
 
   if (job && !["created", "matching"].includes(job.status)) {
@@ -161,51 +172,38 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         .insert({
           tenant_id: inc.tenant_id,
           incident_id: inc.id,
-          status: "manual_review",
+          status: "created",
           payer_type: payerType,
           priority,
+          created_by_user_id: user.id,
         } as never)
         .select("id, status, payer_type, priority")
         .single();
-      if (manualErr) return jsonError(503, "Bärgningen kunde inte skickas just nu. Försök igen eller kontakta support.");
+      if (manualErr || !manualJob) return jsonError(503, "Bärgningen kunde inte skickas just nu. Försök igen eller kontakta support.");
       job = manualJob as TowJobRow;
-    } else {
-      await db.from("tow_jobs" as never).update({ status: "manual_review" } as never).eq("id", job.id);
-      job.status = "manual_review";
     }
 
     const manualAddress = stringOrNull(body.address);
-    await db.from("tow_job_status_events" as never).insert({
-      tow_job_id: job!.id,
-      from_status: null,
-      to_status: "manual_review",
-      actor_user_id: user.id,
-      reason: "upphämtningsplats saknas; adress behöver bekräftas av handläggare",
-    } as never);
-    const { data: existingReview } = await db
-      .from("manual_reviews" as never)
-      .select("id")
-      .eq("tow_job_id", job!.id)
-      .in("status", ["open", "in_progress"])
-      .limit(1)
-      .maybeSingle();
-    if (!existingReview) {
-      const { error: reviewError } = await db.from("manual_reviews" as never).insert({
-        tenant_id: inc.tenant_id,
-        incident_id: inc.id,
-        tow_job_id: job!.id,
-        reason: manualAddress
-          ? `Kunden angav adressen "${manualAddress}" men platsen kunde inte fastställas automatiskt.`
-          : "Kunden kunde inte dela sin position. Upphämtningsplats behöver bekräftas.",
-        status: "open",
-      } as never);
-      if (reviewError && (reviewError as { code?: string }).code !== "23505") {
-        return jsonError(503, "Ärendet kunde inte skickas till manuell hantering.");
-      }
-    }
+    const reviewReason = manualAddress
+      ? `Kunden angav adressen "${manualAddress}" men platsen kunde inte fastställas automatiskt.`
+      : "Kunden kunde inte dela sin position. Upphämtningsplats behöver bekräftas.";
+    const { data: escalationData, error: escalationError } = await db.rpc(
+      "escalate_tow_job_manual_review" as never,
+      {
+        p_job: job.id,
+        p_tenant: inc.tenant_id,
+        p_actor_user: user.id,
+        p_reason: "upphämtningsplats saknas; adress behöver bekräftas av handläggare",
+        p_review_reason: reviewReason,
+        p_assign_to: null,
+      } as never,
+    );
+    if (escalationError) return jsonError(503, "Ärendet kunde inte skickas till manuell hantering.");
+    const escalation = (escalationData ?? {}) as { error?: string };
+    if (escalation.error) return jsonError(409, "Ärendet kunde inte skickas till manuell hantering.");
 
-    const manualBody = { tow_job_id: job!.id, status: "manual_review", offered_drivers: [] };
-    await storeIdempotentResponse(db, user.id, `tow.request:${inc.id}`, idemKey, job!.id, manualBody);
+    const manualBody = { tow_job_id: job.id, status: "manual_review", offered_drivers: [] };
+    await storeIdempotentResponse(db, user.id, `tow.request:${inc.id}`, idemKey, job.id, manualBody);
     return NextResponse.json(manualBody, { status: 201 });
   }
 
@@ -218,12 +216,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         status: "created",
         payer_type: payerType,
         priority,
+        created_by_user_id: user.id,
       } as never)
       .select("id, status, payer_type, priority")
       .single();
 
     if (jobError) {
-      const { data: concurrent } = await db
+      const { data: concurrent, error: concurrentError } = await db
         .from("tow_jobs" as never)
         .select("id, status, payer_type, priority")
         .eq("tenant_id", inc.tenant_id)
@@ -232,6 +231,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+      if (concurrentError) return jsonError(503, "Bärgningsuppdraget kunde inte kontrolleras efter ett samtidigt försök.");
       job = concurrent as TowJobRow | null;
       if (!job) return jsonError(503, "Bärgningen kunde inte skickas just nu. Försök igen om en stund.");
       if (!["created", "matching"].includes(job.status)) {
@@ -272,7 +272,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         job: { id: job!.id, incident_id: inc.id, status: job!.status },
         pickup: location,
         payerType: job!.payer_type,
-        priority: priority as "normal" | "high" | "urgent",
+        priority: job!.priority as "normal" | "high" | "urgent",
         problemType: inc.problem_type,
         caseNumber: inc.case_number,
         actorUserId: user.id,
@@ -305,11 +305,26 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return jsonError(503, `Bärgningen kunde inte skickas just nu. Försök igen. Försök ${attempt.attempts}/3.`);
   }
 
-  if (outcome.status === "offered") {
-    await db.from("incidents" as never)
+  if (outcome.status === "offered" && inc.status !== "submitted") {
+    const { error: incidentUpdateError } = await db.from("incidents" as never)
       .update({ status: "submitted" } as never)
       .eq("id", inc.id)
-      .eq("customer_user_id", user.id);
+      .eq("customer_user_id", user.id)
+      .eq("tenant_id", inc.tenant_id);
+    if (!incidentUpdateError) {
+      const { error: eventError } = await db.from("incident_status_events" as never).insert({
+        incident_id: inc.id,
+        from_status: inc.status,
+        to_status: "submitted",
+        actor_user_id: user.id,
+        actor_kind: "user",
+        reason: "Bärgning begärd av kund",
+      } as never);
+      if (eventError) {
+        await db.from("incidents" as never).update({ status: inc.status } as never).eq("id", inc.id).eq("tenant_id", inc.tenant_id);
+        return jsonError(503, "Ärendestatus kunde inte sparas med full spårbarhet.");
+      }
+    }
   }
 
   await sendCustomerEmail(db, {

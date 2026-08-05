@@ -3,10 +3,11 @@ import {
   driverLocationInputSchema,
   offerRejectInputSchema,
 } from "@resqly/types";
-import { forbidden, notFound } from "@resqly/utils";
+import { AppError, forbidden, notFound } from "@resqly/utils";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
 import { acceptJobForDriver } from "./tow";
+import { apiActorFields } from "../services/audit";
 
 function requireDriver(ctx: ApiContext): string {
   if (!ctx.driverId) throw forbidden("An authenticated driver token is required for this action");
@@ -27,7 +28,7 @@ export async function goOnline(ctx: ApiContext, online: boolean): Promise<RouteR
   await ctx.repo.setDriverOnline(driverId, online);
   await ctx.repo.recordAudit({
     tenant_id: profile.tenant_id,
-    actor_user_id: ctx.userId ?? null,
+    ...apiActorFields(ctx),
     action: "update",
     entity_type: "tow_driver",
     entity_id: driverId,
@@ -54,6 +55,16 @@ export async function registerDevice(ctx: ApiContext, body: unknown): Promise<Ro
     expo_push_token: input.expo_push_token,
     platform: input.platform,
     device_name: input.device_name ?? null,
+  });
+  const profile = await requireActiveDriverProfile(ctx, driverId);
+  await ctx.repo.recordAudit({
+    tenant_id: profile.tenant_id,
+    ...apiActorFields(ctx),
+    action: "upsert",
+    entity_type: "driver_device",
+    entity_id: driverId,
+    fields: ["expo_push_token", "platform", "device_name"],
+    metadata: { platform: input.platform },
   });
   return { status: 201, body: { ok: true } };
 }
@@ -89,10 +100,15 @@ export async function rejectOffer(
   const offer = await ctx.repo.getOfferById(offerId);
   if (!offer) throw notFound("Offer not found");
   if (offer.driver_id !== driverId) throw forbidden("This offer belongs to another driver");
-  await ctx.repo.rejectOffer(offer.tow_job_id, driverId, input.reason ?? null);
+  const rejected = await ctx.repo.rejectOffer(offer.tow_job_id, driverId, input.reason ?? null);
+  if (!rejected) {
+    throw new AppError("conflict", "Offer is no longer pending", {
+      user_message: "Erbjudandet är inte längre tillgängligt.",
+    });
+  }
   await ctx.repo.recordAudit({
     tenant_id: offer.tenant_id,
-    actor_user_id: ctx.userId ?? null,
+    ...apiActorFields(ctx),
     action: "update",
     entity_type: "tow_job_offer",
     entity_id: offer.id,

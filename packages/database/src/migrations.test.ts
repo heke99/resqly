@@ -181,3 +181,82 @@ describe("notification idempotency (0024)", () => {
     expect(sql).toContain("where dedupe_key is not null");
   });
 });
+
+describe("tenant and actor consistency (0027)", () => {
+  const sql = readFileSync(join(migrationsDir, "0027_tenant_actor_consistency.sql"), "utf8");
+
+  it("selects exactly one explicit private marketplace operator", () => {
+    expect(sql).toContain("private_marketplace_operator");
+    expect(sql).toContain("uq_single_private_marketplace_operator");
+    expect(sql).toContain("private_marketplace_operator_must_be_active_internal_tenant");
+  });
+
+  it("binds partner supplied references to the same tenant and company", () => {
+    expect(sql).toContain("incident_vehicle_not_owned_by_customer");
+    expect(sql).toContain("incident_insurance_company_wrong_tenant");
+    expect(sql).toContain("tow_offer_driver_vehicle_wrong_company");
+    expect(sql).toContain("tow_offer_not_covered_by_insurer_agreement");
+    expect(sql).toContain("tow_job_company_not_open_for_private_orders");
+    expect(sql).toContain("tow_child_driver_not_assigned_to_job");
+    expect(sql).toContain("tow_invoice_payer_does_not_match_job");
+  });
+
+  it("preserves the insurer-to-tow-company cross-tenant bridge", () => {
+    expect(sql).toContain("job owner tenant and executing tow-company tenant are intentionally");
+    expect(sql).toContain("tow_assignment_does_not_match_job_company_driver_vehicle");
+    expect(sql).not.toContain("tow_job_company_wrong_tenant");
+  });
+
+  it("records human, API client and worker actors", () => {
+    expect(sql).toContain("actor_api_client_id");
+    expect(sql).toContain("actor_kind");
+    expect(sql).toContain("created_by_worker");
+    expect(sql).toContain("actor_worker");
+    expect(sql).toContain("worker_manual_review_requires_worker_name");
+  });
+
+  it("cancels an incident and all live tow work atomically", () => {
+    expect(sql).toContain("function public.cancel_incident_workflow");
+    expect(sql).toContain("for update");
+    expect(sql).toContain("cancelled_tow_jobs");
+    expect(sql).toContain("v_admin_job_statuses");
+    expect(sql).toContain("tow_job_locked");
+    expect(sql).toContain("grant execute on function public.cancel_incident_workflow(uuid, uuid, text, boolean) to service_role");
+  });
+
+
+  it("moves manual review escalation into one service-only transaction", () => {
+    expect(sql).toContain("function public.escalate_tow_job_manual_review");
+    expect(sql).toContain("manual_review_id");
+    expect(sql).toContain("created_by_worker");
+    expect(sql).toContain("status_not_reviewable");
+    expect(sql).toContain("revoke all on function public.escalate_tow_job_manual_review(uuid, uuid, uuid, text, text, uuid, text, uuid) from public, anon, authenticated");
+    expect(sql).toContain("grant execute on function public.escalate_tow_job_manual_review(uuid, uuid, uuid, text, text, uuid, text, uuid) to service_role");
+  });
+
+  it("keeps customer cancellation consistent with the incident status graph", () => {
+    expect(sql).toContain("'received' and p_to_status = any(array['more_info_required','in_progress','rejected','cancelled','closed'])");
+    expect(sql).toContain("if not public.user_can_act_for_tenant(p_actor_user, p_tenant) then");
+  });
+
+  it("transitions tow status atomically with attributed actors", () => {
+    expect(sql).toContain("function public.transition_tow_job_status");
+    expect(sql).toContain("stale_status");
+    expect(sql).toContain("tow_job_status_events");
+    expect(sql).toContain("grant execute on function public.transition_tow_job_status(uuid, text, text, uuid, uuid, text, text)");
+  });
+
+  it("limits tenant API keys to explicit validated scopes", () => {
+    expect(sql).toContain("add column if not exists scopes text[]");
+    expect(sql).toContain("tenant_api_clients_scopes_allowed");
+    expect(sql).toContain("'tenant:write'");
+    expect(sql).toContain("cardinality(scopes) > 0");
+  });
+
+  it("validates the creator and agreement parties against active tenant context", () => {
+    expect(sql).toContain("creator_user_wrong_tenant");
+    expect(sql).toContain("agreement_requester_wrong_tenant");
+    expect(sql).toContain("agreement_decider_wrong_tenant");
+    expect(sql).toContain("tow_event_user_wrong_context");
+  });
+});

@@ -93,6 +93,8 @@ export async function pollDispatchRecovery(
           problemType: row.problem_type,
           caseNumber: row.case_number,
           actorUserId: null,
+          actorKind: "worker",
+          actorWorker: "dispatch-recovery",
           settings,
         },
         {
