@@ -16,7 +16,7 @@
     "test": "vitest run",
     "db:push": "supabase db push",
     "db:reset": "supabase db reset",
-    "gen:types": "supabase gen types typescript --local > src/generated-types.ts"
+    "gen:types": "bash scripts/generate-types.sh"
   },
   "dependencies": {
     "@resqly/utils": "workspace:*",

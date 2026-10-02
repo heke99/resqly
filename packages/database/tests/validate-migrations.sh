@@ -6,13 +6,32 @@
 # Usage: bash tests/validate-migrations.sh [database-name]
 set -euo pipefail
 
-DB="${1:-resqly_migration_check}"
+DB="${1:-resqly_test_migrations}"
+if [[ ! "$DB" =~ ^resqly_(test|migration)_[a-z0-9_]+$ ]]; then
+  echo 'Only explicitly named local Resqly scratch databases are allowed' >&2
+  exit 1
+fi
+# Reject connection overrides that could redirect a destructive scratch replay.
+unset PGHOSTADDR PGSERVICE PGSERVICEFILE PGOPTIONS PGTARGETSESSIONATTRS
+if [ -n "${DATABASE_SUPERUSER_URL:-}" ]; then
+  python3 - <<'PY'
+import os,urllib.parse
+u=urllib.parse.urlparse(os.environ['DATABASE_SUPERUSER_URL'])
+if u.scheme not in ('postgres','postgresql') or u.hostname not in ('localhost','127.0.0.1','::1') or u.query or u.fragment:
+    raise SystemExit('Migration replay requires a direct local PostgreSQL URL without overrides')
+PY
+fi
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MIGRATIONS_DIR="$HERE/../supabase/migrations"
 
 run_psql() {
   if [ -n "${DATABASE_SUPERUSER_URL:-}" ]; then
-    psql "$DATABASE_SUPERUSER_URL" "$@"
+    local target=postgres
+    local args=()
+    while (( $# )); do
+      if [[ "$1" == -d ]]; then target="$2"; shift 2; else args+=("$1"); shift; fi
+    done
+    psql "${DATABASE_SUPERUSER_URL%/*}/$target" "${args[@]}"
   else
     sudo -u postgres psql "$@"
   fi
@@ -65,14 +84,19 @@ begin
   end if;
 end $$;
 
--- accept_tow_offer must exist with the hardened reason codes.
+-- Actor-bound accept is the only service entry point.
 do $$
 declare src text;
 begin
-  select prosrc into src from pg_proc where proname = 'accept_tow_offer';
-  if src is null then raise exception 'accept_tow_offer missing'; end if;
+  select prosrc into src from pg_proc where proname = 'accept_tow_offer_for_actor';
+  if src is null then raise exception 'accept_tow_offer_for_actor missing'; end if;
   if position('offer_expired' in src) = 0 then raise exception 'accept_tow_offer missing expiry check'; end if;
   if position('already_accepted_by_driver' in src) = 0 then raise exception 'accept_tow_offer missing idempotent re-accept'; end if;
+  if has_function_privilege('service_role','public.accept_tow_offer(uuid,uuid)','EXECUTE')
+    or has_function_privilege('anon','public.accept_tow_offer_for_actor(uuid,uuid,uuid,text)','EXECUTE')
+    or has_function_privilege('authenticated','public.accept_tow_offer_for_actor(uuid,uuid,uuid,text)','EXECUTE') then
+    raise exception 'accept RPC grants are unsafe';
+  end if;
 end $$;
 
 -- Launch-safety RPCs are service-only and exact-once constraints exist.
@@ -173,7 +197,8 @@ SQL
 echo "==> Running pgTAP business-rule tests (if pgtap is available)"
 if run_psql -d "$DB" -tAc "select count(*) from pg_available_extensions where name = 'pgtap'" | grep -q '^1$'; then
   run_psql -v ON_ERROR_STOP=1 -d "$DB" -q -c "create extension if not exists pgtap;"
-  for t in "$HERE/rls_assumptions.sql" "$HERE/dispatch_rules.sql"; do
+  for t in "$HERE"/*.sql; do
+    if [[ "$(basename "$t")" == local_shim.sql || "$(basename "$t")" == *_fixture.sql ]]; then continue; fi
     echo "==> $(basename "$t")"
     if ! OUT="$(run_psql -v ON_ERROR_STOP=1 -d "$DB" -f "$t" 2>&1)"; then
       echo "$OUT" | tail -30
@@ -187,7 +212,12 @@ if run_psql -d "$DB" -tAc "select count(*) from pg_available_extensions where na
     fi
   done
 else
-  echo "    pgtap extension not available — skipping (install postgresql-XX-pgtap to run)"
+  echo "pgtap is required for this verification gate" >&2
+  exit 1
 fi
 
+echo "==> Real independent-session accept and resource races"
+RESQLY_TEST_DATABASE="$DB" python3 "$HERE/accept_concurrency.py"
+echo "==> Real independent-session worker claims"
+RESQLY_TEST_DATABASE="$DB" python3 "$HERE/worker_concurrency.py"
 echo "==> OK: all migrations applied cleanly to $DB"

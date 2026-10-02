@@ -19,6 +19,8 @@ function setup() {
   ];
   repo.driverUsers.set("user-drv1", "drv1");
   repo.driverUsers.set("user-drv2", "drv2");
+  repo.seedDriverProfile({id:"drv1",user_id:"user-drv1",is_online:true,duty_status:"on_duty"});
+  repo.seedDriverProfile({id:"drv2",user_id:"user-drv2",is_online:true,duty_status:"on_duty"});
   const app = new App({
     repo,
     maps: { routesEnabled: false },
@@ -44,6 +46,23 @@ const driverAuth = () => ({ "x-driver-authorization": `Bearer ${DRIVER_TOKEN}` }
 const driver2Auth = () => ({ "x-driver-authorization": `Bearer ${DRIVER2_TOKEN}` });
 
 describe("API auth", () => {
+  it.each([
+    ["GET", "/api/v1/drivers/me/offers"],
+    ["GET", "/api/v1/drivers/me/jobs"],
+    ["POST", "/api/v1/drivers/me/device"],
+    ["POST", "/api/v1/drivers/me/online"],
+    ["POST", "/api/v1/drivers/me/location"],
+    ["GET", "/api/v1/tow/jobs/old-job"],
+    ["POST", "/api/v1/tow/jobs/old-job/status"],
+  ])("blocks suspended driver session at %s %s", async (method,path) => {
+    const { app, repo } = setup();
+    repo.seedDriverProfile({ id: "drv1", user_id: "user-drv1", status: "inactive" });
+    const response = await app.handle({ method, path, headers: driverAuth(), body: {} });
+    expect(response.status).toBe(403);
+    expect(repo.devices).toHaveLength(0);
+    expect(repo.auditLogs).toHaveLength(0);
+  });
+
   it("rejects requests without an API key", async () => {
     const { app } = setup();
     const res = await app.handle({ method: "GET", path: "/api/v1/tenant/settings", headers: {} });
@@ -215,8 +234,7 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     expect(share.customer_phone).toBe("+46700000000");
     expect(Object.keys(share)).not.toContain("personal_number");
     expect(Object.keys(share)).not.toContain("bankid_status");
-    // a data_share audit was written
-    expect(env.repo.auditLogs.some((a) => a.action === "data_share")).toBe(true);
+    expect(env.repo.auditLogs.some((a) => a.action === "tow.driver_accepted")).toBe(true);
   });
 
   it("isolates tenants: another tenant cannot read this incident", async () => {

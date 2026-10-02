@@ -1,5 +1,7 @@
 import { newId } from "@resqly/utils";
 import { formatCaseNumber } from "@resqly/utils";
+import { normalizePhoneE164 } from "@resqly/utils";
+import { buildCustomerShare } from "@resqly/tow";
 import type { DispatchCandidate } from "@resqly/dispatch";
 import { ALL_API_SCOPES } from "./types";
 import type {
@@ -50,6 +52,10 @@ const DEFAULT_SETTINGS: TenantSettingsRecord = {
 
 /** In-memory implementation used by tests. Mirrors the Supabase repo behaviour. */
 export class MemoryRepo implements ApiRepo {
+  async isDriverActorActive(driverId: string, userId: string): Promise<boolean> {
+    const driver = this.driverProfiles.get(driverId);
+    return !!driver && driver.user_id === userId && driver.status === "active";
+  }
   private readonly dispatchClaims = new Set<string>();
   apiClients = new Map<string, ApiClientRecord>(); // keyed by key hash
   tenants = new Map<string, TenantRecord>();
@@ -464,14 +470,18 @@ export class MemoryRepo implements ApiRepo {
   }
   async getOfferForDriver(jobId: string, driverId: string) {
     const o = this.offers.find((x) => x.tow_job_id === jobId && x.driver_id === driverId);
-    return o ? { status: o.status } : null;
+    return o ? { status: o.status, expires_at: o.expires_at } : null;
   }
   // Mirrors the accept_tow_offer SQL function (0020): row-lock semantics are
   // approximated, expired offers are rejected, and a retry by the winning
   // driver is idempotent.
-  async acceptOffer(jobId: string, driverId: string): Promise<AcceptOfferResult> {
+  async acceptOffer(jobId: string, driverId: string, actorUserId: string, correlationId: string): Promise<AcceptOfferResult> {
     const job = this.towJobs.get(jobId);
     if (!job) return { accepted: false, towCompanyId: null, reason: "job_not_found" };
+    const profile = this.driverProfiles.get(driverId);
+    if (!actorUserId || !correlationId || !profile || profile.user_id !== actorUserId || profile.status !== "active") {
+      return { accepted: false, towCompanyId: null, reason: "forbidden" };
+    }
     if (job.driver_id && job.driver_id !== driverId) {
       return { accepted: false, towCompanyId: job.tow_company_id ?? null, reason: "already_assigned" };
     }
@@ -489,6 +499,20 @@ export class MemoryRepo implements ApiRepo {
       offer.status = "expired";
       return { accepted: false, towCompanyId: job.tow_company_id ?? null, reason: "offer_expired" };
     }
+    const contact = this.contacts.get(job.incident_id);
+    const phone = contact ? normalizePhoneE164(contact.phone) : null;
+    if (!contact || contact.name.trim().length < 2 || !phone) {
+      return { accepted: false, towCompanyId: null, reason: "customer_contact_missing" };
+    }
+    const busyStatuses = ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"];
+    if ([...this.towJobs.values()].some((other) => other.id !== jobId && busyStatuses.includes(other.status) &&
+      (other.driver_id === driverId || (offer.tow_vehicle_id && other.tow_vehicle_id === offer.tow_vehicle_id)))) {
+      return { accepted: false, towCompanyId: null, reason: "resource_busy" };
+    }
+    const share = buildCustomerShare({tenantId: job.tenant_id,towJobId: jobId,driverId,jobStatus: "accepted",
+      customer: {name: contact.name.trim(),phone,email:contact.email}, registrationNumber:contact.registration_number,
+      problemSummary:contact.problem_summary,pickup:contact.pickup,pickupAddress:contact.pickup_address,
+      destinationAddress:contact.destination_address,customerNotes:contact.customer_notes});
     offer.status = "accepted";
     for (const o of this.offers) {
       if (o.tow_job_id === jobId && o.id !== offer.id && o.status === "pending") o.status = "cancelled";
@@ -496,6 +520,15 @@ export class MemoryRepo implements ApiRepo {
     job.status = "accepted";
     job.driver_id = driverId;
     job.tow_company_id = offer.tow_company_id ?? job.tow_company_id;
+    job.tow_vehicle_id = offer.tow_vehicle_id ?? null;
+    this.customerShares.push(share);
+    this.auditLogs.push({tenant_id:job.tenant_id,actor_user_id:actorUserId,actor_kind:"user",action:"tow.driver_accepted",
+      entity_type:"tow_job",entity_id:jobId,metadata:{correlation_id:correlationId}});
+    this.webhookDeliveries.push({tenant_id:job.tenant_id,event:"tow.driver_accepted",payload:{tow_job_id:jobId,
+      driver_id:driverId,tow_company_id:job.tow_company_id,correlation_id:correlationId},status:"pending"});
+    if(contact.email) this.notificationDeliveries.push({tenant_id:job.tenant_id,incident_id:job.incident_id,tow_job_id:jobId,
+      channel:"email",provider:"resend",to_address:contact.email,status:"pending",dedupe_key:`email:driver_accepted:${jobId}`,
+      payload:{subject:"Bärgare har accepterat ditt ärende",html:"<p>En bärgare har accepterat ditt ärende.</p>"}});
     return { accepted: true, towCompanyId: offer.tow_company_id ?? job.tow_company_id ?? null, reason: null };
   }
   async getOfferById(id: string): Promise<OfferRecord | null> {

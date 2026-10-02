@@ -34,6 +34,12 @@ migrations. Do not assume absent history means an empty database.
 
 ## Next implementation sequence
 
+Current restored F1 package is now implemented and targeted-tested in this
+worktree. Read `VERIFICATION-2026-10-02-core.md` and the scoped requirement
+statuses. Its tests are current to the code checkpoint being published, not
+the lost commits. Next is atomic incident/tow creation across both customer
+routes and partner API. Coverage and price consent remain open blockers.
+
 1. Restore F1: actor-bound service-only accept; active organizations/members/
    driver checks; cross-job driver and vehicle reservations; one atomic
    assignment/share/status/audit/outbox commit; current-assignment access.

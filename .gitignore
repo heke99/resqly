@@ -34,3 +34,5 @@ packages/*/.env.*.local
 
 # Never commit local env files without a dot either
 env
+packages/database/supabase/.temp/
+__pycache__/

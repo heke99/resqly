@@ -208,6 +208,9 @@ export class App {
           };
         }
         const driverId = await this.config.repo.getDriverIdForUser(userId);
+        if (driverId && !(await this.config.repo.isDriverActorActive(driverId,userId))) {
+          return {status:403,body:{error:{code:"forbidden",message:"No active driver membership",request_id:requestId}},headers:baseHeaders};
+        }
         const driverProfile = driverId ? await this.config.repo.getDriverProfile(driverId) : null;
         const resolvedTenantId = driverProfile?.tenant_id ?? "public";
         const ctx: ApiContext = {
@@ -292,6 +295,9 @@ export class App {
         ? await this.config.driverAuth.getUserIdFromAccessToken(userAccessToken)
         : null;
     const driverId = userId ? await this.config.repo.getDriverIdForUser(userId) : null;
+    if (driverId && userId && !(await this.config.repo.isDriverActorActive(driverId,userId))) {
+      return {status:403,body:{error:{code:"forbidden",message:"No active driver membership",request_id:requestId}},headers:baseHeaders};
+    }
 
     const ctx: ApiContext = {
       config: this.config,

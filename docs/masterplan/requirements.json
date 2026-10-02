@@ -46,11 +46,18 @@
     {
       "id": "R05",
       "requirement": "Aktiv förare krävs för erbjudande-, jobb-, position-, accept-, status- och enhetsoperationer.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Central API driver guard; active DB actor checks. Remaining device/storage/realtime paths still need complete inventory."
       ]
     },
     {
@@ -76,21 +83,35 @@
     {
       "id": "R08",
       "requirement": "Känsliga interna RPC:er har minsta möjliga EXECUTE-grants och uttrycklig anrops-/aktörskontroll. Anonym identitet får inte tolkas som betrodd worker.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Legacy accept disabled for all API roles; actor-bound accept and delivery RPCs service-only. Remaining SECURITY DEFINER inventory open."
       ]
     },
     {
       "id": "R09",
       "requirement": "Förare får kundkontakt först efter aktuell giltig tilldelning. Personnummer/BankID-bevis delas aldrig med förare.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Current driver contact share and stale-offer API reads restricted. Complete column/Storage/Realtime inventory remains."
       ]
     },
     {
@@ -176,31 +197,52 @@
     {
       "id": "R18",
       "requirement": "Behörighet och resurstillgänglighet kontrolleras igen atomiskt vid accept. Ett gammalt erbjudande är inte fortsatt behörighet.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Active driver/member/company/tenant, vehicle, capability and approval checked under locks. Coverage/price consent and geographic rules remain."
       ]
     },
     {
       "id": "R19",
       "requirement": "Exakt en aktiv tilldelning per jobb; en förare och en bärgningsbil får inte dubbelbokas över två samtidiga jobb.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Unique live-driver and live-vehicle indexes and independent-session resource races verified."
       ]
     },
     {
       "id": "R20",
       "requirement": "Resurslås tas i konsekvent ordning och kräver databasconstraint/låsning över resurs, inte bara över jobb.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Accept locks job, driver, vehicle, then relationships; unique indexes guard direct writes. Manual reallocation remains."
       ]
     },
     {
@@ -216,11 +258,18 @@
     {
       "id": "R22",
       "requirement": "Retry av samma giltiga accept ger samma resultat utan dubbla events, kunddelningar eller externa meddelandeavsikter.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Current winning actor retry returns same assignment without duplicate shares/events/audit/outbox."
       ]
     },
     {
@@ -386,21 +435,35 @@
     {
       "id": "R39",
       "requirement": "Affärstransaktion och beständig outbox skrivs i samma commit. Fel vid outbox-/audit-skrivning gör inte ett lyckat affärsbesked.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Accept transaction writes share, status, audit, partner webhook and customer email intent atomically. Other mutation paths remain."
       ]
     },
     {
       "id": "R40",
       "requirement": "Workers använder lease, begränsade försök, backoff och idempotens. Krasch efter extern sändning ger kontrollerad deduplicering/avstämning.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Notification/email/webhook claim, fencing and crash reclaim implemented with attempts/backoff and persisted requests. Push and provider reconciliation remain."
       ]
     },
     {
@@ -596,11 +659,18 @@
     {
       "id": "R60",
       "requirement": "Varje krav har verklig anropsväg och versionsbundet testbevis. En knapp, stub, mock eller statisk SQL-kontroll är inte full verifiering.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Version-scoped PostgreSQL replay/real sessions, API/unit/source checks documented; full release and provider/device evidence still open."
       ]
     }
   ],
@@ -630,8 +700,10 @@
       "id": "A04",
       "scenario": "Anonym och vanlig klientroll anropar intern accept-/status-RPC.",
       "expected": "Nekas och inga affärsrader ändras.",
-      "status": "planned",
-      "evidence": []
+      "status": "targeted_verified_partial",
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ]
     },
     {
       "id": "A05",
@@ -686,22 +758,28 @@
       "id": "A12",
       "scenario": "Två verkliga DB-sessioner, sedan stresstest med 100 samtidiga accepter på samma jobb.",
       "expected": "Exakt en tilldelning, rätt vinnare, inga dubbla shares/events/outbox-events.",
-      "status": "planned",
-      "evidence": []
+      "status": "targeted_verified_partial",
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ]
     },
     {
       "id": "A13",
       "scenario": "Två samtidiga jobb försöker boka samma förare respektive samma bärgningsbil.",
       "expected": "Högst ett reserverar respektive resurs.",
-      "status": "planned",
-      "evidence": []
+      "status": "targeted_verified_partial",
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ]
     },
     {
       "id": "A14",
       "scenario": "Timeout efter commit och upprepad accept.",
       "expected": "Samma resultat, med leveransbar beständig kommunikation.",
-      "status": "planned",
-      "evidence": []
+      "status": "targeted_verified_partial",
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ]
     },
     {
       "id": "A15",
@@ -763,8 +841,10 @@
       "id": "A23",
       "scenario": "Worker kraschar före/efter extern sändning, eller två workers kör.",
       "expected": "Köpost återhämtas, lease/idempotens håller och fel syns.",
-      "status": "planned",
-      "evidence": []
+      "status": "targeted_verified_partial",
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+      ]
     },
     {
       "id": "A24",

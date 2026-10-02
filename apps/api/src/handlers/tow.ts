@@ -4,19 +4,17 @@ import {
   towJobLocationInputSchema,
   towJobStatusInputSchema,
 } from "@resqly/types";
-import { AppError, notFound, badRequest, forbidden, normalizePhoneE164 } from "@resqly/utils";
+import { AppError, notFound, badRequest, forbidden } from "@resqly/utils";
 import {
-  buildCustomerShare,
   buildCompletionReport,
   transitionTowJob,
   SHAREABLE_CUSTOMER_FIELDS,
 } from "@resqly/tow";
-import { buildCustomerShareAudit } from "@resqly/audit";
-import { buildInvoiceBasis, estimatePrivateTowPrice, type PriceList } from "@resqly/billing";
-import { MapsClient, buildEtaSnapshot, haversineMeters } from "@resqly/maps";
+import { buildInvoiceBasis, type PriceList } from "@resqly/billing";
+import { MapsClient, buildEtaSnapshot } from "@resqly/maps";
 import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
-import { enqueueWebhookEvent, escapeHtml, sendEmail } from "../services/notifications";
+import { enqueueWebhookEvent, sendEmail } from "../services/notifications";
 import { apiActorFields } from "../services/audit";
 
 const acceptSchema = z.object({});
@@ -64,7 +62,8 @@ async function loadJobForContext(ctx: ApiContext, jobId: string) {
     if (!job) throw notFound("Tow job not found");
     if (job.driver_id !== driverId) {
       const offer = await ctx.repo.getOfferForDriver(jobId, driverId);
-      if (!offer) throw notFound("Tow job not found");
+      if (!offer || offer.status !== "pending" || Date.parse(offer.expires_at) <= Date.now()
+        || !["matching", "offered"].includes(job.status)) throw notFound("Tow job not found");
     }
     return job;
   }
@@ -105,6 +104,8 @@ const ACCEPT_FAILURE_MESSAGES: Record<string, string> = {
   job_not_found: "Tow job not found",
   offer_expired: "This offer has expired",
   forbidden: "You are not allowed to accept this job",
+  customer_contact_missing: "Customer contact details are incomplete",
+  resource_busy: "The driver or vehicle is already assigned",
 };
 
 /** Friendly Swedish messages the driver app can show directly. */
@@ -115,6 +116,8 @@ const ACCEPT_FAILURE_USER_MESSAGES: Record<string, string> = {
   job_not_found: "Uppdraget kunde inte hittas.",
   offer_expired: "Erbjudandet har gått ut.",
   forbidden: "Du kan inte acceptera det här uppdraget.",
+  customer_contact_missing: "Kundens kontaktuppgifter är inte kompletta. Be trafikledningen kontrollera ärendet.",
+  resource_busy: "Föraren eller bärgningsbilen har redan ett aktivt uppdrag.",
 };
 
 /**
@@ -127,19 +130,9 @@ export async function acceptJobForDriver(
   jobId: string,
   driverId: string,
 ): Promise<RouteResult> {
-  const job = await loadJobForContext(ctx, jobId);
-
-  // Validate the contact before assigning the job. Otherwise a successful
-  // race-safe accept could leave the winning driver without a callable number.
-  const contact = await ctx.repo.getCustomerContact(job.incident_id);
-  const normalizedPhone = contact ? normalizePhoneE164(contact.phone) : null;
-  if (!contact || contact.name.trim().length < 2 || !normalizedPhone) {
-    throw new AppError("conflict", "Customer contact details are incomplete", {
-      user_message: "Kundens kontaktuppgifter är inte kompletta. Be trafikledningen kontrollera ärendet.",
-    });
-  }
-
-  const result = await ctx.repo.acceptOffer(jobId, driverId);
+  const actorUserId = ctx.driverUserId ?? ctx.userId;
+  if (!actorUserId) throw forbidden("Authenticated driver token is required");
+  const result = await ctx.repo.acceptOffer(jobId, driverId, actorUserId, ctx.requestId);
   if (!result.accepted) {
     const reason = result.reason ?? "";
     throw new AppError("conflict", ACCEPT_FAILURE_MESSAGES[reason] ?? "Cannot accept this offer", {
@@ -147,136 +140,8 @@ export async function acceptJobForDriver(
       user_message: ACCEPT_FAILURE_USER_MESSAGES[reason] ?? "Uppdraget kunde inte accepteras. Försök igen.",
     });
   }
-
-  if (job.payer_type === "customer_private" && result.towCompanyId && result.reason !== "already_accepted_by_driver") {
-    await snapshotAcceptedPrice(ctx, jobId, job, result.towCompanyId);
-  }
-
-  const existingShare = await ctx.repo.getCustomerShare(jobId, driverId);
-  const share = buildCustomerShare({
-    tenantId: job.tenant_id,
-    towJobId: jobId,
-    driverId,
-    jobStatus: "accepted",
-    customer: { name: contact.name.trim(), phone: normalizedPhone, email: contact.email },
-    registrationNumber: contact.registration_number,
-    problemSummary: contact.problem_summary,
-    pickup: contact.pickup,
-    pickupAddress: contact.pickup_address,
-    destinationAddress: contact.destination_address,
-    customerNotes: contact.customer_notes,
-  });
-  await ctx.repo.ensureCustomerShare(share);
-
-  // A mobile retry repairs a missing share but does not duplicate audit,
-  // webhooks or customer messages when the share already existed.
-  if (!existingShare) {
-    await ctx.repo.recordAudit({
-      ...buildCustomerShareAudit({
-        tenantId: job.tenant_id,
-        actorUserId: ctx.driverUserId ?? ctx.userId ?? null,
-        driverId,
-        towJobId: jobId,
-        fields: [...SHAREABLE_CUSTOMER_FIELDS],
-        reason: "driver accepted job",
-        ip: ctx.ip,
-      }),
-      ...apiActorFields(ctx),
-    });
-    await enqueueWebhookEvent(ctx, "tow.driver_accepted", {
-      tow_job_id: jobId,
-      incident_id: job.incident_id,
-      driver_id: driverId,
-      tow_company_id: result.towCompanyId,
-    });
-    await sendEmail(ctx, {
-      to: contact.email,
-      subject: "Bärgare har accepterat ditt ärende",
-      html: `<p>En bärgare har accepterat ditt ärende.</p><p>Fordon: ${escapeHtml(contact.registration_number)}</p>`,
-      incidentId: job.incident_id,
-      towJobId: jobId,
-      dedupeKey: `email:driver_accepted:${jobId}`,
-    });
-  }
-
-  return {
-    status: 200,
-    body: {
-      status: "accepted",
-      customer_shared: true,
-      shared_fields: SHAREABLE_CUSTOMER_FIELDS,
-      tow_company_id: result.towCompanyId,
-      repaired: result.reason === "already_accepted_by_driver" && !existingShare,
-    },
-  };
-}
-
-interface PriceSnapshot {
-  tow_company_id: string;
-  price_list: PriceList;
-  estimate: {
-    lines: unknown[];
-    subtotal_minor: number;
-    vat_minor: number;
-    total_minor: number;
-    currency: string;
-  };
-  factors: { evening_night: boolean; weekend: boolean; distance_km: number | null };
-  computed_at: string;
-}
-
-/**
- * Best-effort price snapshot at accept time. Uses the accepting company's
- * active price list plus the case's pickup/destination distance (haversine
- * with road factor when route data is unavailable). Never blocks accept.
- */
-async function snapshotAcceptedPrice(
-  ctx: ApiContext,
-  jobId: string,
-  job: { incident_id: string; tenant_id: string; price_snapshot?: Record<string, unknown> | null },
-  towCompanyId: string,
-): Promise<void> {
-  try {
-    if (job.price_snapshot) return;
-    const priceList = await ctx.repo.getActivePriceList(towCompanyId);
-    if (!priceList) return;
-    const coords = await ctx.repo.getIncidentCoordinates(job.incident_id);
-    const distanceKm =
-      coords.pickup && coords.destination
-        ? Math.round((haversineMeters(coords.pickup, coords.destination) * 1.3) / 100) / 10
-        : null;
-    const estimate = estimatePrivateTowPrice({ priceList, distanceKm });
-    const snapshot: PriceSnapshot = {
-      tow_company_id: towCompanyId,
-      price_list: priceList,
-      estimate: {
-        lines: estimate.lines,
-        subtotal_minor: estimate.subtotal_minor,
-        vat_minor: estimate.vat_minor,
-        total_minor: estimate.total_minor,
-        currency: estimate.currency,
-      },
-      factors: estimate.factors,
-      computed_at: new Date().toISOString(),
-    };
-    await ctx.repo.setTowJobPriceSnapshot(jobId, snapshot as unknown as Record<string, unknown>);
-    await ctx.repo.recordAudit({
-      tenant_id: job.tenant_id,
-      ...apiActorFields(ctx),
-      action: "update",
-      entity_type: "tow_job",
-      entity_id: jobId,
-      fields: ["price_snapshot"],
-      metadata: {
-        total_minor: estimate.total_minor,
-        currency: estimate.currency,
-        distance_km: distanceKm,
-        tow_company_id: towCompanyId,
-      },
-    });
-  } catch {
-    // Pricing snapshot is best-effort; accept must never fail because of it.
-  }
+  return { status: 200, body: { status: "accepted", customer_shared: true,
+    shared_fields: SHAREABLE_CUSTOMER_FIELDS, tow_company_id: result.towCompanyId, repaired: false } };
 }
 
 export async function acceptTowJob(

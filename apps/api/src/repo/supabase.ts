@@ -528,12 +528,12 @@ export class SupabaseRepo implements ApiRepo {
   }
   async getOfferForDriver(jobId: string, driverId: string) {
     const { data, error } = await this.table("tow_job_offers")
-      .select("status")
+      .select("status,expires_at")
       .eq("tow_job_id", jobId)
       .eq("driver_id", driverId)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    return (data as { status: string } | null) ?? null;
+    return (data as { status: string; expires_at: string } | null) ?? null;
   }
   async getDispatchCandidates(
     pickup: Coordinate,
@@ -591,10 +591,12 @@ export class SupabaseRepo implements ApiRepo {
     }));
   }
 
-  async acceptOffer(jobId: string, driverId: string): Promise<AcceptOfferResult> {
-    const { data, error } = await this.db.rpc("accept_tow_offer" as never, {
+  async acceptOffer(jobId: string, driverId: string, actorUserId: string, correlationId: string): Promise<AcceptOfferResult> {
+    const { data, error } = await this.db.rpc("accept_tow_offer_for_actor" as never, {
       p_job: jobId,
       p_driver: driverId,
+      p_actor_user: actorUserId,
+      p_correlation_id: correlationId,
     } as never);
     if (error) throw new Error(error.message);
     const row = Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) : undefined;
@@ -624,6 +626,12 @@ export class SupabaseRepo implements ApiRepo {
       .maybeSingle();
     if (error) throw new Error(error.message);
     return Boolean(data);
+  }
+
+  async isDriverActorActive(driverId: string, userId: string): Promise<boolean> {
+    const {data,error} = await this.db.rpc("driver_actor_active" as never,{p_driver:driverId,p_user:userId} as never);
+    if(error) throw new Error(error.message);
+    return data === true;
   }
 
   async getDriverProfile(driverId: string): Promise<DriverProfileRecord | null> {

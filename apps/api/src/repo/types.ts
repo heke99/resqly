@@ -213,6 +213,7 @@ export interface TenantWebhookTarget {
  * interface makes the request pipeline fully unit-testable without a database.
  */
 export interface ApiRepo {
+  isDriverActorActive(driverId: string, userId: string): Promise<boolean>;
   findApiClientByKeyHash(hash: string): Promise<ApiClientRecord | null>;
   logApiRequest(row: {
     tenant_id: string | null;
@@ -323,13 +324,13 @@ export interface ApiRepo {
   }): Promise<void>;
   assignTowJob(tenantId: string, id: string, driverId: string, towCompanyId: string, towVehicleId: string): Promise<void>;
   createOffers(rows: Array<Record<string, unknown>>): Promise<void>;
-  getOfferForDriver(jobId: string, driverId: string): Promise<{ status: string } | null>;
+  getOfferForDriver(jobId: string, driverId: string): Promise<{ status: string; expires_at: string } | null>;
 
   /**
    * Race-safe offer acceptance. Locks the job, accepts the driver's pending
    * offer, cancels the rest, and assigns the job atomically.
    */
-  acceptOffer(jobId: string, driverId: string): Promise<AcceptOfferResult>;
+  acceptOffer(jobId: string, driverId: string, actorUserId: string, correlationId: string): Promise<AcceptOfferResult>;
   getOfferById(id: string): Promise<OfferRecord | null>;
   rejectOffer(jobId: string, driverId: string, reason: string | null): Promise<boolean>;
 
