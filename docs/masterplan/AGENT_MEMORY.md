@@ -61,3 +61,13 @@ of independent flows. No platform payments or automatic outside-network orders.
 Push each coherent checkpoint now that public publication is authorized.
 Never end a long session with the only source/evidence in transient scratch.
 Record blocked operations honestly and avoid invented PRs or test results.
+
+## Atomic workflow checkpoint
+
+The customer web/mobile backend and partner API now share atomic incident/tow
+commands. Read `VERIFICATION-2026-10-02-workflows.md`: 38 pgTAP assertions,
+16 same-key sessions, 100 distinct creations/numbers and 16 tow requests.
+API/database tests pass (41/44), affected API/database/customer-web types and
+lint pass. This is transaction/command evidence, not device/browser evidence.
+Next: immutable BankID binding and a separate versioned insurance coverage
+decision before insurance dispatch. Do not claim coverage from BankID.

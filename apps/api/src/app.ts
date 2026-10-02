@@ -1,3 +1,4 @@
+import { WorkflowError } from "@resqly/database";
 import { z } from "zod";
 import { AppError, isAppError, newRequestId, sha256Hex } from "@resqly/utils";
 import { Router, type RouteResult } from "./http/router";
@@ -99,12 +100,13 @@ export class App {
     r.get("/api/v1/drivers/me/offers", (ctx) => drivers.listOffers(ctx));
     r.get("/api/v1/drivers/me/jobs", (ctx, a) => drivers.listJobs(ctx, a.query));
     r.post("/api/v1/drivers/offers/:id/accept", (ctx, a) => drivers.acceptOffer(ctx, a.params.id!));
-    r.post("/api/v1/drivers/offers/:id/reject", (ctx, a) => drivers.rejectOffer(ctx, a.params.id!, a.body));
+    r.post("/api/v1/drivers/offers/:id/reject", (ctx, a) =>
+      drivers.rejectOffer(ctx, a.params.id!, a.body),
+    );
 
     // Manual / re-run dispatch for an existing tow job.
     r.post("/api/v1/dispatch/run", (ctx, a) => dispatch.runDispatch(ctx, a.body));
   }
-
 
   /**
    * Public health check. Deliberately minimal: it reports liveness and
@@ -135,7 +137,11 @@ export class App {
     const baseHeaders = { "x-request-id": requestId };
 
     if (!matched) {
-      return { status: 404, body: { error: { code: "not_found", message: "Route not found", request_id: requestId } }, headers: baseHeaders };
+      return {
+        status: 404,
+        body: { error: { code: "not_found", message: "Route not found", request_id: requestId } },
+        headers: baseHeaders,
+      };
     }
 
     // Public health checks and provider callbacks are authenticated by their own
@@ -187,7 +193,9 @@ export class App {
     const allowsUserToken =
       url.pathname === "/api/v1/me/role-context" ||
       url.pathname.startsWith("/api/v1/drivers/") ||
-      /^\/api\/v1\/tow\/jobs\/[^/]+(\/(accept|reject|status|location|complete|eta|evidence)(\/(upload|complete))?)?$/.test(url.pathname);
+      /^\/api\/v1\/tow\/jobs\/[^/]+(\/(accept|reject|status|location|complete|eta|evidence)(\/(upload|complete))?)?$/.test(
+        url.pathname,
+      );
     if (allowsUserToken && userTokenFromAuth && this.config.driverAuth) {
       const userId = await this.config.driverAuth.getUserIdFromAccessToken(userTokenFromAuth);
       if (userId) {
@@ -208,8 +216,18 @@ export class App {
           };
         }
         const driverId = await this.config.repo.getDriverIdForUser(userId);
-        if (driverId && !(await this.config.repo.isDriverActorActive(driverId,userId))) {
-          return {status:403,body:{error:{code:"forbidden",message:"No active driver membership",request_id:requestId}},headers:baseHeaders};
+        if (driverId && !(await this.config.repo.isDriverActorActive(driverId, userId))) {
+          return {
+            status: 403,
+            body: {
+              error: {
+                code: "forbidden",
+                message: "No active driver membership",
+                request_id: requestId,
+              },
+            },
+            headers: baseHeaders,
+          };
         }
         const driverProfile = driverId ? await this.config.repo.getDriverProfile(driverId) : null;
         const resolvedTenantId = driverProfile?.tenant_id ?? "public";
@@ -225,7 +243,8 @@ export class App {
           userId,
           driverUserId: userId,
           driverId,
-          idempotencyKey: req.headers["idempotency-key"] ?? req.headers["x-idempotency-key"] ?? null,
+          idempotencyKey:
+            req.headers["idempotency-key"] ?? req.headers["x-idempotency-key"] ?? null,
         };
 
         let result: RouteResult;
@@ -256,8 +275,7 @@ export class App {
     }
 
     // --- API key authentication ---
-    const apiKey =
-      extractBearer(req.headers["authorization"]) ?? req.headers["x-api-key"] ?? null;
+    const apiKey = extractBearer(req.headers["authorization"]) ?? req.headers["x-api-key"] ?? null;
     if (!apiKey) {
       return unauthorized(requestId);
     }
@@ -279,7 +297,9 @@ export class App {
     if (!rl.allowed) {
       return {
         status: 429,
-        body: { error: { code: "rate_limited", message: "Rate limit exceeded", request_id: requestId } },
+        body: {
+          error: { code: "rate_limited", message: "Rate limit exceeded", request_id: requestId },
+        },
         headers: baseHeaders,
       };
     }
@@ -295,8 +315,18 @@ export class App {
         ? await this.config.driverAuth.getUserIdFromAccessToken(userAccessToken)
         : null;
     const driverId = userId ? await this.config.repo.getDriverIdForUser(userId) : null;
-    if (driverId && userId && !(await this.config.repo.isDriverActorActive(driverId,userId))) {
-      return {status:403,body:{error:{code:"forbidden",message:"No active driver membership",request_id:requestId}},headers:baseHeaders};
+    if (driverId && userId && !(await this.config.repo.isDriverActorActive(driverId, userId))) {
+      return {
+        status: 403,
+        body: {
+          error: {
+            code: "forbidden",
+            message: "No active driver membership",
+            request_id: requestId,
+          },
+        },
+        headers: baseHeaders,
+      };
     }
 
     const ctx: ApiContext = {
@@ -343,8 +373,13 @@ export class App {
 
 function requiredApiScope(method: string, path: string): ApiScope | "user_token_only" | null {
   const verb = method.toUpperCase();
-  if (path === "/api/v1/me/role-context" || path.startsWith("/api/v1/drivers/")) return "user_token_only";
-  if (path.startsWith("/api/v1/incidents/") || path === "/api/v1/incidents" || path.startsWith("/api/v1/bankid/sessions/")) {
+  if (path === "/api/v1/me/role-context" || path.startsWith("/api/v1/drivers/"))
+    return "user_token_only";
+  if (
+    path.startsWith("/api/v1/incidents/") ||
+    path === "/api/v1/incidents" ||
+    path.startsWith("/api/v1/bankid/sessions/")
+  ) {
     return verb === "GET" ? "incidents:read" : "incidents:write";
   }
   if (path.startsWith("/api/v1/tow/jobs")) return verb === "GET" ? "tow:read" : "tow:write";
@@ -381,7 +416,9 @@ function extractBearer(header?: string): string | null {
 function unauthorized(requestId: string): RouteResult {
   return {
     status: 401,
-    body: { error: { code: "unauthorized", message: "Invalid or missing API key", request_id: requestId } },
+    body: {
+      error: { code: "unauthorized", message: "Invalid or missing API key", request_id: requestId },
+    },
     headers: { "x-request-id": requestId },
   };
 }
@@ -404,6 +441,19 @@ const USER_MESSAGES_SV: Record<string, string> = {
 };
 
 function toErrorResult(error: unknown, requestId: string): RouteResult {
+  if (error instanceof WorkflowError) {
+    const code =
+      error.status === 403
+        ? "forbidden"
+        : error.status === 404
+          ? "not_found"
+          : error.status === 409
+            ? "conflict"
+            : error.status === 400
+              ? "bad_request"
+              : "dependency_unavailable";
+    return toErrorResult(new AppError(code, error.message), requestId);
+  }
   if (error instanceof z.ZodError) {
     return {
       status: 422,
@@ -424,7 +474,8 @@ function toErrorResult(error: unknown, requestId: string): RouteResult {
       error.details && typeof error.details === "object"
         ? (error.details as { user_message?: string }).user_message
         : undefined;
-    json.error.user_message = detailUserMessage ?? USER_MESSAGES_SV[error.code] ?? USER_MESSAGES_SV.internal_error;
+    json.error.user_message =
+      detailUserMessage ?? USER_MESSAGES_SV[error.code] ?? USER_MESSAGES_SV.internal_error;
     return { status: error.status, body: json };
   }
   return {

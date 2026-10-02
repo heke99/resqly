@@ -6,21 +6,37 @@
     {
       "id": "R01",
       "requirement": "Servern härleder ägande tenant från verifierad fordons-/försäkringsrelation eller explicit privatoperatör. Klientens tenant-ID är aldrig ensamt auktoritativt.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002090954_atomic_incident_workflows.sql",
+        "packages/database/src/workflows.ts",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/route.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
       ]
     },
     {
       "id": "R02",
       "requirement": "Ärende, kund, kundfordon, försäkringsbolag och skapande aktör måste bilda en giltig kedja.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002090954_atomic_incident_workflows.sql",
+        "packages/database/src/workflows.ts",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/route.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
       ]
     },
     {
@@ -127,21 +143,37 @@
     {
       "id": "R11",
       "requirement": "Varje viktig skrivning har exakt en skapande/ändrande aktör; attribution bevaras även när ett konto avaktiveras.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002090954_atomic_incident_workflows.sql",
+        "packages/database/src/workflows.ts",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/route.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
       ]
     },
     {
       "id": "R12",
       "requirement": "Domänrelationer skyddas med FK/constraints/transactions även när serverns service-role kringgår RLS.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002090954_atomic_incident_workflows.sql",
+        "packages/database/src/workflows.ts",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/route.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
       ]
     },
     {
@@ -440,13 +472,19 @@
         "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
         "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
         "apps/api/src/handlers/tow.ts",
-        "apps/workers/src/jobs/delivery-lease-db.ts"
+        "apps/workers/src/jobs/delivery-lease-db.ts",
+        "packages/database/supabase/migrations/20261002090954_atomic_incident_workflows.sql",
+        "packages/database/src/workflows.ts",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/route.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
       ],
       "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
       ],
       "remainingGaps": [
-        "Accept transaction writes share, status, audit, partner webhook and customer email intent atomically. Other mutation paths remain."
+        "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
       ]
     },
     {
@@ -559,11 +597,19 @@
     {
       "id": "R50",
       "requirement": "Ärendenummer genereras atomiskt med unikhet per avsedd nummerdomän; prefixbyte ändrar inte historiska nummer.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002090954_atomic_incident_workflows.sql",
+        "packages/database/src/workflows.ts",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/route.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
       ]
     },
     {
@@ -885,8 +931,10 @@
       "id": "A29",
       "scenario": "Prefixbyte och samtidiga ärendeskapanden för white-label.",
       "expected": "Unika stabila nummer, historik oförändrad, rätt branding utan behörighetsläcka.",
-      "status": "planned",
-      "evidence": []
+      "status": "targeted_verified_partial",
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
+      ]
     },
     {
       "id": "A30",
@@ -948,8 +996,10 @@
       "id": "A38",
       "scenario": "Samma försäkringsscenario via webb, mobil, portal och partner-API.",
       "expected": "Samma domänregler, behörigheter och affärsresultat.",
-      "status": "planned",
-      "evidence": []
+      "status": "targeted_verified_partial",
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
+      ]
     },
     {
       "id": "A39",

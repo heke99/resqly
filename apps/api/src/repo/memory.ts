@@ -1,4 +1,7 @@
-import { newId } from "@resqly/utils";
+import { newId, AppError } from "@resqly/utils";
+import type { WorkflowActor, IncidentWorkflowResult, TowWorkflowResult } from "@resqly/database";
+import { buildIncidentRow, determineRequiresBankid } from "@resqly/insurance";
+import type { CreateIncidentInput } from "@resqly/types";
 import { formatCaseNumber } from "@resqly/utils";
 import { normalizePhoneE164 } from "@resqly/utils";
 import { buildCustomerShare } from "@resqly/tow";
@@ -57,6 +60,139 @@ export class MemoryRepo implements ApiRepo {
     return !!driver && driver.user_id === userId && driver.status === "active";
   }
   private readonly dispatchClaims = new Set<string>();
+  private readonly workflowCommands = new Map<
+    string,
+    { input: string; result: Promise<unknown> }
+  >();
+
+  private async workflow<T>(
+    actor: WorkflowActor,
+    action: string,
+    input: Record<string, unknown>,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const key = `${actor.userId ?? actor.apiClientId}:${actor.tenantId}:${action}:${actor.key}`;
+    const fingerprint = JSON.stringify(input);
+    const previous = this.workflowCommands.get(key);
+    if (previous) {
+      if (previous.input !== fingerprint)
+        throw new AppError("conflict", "idempotency_payload_conflict");
+      return { ...((await previous.result) as object), replay: true } as T;
+    }
+    const result = run();
+    this.workflowCommands.set(key, { input: fingerprint, result });
+    try {
+      return await result;
+    } catch (error) {
+      this.workflowCommands.delete(key);
+      throw error;
+    }
+  }
+
+  createIncidentWorkflow(
+    actor: WorkflowActor,
+    input: Record<string, unknown>,
+    locations: Array<Record<string, unknown>>,
+  ): Promise<IncidentWorkflowResult> {
+    return this.workflow(actor, "incident.create", input, async () => {
+      const settings = await this.getTenantSettings(actor.tenantId);
+      const requires = determineRequiresBankid(input.type as CreateIncidentInput["type"], {
+        bankidRequiredForClaims: settings.bankid_required_for_claims,
+        bankidRequiredForTow: settings.bankid_required_for_tow,
+      });
+      const caseNumber = await this.allocateCaseNumber(actor.tenantId, "default");
+      const row = buildIncidentRow({
+        tenantId: actor.tenantId,
+        customerUserId: String(input.customer_user_id),
+        input: input as CreateIncidentInput,
+        vehicleId: (input.vehicle_id as string) ?? null,
+        insuranceCompanyId: (input.insurance_company_id as string) ?? null,
+        requiresBankid: requires,
+        caseNumber,
+      });
+      const incident = await this.createIncident({
+        ...row,
+        status: requires ? "awaiting_bankid" : "submitted",
+      });
+      for (const loc of locations)
+        await this.upsertIncidentLocation({
+          incident_id: incident.id,
+          kind: String(loc.kind),
+          lat: Number(loc.lat),
+          lng: Number(loc.lng),
+          address: (loc.address as string) ?? null,
+        });
+      this.auditLogs.push({
+        tenant_id: actor.tenantId,
+        actor_user_id: actor.userId,
+        actor_api_client_id: actor.apiClientId,
+        action: "incident.created",
+        entity_type: "incident",
+        entity_id: incident.id,
+        metadata: { correlation_id: actor.correlationId },
+      });
+      this.webhookDeliveries.push({
+        tenant_id: actor.tenantId,
+        event: "incident.created",
+        payload: { incident_id: incident.id },
+      });
+      return {
+        incident_id: incident.id,
+        case_number: caseNumber,
+        status: incident.status,
+        requires_bankid: requires,
+        mode: incident.insurance_company_id ? "insurance" : "private",
+        replay: false,
+      };
+    });
+  }
+
+  async requestTowWorkflow(
+    actor: WorkflowActor,
+    incidentId: string,
+    input: Record<string, unknown>,
+  ): Promise<TowWorkflowResult<TowJobRecord>> {
+    const result = await this.workflow(actor, `tow.request:${incidentId}`, input, async () => {
+      const incident = await this.getIncident(actor.tenantId, incidentId);
+      if (!incident) throw new AppError("not_found", "incident_not_found");
+      let job = await this.getActiveTowJobForIncident(actor.tenantId, incidentId);
+      const created = !job;
+      const pickup = input.pickup as { lat: number; lng: number } | undefined;
+      if (
+        job &&
+        ["created", "matching"].includes(job.status) &&
+        pickup &&
+        !(await this.getIncidentCoordinates(incidentId)).pickup
+      ) {
+        await this.upsertIncidentLocation({ incident_id: incidentId, kind: "pickup", ...pickup });
+      }
+      if (!job) {
+        if (pickup)
+          await this.upsertIncidentLocation({ incident_id: incidentId, kind: "pickup", ...pickup });
+        job = await this.createTowJob({
+          tenant_id: actor.tenantId,
+          incident_id: incidentId,
+          status: "created",
+          payer_type: input.payer_type,
+          priority: input.priority,
+        });
+        this.auditLogs.push({
+          action: "tow.requested",
+          entity_id: job.id,
+          actor_user_id: actor.userId,
+          actor_api_client_id: actor.apiClientId,
+        });
+        this.webhookDeliveries.push({
+          tenant_id: actor.tenantId,
+          event: "tow.requested",
+          payload: { tow_job_id: job.id },
+        });
+      }
+      return { tow_job_id: job.id, status: job.status, job, created, replay: !created };
+    });
+    const job = this.towJobs.get(result.tow_job_id)!;
+    return { ...result, job, status: job.status, created: !result.replay && result.created };
+  }
   apiClients = new Map<string, ApiClientRecord>(); // keyed by key hash
   tenants = new Map<string, TenantRecord>();
   settings = new Map<string, TenantSettingsRecord>();
@@ -72,8 +208,20 @@ export class MemoryRepo implements ApiRepo {
   invoices: Array<Record<string, unknown>> = [];
   auditLogs: Array<Record<string, unknown>> = [];
   apiRequestLogs: Array<Record<string, unknown>> = [];
-  incidentLocations: Array<{ incident_id: string; kind: string; lat: number; lng: number; address: string | null }> = [];
-  idempotencyRecords: Array<{ scope: string; action: string; key: string; resource_id: string | null; response: unknown }> = [];
+  incidentLocations: Array<{
+    incident_id: string;
+    kind: string;
+    lat: number;
+    lng: number;
+    address: string | null;
+  }> = [];
+  idempotencyRecords: Array<{
+    scope: string;
+    action: string;
+    key: string;
+    resource_id: string | null;
+    response: unknown;
+  }> = [];
   bankidSessions = new Map<string, BankidSessionRecord>();
   bankidSignatures: Array<Record<string, unknown>> = [];
   completedBankidSessions = new Set<string>();
@@ -83,7 +231,12 @@ export class MemoryRepo implements ApiRepo {
   candidates: DispatchCandidate[] = [];
   driverUsers = new Map<string, string>(); // userId -> driverId
   driverProfiles = new Map<string, DriverProfileRecord>(); // driverId -> profile
-  devices: Array<{ driver_id: string; user_id: string; expo_push_token: string; platform: string }> = [];
+  devices: Array<{
+    driver_id: string;
+    user_id: string;
+    expo_push_token: string;
+    platform: string;
+  }> = [];
   roleContexts = new Map<string, RoleContext>(); // userId -> context
   private seq = new Map<string, number>();
 
@@ -100,7 +253,11 @@ export class MemoryRepo implements ApiRepo {
     this.settings.set(rec.id, { ...DEFAULT_SETTINGS });
     return rec;
   }
-  seedApiClient(tenantId: string, keyHash: string, scopes: ApiScope[] = ALL_API_SCOPES): ApiClientRecord {
+  seedApiClient(
+    tenantId: string,
+    keyHash: string,
+    scopes: ApiScope[] = ALL_API_SCOPES,
+  ): ApiClientRecord {
     const rec = { id: newId(), tenantId, active: true, scopes: [...scopes] };
     this.apiClients.set(keyHash, rec);
     return rec;
@@ -156,7 +313,13 @@ export class MemoryRepo implements ApiRepo {
     for (const offer of this.offers) {
       if (offer.tow_job_id === job.id && offer.status === "pending") offer.status = "cancelled";
     }
-    if (!this.manualReviews.some((item) => item.tow_job_id === row.tow_job_id && ["open", "in_progress"].includes(String(item.status)))) {
+    if (
+      !this.manualReviews.some(
+        (item) =>
+          item.tow_job_id === row.tow_job_id &&
+          ["open", "in_progress"].includes(String(item.status)),
+      )
+    ) {
       this.manualReviews.push({
         tenant_id: row.tenant_id,
         incident_id: row.incident_id,
@@ -200,7 +363,9 @@ export class MemoryRepo implements ApiRepo {
     this.signedEvidenceUploads.set(path, token);
     return { path, token };
   }
-  async getTowEvidenceObject(path: string): Promise<{ size: number | null; contentType: string | null } | null> {
+  async getTowEvidenceObject(
+    path: string,
+  ): Promise<{ size: number | null; contentType: string | null } | null> {
     const file = this.towEvidenceObjects.find((entry) => entry.path === path);
     return file ? { size: file.size, contentType: file.contentType } : null;
   }
@@ -218,7 +383,9 @@ export class MemoryRepo implements ApiRepo {
     const coord = (kind: string) => {
       const row = [...this.incidentLocations]
         .reverse()
-        .find((l) => l.incident_id === incidentId && l.kind === kind && l.lat != null && l.lng != null);
+        .find(
+          (l) => l.incident_id === incidentId && l.kind === kind && l.lat != null && l.lng != null,
+        );
       return row ? { lat: row.lat, lng: row.lng } : null;
     };
     return { pickup: coord("pickup"), destination: coord("destination") };
@@ -239,7 +406,10 @@ export class MemoryRepo implements ApiRepo {
     this.branding.set(id, { ...(this.branding.get(id) ?? {}), ...patch });
   }
   async updateTenantSettings(id: string, patch: Record<string, unknown>) {
-    this.settings.set(id, { ...(this.settings.get(id) ?? DEFAULT_SETTINGS), ...patch } as TenantSettingsRecord);
+    this.settings.set(id, {
+      ...(this.settings.get(id) ?? DEFAULT_SETTINGS),
+      ...patch,
+    } as TenantSettingsRecord);
   }
   async allocateCaseNumber(tenantId: string, scope: string) {
     const tenant = this.tenants.get(tenantId)!;
@@ -278,7 +448,7 @@ export class MemoryRepo implements ApiRepo {
     );
     this.incidentLocations.push({
       ...row,
-      address: row.address === undefined ? previous?.address ?? null : row.address,
+      address: row.address === undefined ? (previous?.address ?? null) : row.address,
     });
     // Keep the contact pickup in sync so dispatch/share tests see real coords.
     const contact = this.contacts.get(row.incident_id);
@@ -339,14 +509,16 @@ export class MemoryRepo implements ApiRepo {
     result: Record<string, unknown>;
     fromWebhook: boolean;
   }) {
-    const session = this.bankidSessions.get(input.sessionId)
-      ?? [...this.bankidSessions.values()].find((row) => row.tic_session_id === input.sessionId);
+    const session =
+      this.bankidSessions.get(input.sessionId) ??
+      [...this.bankidSessions.values()].find((row) => row.tic_session_id === input.sessionId);
     if (!session) throw new Error("bankid_session_not_found");
     const already = this.completedBankidSessions.has(session.id);
     const saved = await this.recordBankidSignature(input.signature);
-    const vehiclePolicyId = typeof input.businessPayload.vehicle_policy_id === "string"
-      ? input.businessPayload.vehicle_policy_id
-      : null;
+    const vehiclePolicyId =
+      typeof input.businessPayload.vehicle_policy_id === "string"
+        ? input.businessPayload.vehicle_policy_id
+        : null;
     if (!already) {
       this.completedBankidSessions.add(session.id);
       session.status = "complete";
@@ -355,7 +527,7 @@ export class MemoryRepo implements ApiRepo {
     return {
       newlyProcessed: !already,
       signatureId: saved.id,
-      flow: session.incident_id ? "incident" as const : "vehicle_policy" as const,
+      flow: session.incident_id ? ("incident" as const) : ("vehicle_policy" as const),
       relatedId: session.incident_id ?? vehiclePolicyId,
     };
   }
@@ -380,26 +552,44 @@ export class MemoryRepo implements ApiRepo {
     return this.towJobs.get(id) ?? null;
   }
   async getActiveTowJobForIncident(tenantId: string, incidentId: string) {
-    return [...this.towJobs.values()].find((job) =>
-      job.tenant_id === tenantId && job.incident_id === incidentId && !["cancelled", "failed", "closed"].includes(job.status),
-    ) ?? null;
+    return (
+      [...this.towJobs.values()].find(
+        (job) =>
+          job.tenant_id === tenantId &&
+          job.incident_id === incidentId &&
+          !["cancelled", "failed", "closed"].includes(job.status),
+      ) ?? null
+    );
   }
   async claimTowDispatch(jobId: string): Promise<{ claimed: boolean; status: string }> {
     const job = this.towJobs.get(jobId);
     if (!job) throw new Error("tow_job_not_found");
-    if (job.driver_id || !["created", "matching"].includes(job.status) || this.dispatchClaims.has(jobId)) {
+    if (
+      job.driver_id ||
+      !["created", "matching"].includes(job.status) ||
+      this.dispatchClaims.has(jobId)
+    ) {
       return { claimed: false, status: job.status };
     }
     this.dispatchClaims.add(jobId);
     return { claimed: true, status: job.status };
   }
-  async recordDispatchAttempt(jobId: string, error: string | null): Promise<{ attempts: number; status: string }> {
+  async recordDispatchAttempt(
+    jobId: string,
+    error: string | null,
+  ): Promise<{ attempts: number; status: string }> {
     this.dispatchClaims.delete(jobId);
-    const job = this.towJobs.get(jobId) as (TowJobRecord & { dispatch_attempts?: number; last_dispatch_error?: string | null }) | undefined;
+    const job = this.towJobs.get(jobId) as
+      | (TowJobRecord & { dispatch_attempts?: number; last_dispatch_error?: string | null })
+      | undefined;
     if (!job) return { attempts: 0, status: "created" };
     job.dispatch_attempts = (job.dispatch_attempts ?? 0) + 1;
     job.last_dispatch_error = error;
-    if (error && job.dispatch_attempts >= 3 && ["created", "matching", "offered"].includes(job.status)) {
+    if (
+      error &&
+      job.dispatch_attempts >= 3 &&
+      ["created", "matching", "offered"].includes(job.status)
+    ) {
       job.status = "manual_review";
     }
     return { attempts: job.dispatch_attempts, status: job.status };
@@ -434,7 +624,13 @@ export class MemoryRepo implements ApiRepo {
       metadata: { from: row.from_status, to: row.to_status },
     });
   }
-  async assignTowJob(_tenantId: string, id: string, driverId: string, towCompanyId: string, towVehicleId: string) {
+  async assignTowJob(
+    _tenantId: string,
+    id: string,
+    driverId: string,
+    towCompanyId: string,
+    towVehicleId: string,
+  ) {
     const job = this.towJobs.get(id);
     if (job) {
       job.driver_id = driverId;
@@ -453,7 +649,8 @@ export class MemoryRepo implements ApiRepo {
         tenant_id: (r.tenant_id as string | undefined) ?? null,
         status: "pending",
         rank: (r.rank as number | undefined) ?? 0,
-        expires_at: (r.expires_at as string | undefined) ?? new Date(Date.now() + 120_000).toISOString(),
+        expires_at:
+          (r.expires_at as string | undefined) ?? new Date(Date.now() + 120_000).toISOString(),
         push_status: "pending",
       };
       if (existing) {
@@ -475,25 +672,52 @@ export class MemoryRepo implements ApiRepo {
   // Mirrors the accept_tow_offer SQL function (0020): row-lock semantics are
   // approximated, expired offers are rejected, and a retry by the winning
   // driver is idempotent.
-  async acceptOffer(jobId: string, driverId: string, actorUserId: string, correlationId: string): Promise<AcceptOfferResult> {
+  async acceptOffer(
+    jobId: string,
+    driverId: string,
+    actorUserId: string,
+    correlationId: string,
+  ): Promise<AcceptOfferResult> {
     const job = this.towJobs.get(jobId);
     if (!job) return { accepted: false, towCompanyId: null, reason: "job_not_found" };
     const profile = this.driverProfiles.get(driverId);
-    if (!actorUserId || !correlationId || !profile || profile.user_id !== actorUserId || profile.status !== "active") {
+    if (
+      !actorUserId ||
+      !correlationId ||
+      !profile ||
+      profile.user_id !== actorUserId ||
+      profile.status !== "active"
+    ) {
       return { accepted: false, towCompanyId: null, reason: "forbidden" };
     }
     if (job.driver_id && job.driver_id !== driverId) {
-      return { accepted: false, towCompanyId: job.tow_company_id ?? null, reason: "already_assigned" };
+      return {
+        accepted: false,
+        towCompanyId: job.tow_company_id ?? null,
+        reason: "already_assigned",
+      };
     }
     if (job.driver_id === driverId && job.status === "accepted") {
-      return { accepted: true, towCompanyId: job.tow_company_id ?? null, reason: "already_accepted_by_driver" };
+      return {
+        accepted: true,
+        towCompanyId: job.tow_company_id ?? null,
+        reason: "already_accepted_by_driver",
+      };
     }
     if (job.status !== "offered" && job.status !== "matching") {
-      return { accepted: false, towCompanyId: job.tow_company_id ?? null, reason: "job_not_offerable" };
+      return {
+        accepted: false,
+        towCompanyId: job.tow_company_id ?? null,
+        reason: "job_not_offerable",
+      };
     }
     const offer = this.offers.find((o) => o.tow_job_id === jobId && o.driver_id === driverId);
     if (!offer || offer.status !== "pending") {
-      return { accepted: false, towCompanyId: job.tow_company_id ?? null, reason: "no_pending_offer" };
+      return {
+        accepted: false,
+        towCompanyId: job.tow_company_id ?? null,
+        reason: "no_pending_offer",
+      };
     }
     if (offer.expires_at && new Date(offer.expires_at).getTime() < Date.now()) {
       offer.status = "expired";
@@ -504,32 +728,88 @@ export class MemoryRepo implements ApiRepo {
     if (!contact || contact.name.trim().length < 2 || !phone) {
       return { accepted: false, towCompanyId: null, reason: "customer_contact_missing" };
     }
-    const busyStatuses = ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"];
-    if ([...this.towJobs.values()].some((other) => other.id !== jobId && busyStatuses.includes(other.status) &&
-      (other.driver_id === driverId || (offer.tow_vehicle_id && other.tow_vehicle_id === offer.tow_vehicle_id)))) {
+    const busyStatuses = [
+      "accepted",
+      "driver_en_route",
+      "driver_arrived",
+      "vehicle_loaded",
+      "transporting",
+      "delivered",
+    ];
+    if (
+      [...this.towJobs.values()].some(
+        (other) =>
+          other.id !== jobId &&
+          busyStatuses.includes(other.status) &&
+          (other.driver_id === driverId ||
+            (offer.tow_vehicle_id && other.tow_vehicle_id === offer.tow_vehicle_id)),
+      )
+    ) {
       return { accepted: false, towCompanyId: null, reason: "resource_busy" };
     }
-    const share = buildCustomerShare({tenantId: job.tenant_id,towJobId: jobId,driverId,jobStatus: "accepted",
-      customer: {name: contact.name.trim(),phone,email:contact.email}, registrationNumber:contact.registration_number,
-      problemSummary:contact.problem_summary,pickup:contact.pickup,pickupAddress:contact.pickup_address,
-      destinationAddress:contact.destination_address,customerNotes:contact.customer_notes});
+    const share = buildCustomerShare({
+      tenantId: job.tenant_id,
+      towJobId: jobId,
+      driverId,
+      jobStatus: "accepted",
+      customer: { name: contact.name.trim(), phone, email: contact.email },
+      registrationNumber: contact.registration_number,
+      problemSummary: contact.problem_summary,
+      pickup: contact.pickup,
+      pickupAddress: contact.pickup_address,
+      destinationAddress: contact.destination_address,
+      customerNotes: contact.customer_notes,
+    });
     offer.status = "accepted";
     for (const o of this.offers) {
-      if (o.tow_job_id === jobId && o.id !== offer.id && o.status === "pending") o.status = "cancelled";
+      if (o.tow_job_id === jobId && o.id !== offer.id && o.status === "pending")
+        o.status = "cancelled";
     }
     job.status = "accepted";
     job.driver_id = driverId;
     job.tow_company_id = offer.tow_company_id ?? job.tow_company_id;
     job.tow_vehicle_id = offer.tow_vehicle_id ?? null;
     this.customerShares.push(share);
-    this.auditLogs.push({tenant_id:job.tenant_id,actor_user_id:actorUserId,actor_kind:"user",action:"tow.driver_accepted",
-      entity_type:"tow_job",entity_id:jobId,metadata:{correlation_id:correlationId}});
-    this.webhookDeliveries.push({tenant_id:job.tenant_id,event:"tow.driver_accepted",payload:{tow_job_id:jobId,
-      driver_id:driverId,tow_company_id:job.tow_company_id,correlation_id:correlationId},status:"pending"});
-    if(contact.email) this.notificationDeliveries.push({tenant_id:job.tenant_id,incident_id:job.incident_id,tow_job_id:jobId,
-      channel:"email",provider:"resend",to_address:contact.email,status:"pending",dedupe_key:`email:driver_accepted:${jobId}`,
-      payload:{subject:"Bärgare har accepterat ditt ärende",html:"<p>En bärgare har accepterat ditt ärende.</p>"}});
-    return { accepted: true, towCompanyId: offer.tow_company_id ?? job.tow_company_id ?? null, reason: null };
+    this.auditLogs.push({
+      tenant_id: job.tenant_id,
+      actor_user_id: actorUserId,
+      actor_kind: "user",
+      action: "tow.driver_accepted",
+      entity_type: "tow_job",
+      entity_id: jobId,
+      metadata: { correlation_id: correlationId },
+    });
+    this.webhookDeliveries.push({
+      tenant_id: job.tenant_id,
+      event: "tow.driver_accepted",
+      payload: {
+        tow_job_id: jobId,
+        driver_id: driverId,
+        tow_company_id: job.tow_company_id,
+        correlation_id: correlationId,
+      },
+      status: "pending",
+    });
+    if (contact.email)
+      this.notificationDeliveries.push({
+        tenant_id: job.tenant_id,
+        incident_id: job.incident_id,
+        tow_job_id: jobId,
+        channel: "email",
+        provider: "resend",
+        to_address: contact.email,
+        status: "pending",
+        dedupe_key: `email:driver_accepted:${jobId}`,
+        payload: {
+          subject: "Bärgare har accepterat ditt ärende",
+          html: "<p>En bärgare har accepterat ditt ärende.</p>",
+        },
+      });
+    return {
+      accepted: true,
+      towCompanyId: offer.tow_company_id ?? job.tow_company_id ?? null,
+      reason: null,
+    };
   }
   async getOfferById(id: string): Promise<OfferRecord | null> {
     const o = this.offers.find((x) => x.id === id);
@@ -581,7 +861,12 @@ export class MemoryRepo implements ApiRepo {
       existing.user_id = userId;
       existing.platform = device.platform;
     } else {
-      this.devices.push({ driver_id: driverId, user_id: userId, expo_push_token: device.expo_push_token, platform: device.platform });
+      this.devices.push({
+        driver_id: driverId,
+        user_id: userId,
+        expo_push_token: device.expo_push_token,
+        platform: device.platform,
+      });
     }
   }
   async listDriverOffers(driverId: string) {
@@ -608,7 +893,14 @@ export class MemoryRepo implements ApiRepo {
   async listDriverJobs(driverId: string, opts?: { history?: boolean }): Promise<TowJobRecord[]> {
     const statuses = opts?.history
       ? ["completed", "invoiced", "closed", "cancelled", "failed"]
-      : ["accepted", "driver_en_route", "driver_arrived", "vehicle_loaded", "transporting", "delivered"];
+      : [
+          "accepted",
+          "driver_en_route",
+          "driver_arrived",
+          "vehicle_loaded",
+          "transporting",
+          "delivered",
+        ];
     return [...this.towJobs.values()].filter(
       (j) => j.driver_id === driverId && statuses.includes(j.status),
     );
@@ -623,7 +915,10 @@ export class MemoryRepo implements ApiRepo {
     if (o) o.push_status = status;
   }
   async recordNotificationDelivery(row: Record<string, unknown>) {
-    if (row.dedupe_key && this.notificationDeliveries.some((d) => d.dedupe_key === row.dedupe_key)) {
+    if (
+      row.dedupe_key &&
+      this.notificationDeliveries.some((d) => d.dedupe_key === row.dedupe_key)
+    ) {
       return;
     }
     this.notificationDeliveries.push(row);
@@ -649,7 +944,9 @@ export class MemoryRepo implements ApiRepo {
   async ensureCustomerShare(row: Record<string, unknown>): Promise<{ id: string }> {
     const jobId = String(row.tow_job_id);
     const driverId = String(row.driver_id);
-    const existing = this.customerShares.find((share) => share.tow_job_id === jobId && share.driver_id === driverId);
+    const existing = this.customerShares.find(
+      (share) => share.tow_job_id === jobId && share.driver_id === driverId,
+    );
     if (existing) {
       Object.assign(existing, row);
       return { id: String(existing.id) };
@@ -659,7 +956,9 @@ export class MemoryRepo implements ApiRepo {
     return { id };
   }
   async getCustomerShare(jobId: string, driverId: string): Promise<{ id: string } | null> {
-    const existing = this.customerShares.find((share) => share.tow_job_id === jobId && share.driver_id === driverId);
+    const existing = this.customerShares.find(
+      (share) => share.tow_job_id === jobId && share.driver_id === driverId,
+    );
     return existing ? { id: String(existing.id) } : null;
   }
   async addEtaSnapshot(row: Record<string, unknown>) {
@@ -694,7 +993,11 @@ export class MemoryRepo implements ApiRepo {
     if (invoiceIndex >= 0) this.invoices[invoiceIndex] = invoice;
     else this.invoices.push(invoice);
     job.status = "invoiced";
-    return { status: "invoiced", total_minor: Number(invoice.total_minor ?? 0), already_finalized: alreadyFinalized };
+    return {
+      status: "invoiced",
+      total_minor: Number(invoice.total_minor ?? 0),
+      already_finalized: alreadyFinalized,
+    };
   }
   async getDriverIdForUser(userId: string) {
     return this.driverUsers.get(userId) ?? null;

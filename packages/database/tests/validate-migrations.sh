@@ -206,7 +206,7 @@ if run_psql -d "$DB" -tAc "select count(*) from pg_available_extensions where na
       exit 1
     fi
     echo "$OUT" | grep -E "^\s*(not ok|# )" || true
-    if echo "$OUT" | grep -qE "^\s*not ok|failed"; then
+    if echo "$OUT" | grep -qE "^\s*(not ok|# Looks like.*(failed|planned)|Bail out!)"; then
       echo "FAILED: $t"
       exit 1
     fi
@@ -220,4 +220,6 @@ echo "==> Real independent-session accept and resource races"
 RESQLY_TEST_DATABASE="$DB" python3 "$HERE/accept_concurrency.py"
 echo "==> Real independent-session worker claims"
 RESQLY_TEST_DATABASE="$DB" python3 "$HERE/worker_concurrency.py"
+echo "==> Real independent-session incident creation and case numbers"
+RESQLY_TEST_DATABASE="$DB" python3 "$HERE/incident_concurrency.py"
 echo "==> OK: all migrations applied cleanly to $DB"

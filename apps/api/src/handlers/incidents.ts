@@ -6,7 +6,6 @@ import {
   requestTowInputSchema,
 } from "@resqly/types";
 import { AppError, normalizePhoneE164, notFound, sha256Hex } from "@resqly/utils";
-import { buildIncidentRow, determineRequiresBankid } from "@resqly/insurance";
 import {
   buildSignatureRecord,
   getBankidProvider,
@@ -19,7 +18,6 @@ import type { RouteResult } from "../http/router";
 import type { BankidSessionRecord, IncidentRecord } from "../repo/types";
 import { runDispatchForJob } from "./dispatch";
 import { enqueueWebhookEvent, escapeHtml, sendEmail } from "../services/notifications";
-import { withIdempotency } from "../services/idempotency";
 import { apiActorFields } from "../services/audit";
 
 const bankidStartSchema = z.object({
@@ -30,94 +28,29 @@ const bankidStartSchema = z.object({
 
 export async function createIncident(ctx: ApiContext, body: unknown): Promise<RouteResult> {
   const input = createIncidentInputSchema.parse(body);
-  return withIdempotency(
-    ctx,
-    "incident.create",
-    async () => {
-      await ctx.repo.assertIncidentContext({
-        tenantId: ctx.tenantId,
-        customerUserId: input.customer_user_id,
-        vehicleId: input.vehicle_id ?? null,
-        insuranceCompanyId: input.insurance_company_id ?? null,
-      });
-      const settings = await ctx.repo.getTenantSettings(ctx.tenantId);
-      const requiresBankid = determineRequiresBankid(input.type, {
-        bankidRequiredForClaims: settings.bankid_required_for_claims,
-        bankidRequiredForTow: settings.bankid_required_for_tow,
-      });
-      const caseNumber = await ctx.repo.allocateCaseNumber(ctx.tenantId, "default");
-
-      const row = buildIncidentRow({
-        tenantId: ctx.tenantId,
-        // The API acts on behalf of the partner, but customer_user_id must be explicit.
-        // Never default to tenant_id because that creates invalid/cross-domain data.
-        customerUserId: input.customer_user_id,
-        input,
-        vehicleId: input.vehicle_id ?? null,
-        insuranceCompanyId: input.insurance_company_id ?? null,
-        requiresBankid,
-        caseNumber,
-      });
-      Object.assign(row, {
-        created_by_user_id: ctx.userId ?? null,
-        created_by_api_client_id:
-          !ctx.userId && ctx.apiClientId && !["public", "user-token"].includes(ctx.apiClientId)
-            ? ctx.apiClientId
-            : null,
-      });
-      const incident = await ctx.repo.createIncident(row);
-
-      // Persist the pickup location so ETA, dispatch and the post-accept
-      // driver share all work from real coordinates.
-      if (input.pickup) {
-        await ctx.repo.upsertIncidentLocation({
-          incident_id: incident.id,
-          kind: "pickup",
-          lat: input.pickup.lat,
-          lng: input.pickup.lng,
-          address: input.pickup_address ?? null,
-        });
-      }
-      if (input.destination_address) {
-        await ctx.repo.recordAudit({
-          tenant_id: ctx.tenantId,
-          ...apiActorFields(ctx),
-          action: "create",
-          entity_type: "incident_destination",
-          entity_id: incident.id,
-          fields: ["destination_address"],
-          metadata: { destination_address: input.destination_address },
-        });
-      }
-
-      await ctx.repo.recordAudit({
-        tenant_id: ctx.tenantId,
-        ...apiActorFields(ctx),
-        action: "create",
-        entity_type: "incident",
-        entity_id: incident.id,
-        fields: ["type", "case_number"],
-      });
-      await enqueueWebhookEvent(ctx, "incident.created", {
-        incident_id: incident.id,
-        case_number: caseNumber,
-        type: incident.type,
-        status: incident.status,
-        requires_bankid: requiresBankid,
-      });
-
-      return {
-        status: 201,
-        body: {
-          incident_id: incident.id,
-          case_number: caseNumber,
-          status: incident.status,
-          requires_bankid: requiresBankid,
-        },
-      };
-    },
-    (result) => ((result.body as { incident_id?: string } | undefined)?.incident_id ?? null),
+  const result = await ctx.repo.createIncidentWorkflow(
+    workflowActor(ctx),
+    input,
+    input.pickup
+      ? [{ kind: "pickup", ...input.pickup, address: input.pickup_address ?? null }]
+      : [],
   );
+  return {
+    status: result.replay ? 200 : 201,
+    body: { ...result },
+    headers: result.replay ? { "x-idempotent-replay": "true" } : undefined,
+  };
+}
+
+function workflowActor(ctx: ApiContext) {
+  return {
+    tenantId: ctx.tenantId,
+    userId: ctx.userId ?? null,
+    apiClientId:
+      !ctx.userId && !["public", "user-token"].includes(ctx.apiClientId) ? ctx.apiClientId : null,
+    key: ctx.idempotencyKey ?? ctx.requestId,
+    correlationId: ctx.requestId,
+  };
 }
 
 export async function getIncident(ctx: ApiContext, id: string): Promise<RouteResult> {
@@ -236,7 +169,10 @@ export async function signIncident(
       case_number: incident.case_number,
       order_ref: orderRef,
     });
-    return { status: 200, body: { status: "complete", order_ref: orderRef, bankid_verified: true } };
+    return {
+      status: 200,
+      body: { status: "complete", order_ref: orderRef, bankid_verified: true },
+    };
   }
 
   const started = await provider.sign({
@@ -269,10 +205,7 @@ export async function signIncident(
   return { status: 202, body: publicStartBody(started) };
 }
 
-export async function pollBankidSession(
-  ctx: ApiContext,
-  sessionId: string,
-): Promise<RouteResult> {
+export async function pollBankidSession(ctx: ApiContext, sessionId: string): Promise<RouteResult> {
   const session = await ctx.repo.getBankidSessionById(sessionId);
   if (!session || session.tenant_id !== ctx.tenantId) throw notFound("BankID session not found");
   const provider = getBankidProvider(ctx.config.bankid);
@@ -301,7 +234,10 @@ export async function cancelBankidSession(
   if (!session || session.tenant_id !== ctx.tenantId) throw notFound("BankID session not found");
   const provider = getBankidProvider(ctx.config.bankid);
   await provider.cancel(session.tic_session_id ?? session.order_ref ?? sessionId);
-  await ctx.repo.updateBankidSession(session.id, { status: "cancelled", raw_status: { cancelled_at: new Date().toISOString() } });
+  await ctx.repo.updateBankidSession(session.id, {
+    status: "cancelled",
+    raw_status: { cancelled_at: new Date().toISOString() },
+  });
   return { status: 200, body: { status: "cancelled" } };
 }
 
@@ -336,7 +272,10 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
   const incident = await ctx.repo.getIncident(ctx.tenantId, id);
   if (!incident) throw notFound("Incident not found");
   if (["completed", "closed", "cancelled", "rejected"].includes(incident.status)) {
-    throw new AppError("conflict", `A tow cannot be requested for an incident with status ${incident.status}`);
+    throw new AppError(
+      "conflict",
+      `A tow cannot be requested for an incident with status ${incident.status}`,
+    );
   }
 
   if (incident.requires_bankid && !incident.bankid_verified) {
@@ -358,142 +297,85 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
     );
   }
 
-  return withIdempotency(
-    ctx,
-    `tow.request:${incident.id}`,
-    async () => {
-      await ctx.repo.upsertIncidentLocation({
-        incident_id: incident.id,
-        kind: "pickup",
-        lat: input.pickup.lat,
-        lng: input.pickup.lng,
-      });
+  const requested = await ctx.repo.requestTowWorkflow(workflowActor(ctx), incident.id, input);
+  const { job, created } = requested;
+  if (!["created", "matching"].includes(job.status)) {
+    return {
+      status: 200,
+      body: {
+        tow_job_id: job.id,
+        status: job.status,
+        offered_drivers: [],
+        requires_manual_review: job.status === "manual_review",
+        replay: true,
+      },
+    };
+  }
+  const coords = await ctx.repo.getIncidentCoordinates(incident.id);
+  const pickup = coords.pickup;
+  if (!pickup) throw new AppError("conflict", "Pickup coordinates are required for dispatch");
+  const claim = await ctx.repo.claimTowDispatch(job.id);
+  if (!claim.claimed) {
+    return {
+      status: 202,
+      body: {
+        tow_job_id: job.id,
+        status: claim.status,
+        dispatch_in_progress: ["created", "matching"].includes(claim.status),
+        replay: true,
+      },
+    };
+  }
 
-      let job = await ctx.repo.getActiveTowJobForIncident(ctx.tenantId, incident.id);
-      let created = false;
-
-      if (job && !["created", "matching"].includes(job.status)) {
-        return {
-          status: 200,
-          body: {
-            tow_job_id: job.id,
-            status: job.status,
-            offered_drivers: [],
-            requires_manual_review: job.status === "manual_review",
-            strategy: input.dispatch_strategy ?? null,
-            replay: true,
-          },
-        };
-      }
-
-      if (!job) {
-        try {
-          job = await ctx.repo.createTowJob({
-            tenant_id: ctx.tenantId,
-            incident_id: incident.id,
-            status: "created",
-            payer_type: input.payer_type,
-            priority: input.priority,
-            created_by_user_id: ctx.userId ?? null,
-            created_by_api_client_id:
-              !ctx.userId && ctx.apiClientId && !["public", "user-token"].includes(ctx.apiClientId)
-                ? ctx.apiClientId
-                : null,
-          });
-          created = true;
-        } catch (error) {
-          // The partial unique index may have been won by a concurrent request.
-          job = await ctx.repo.getActiveTowJobForIncident(ctx.tenantId, incident.id);
-          if (!job) throw error;
-        }
-      }
-
-      if (created) {
-        await enqueueWebhookEvent(ctx, "tow.requested", {
-          incident_id: incident.id,
-          case_number: incident.case_number,
-          tow_job_id: job.id,
-          priority: input.priority,
-          payer_type: input.payer_type,
-        });
-      }
-
-      const claim = await ctx.repo.claimTowDispatch(job.id);
-      if (!claim.claimed) {
-        return {
-          status: 202,
-          body: {
-            tow_job_id: job.id,
-            status: claim.status,
-            dispatch_in_progress: ["created", "matching"].includes(claim.status),
-            replay: true,
-          },
-        };
-      }
-
-      let outcome;
-      try {
-        outcome = await runDispatchForJob(ctx, {
-          job,
-          pickup: input.pickup,
-          payerType: job.payer_type as "insurance_company" | "customer_private",
-          priority: (["normal", "high", "urgent"].includes(job.priority) ? job.priority : "normal") as
-            | "normal"
-            | "high"
-            | "urgent",
-          strategy: input.dispatch_strategy,
-          problemType: incident.problem_type,
-          actorUserId: ctx.userId ?? null,
-          actorApiClientId:
-            !ctx.userId && ctx.apiClientId && !["public", "user-token"].includes(ctx.apiClientId)
-              ? ctx.apiClientId
-              : null,
-        });
-        await ctx.repo.recordDispatchAttempt(job.id, null);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const attempt = await ctx.repo.recordDispatchAttempt(job.id, message);
-        if (attempt.status === "manual_review") {
-          return {
-            status: 202,
-            body: {
-              tow_job_id: job.id,
-              status: "manual_review",
-              offered_drivers: [],
-              requires_manual_review: true,
-              strategy: input.dispatch_strategy ?? null,
-            },
-          };
-        }
-        throw new AppError("dependency_unavailable", "Dispatch failed and will be retried", {
-          tow_job_id: job.id,
-          attempts: attempt.attempts,
-        });
-      }
-
-      await sendEmail(ctx, {
-        to: contact.email,
-        subject: `Bärgningsärende ${incident.case_number ?? job.id} är mottaget`,
-        html: `<p>Vi har tagit emot ditt bärgningsärende.</p><p>Status: ${escapeHtml(outcome.status)}</p>`,
-        incidentId: incident.id,
-        towJobId: job.id,
-        dedupeKey: `email:tow_requested:${job.id}`,
-      });
-
+  let outcome;
+  try {
+    outcome = await runDispatchForJob(ctx, {
+      job,
+      pickup,
+      payerType: job.payer_type as "insurance_company" | "customer_private",
+      priority: (["normal", "high", "urgent"].includes(job.priority) ? job.priority : "normal") as
+        "normal" | "high" | "urgent",
+      strategy: input.dispatch_strategy,
+      problemType: incident.problem_type,
+      actorUserId: ctx.userId ?? null,
+      actorApiClientId:
+        !ctx.userId && ctx.apiClientId && !["public", "user-token"].includes(ctx.apiClientId)
+          ? ctx.apiClientId
+          : null,
+    });
+    await ctx.repo.recordDispatchAttempt(job.id, null);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const attempt = await ctx.repo.recordDispatchAttempt(job.id, message);
+    if (attempt.status === "manual_review") {
       return {
-        status: created ? 201 : 200,
+        status: 202,
         body: {
           tow_job_id: job.id,
-          status: outcome.status,
-          offered_drivers: outcome.offeredDrivers,
-          requires_manual_review: outcome.requiresManualReview,
-          strategy: outcome.strategy,
-          resumed: !created,
+          status: "manual_review",
+          offered_drivers: [],
+          requires_manual_review: true,
+          strategy: input.dispatch_strategy ?? null,
         },
       };
+    }
+    throw new AppError("dependency_unavailable", "Dispatch failed and will be retried", {
+      tow_job_id: job.id,
+      attempts: attempt.attempts,
+    });
+  }
+
+  return {
+    status: created ? 201 : 200,
+    body: {
+      tow_job_id: job.id,
+      status: outcome.status,
+      offered_drivers: outcome.offeredDrivers,
+      requires_manual_review: outcome.requiresManualReview,
+      strategy: outcome.strategy,
+      resumed: !created,
     },
-    (result) => ((result.body as { tow_job_id?: string } | undefined)?.tow_job_id ?? null),
-  );
+  };
 }
 
 /**
@@ -502,7 +384,10 @@ export async function requestTow(ctx: ApiContext, id: string, body: unknown): Pr
  * the app — the authoritative completion comes from poll/collect/webhook.
  * Response is a friendly Swedish HTML page, never raw errors.
  */
-export async function bankidCallback(ctx: ApiContext, query: URLSearchParams): Promise<RouteResult> {
+export async function bankidCallback(
+  ctx: ApiContext,
+  query: URLSearchParams,
+): Promise<RouteResult> {
   const sessionId = query.get("sessionId") ?? query.get("session_id") ?? null;
 
   let completed = false;
@@ -511,7 +396,9 @@ export async function bankidCallback(ctx: ApiContext, query: URLSearchParams): P
       const session = await ctx.repo.getBankidSessionById(sessionId);
       if (session) {
         const provider = getBankidProvider(ctx.config.bankid);
-        const result = await provider.collect(session.tic_session_id ?? session.order_ref ?? sessionId);
+        const result = await provider.collect(
+          session.tic_session_id ?? session.order_ref ?? sessionId,
+        );
         const effectiveCtx = session.tenant_id ? { ...ctx, tenantId: session.tenant_id } : ctx;
         const handled = await handleBankidResult(effectiveCtx, session, result);
         completed = handled.bankid_verified === true;
@@ -585,9 +472,10 @@ async function handleBankidResult(
     };
   }
 
-  const incident = session.incident_id && session.tenant_id
-    ? await ctx.repo.getIncident(session.tenant_id, session.incident_id)
-    : null;
+  const incident =
+    session.incident_id && session.tenant_id
+      ? await ctx.repo.getIncident(session.tenant_id, session.incident_id)
+      : null;
   const userId = session.user_id ?? incident?.customer_user_id;
   if (!userId) throw new AppError("internal_error", "BankID session is not linked to a user");
 
@@ -662,12 +550,17 @@ function publicStartBody(started: BankidStartResult): Record<string, unknown> {
   };
 }
 
-function signedPayloadForIncident(incident: Pick<IncidentRecord, "id" | "case_number">, purpose: string): Record<string, unknown> {
+function signedPayloadForIncident(
+  incident: Pick<IncidentRecord, "id" | "case_number">,
+  purpose: string,
+): Record<string, unknown> {
   return {
     incident_id: incident.id,
     case_number: incident.case_number,
     purpose,
-    payload_hash: sha256Hex(JSON.stringify({ incident_id: incident.id, case_number: incident.case_number, purpose })),
+    payload_hash: sha256Hex(
+      JSON.stringify({ incident_id: incident.id, case_number: incident.case_number, purpose }),
+    ),
   };
 }
 
@@ -699,5 +592,7 @@ function ticWebhookUrl(ctx: ApiContext): string | undefined {
 }
 
 function bankidState(tenantId: string, incidentId: string, flow: "auth" | "sign"): string {
-  return Buffer.from(JSON.stringify({ tenant_id: tenantId, incident_id: incidentId, flow })).toString("base64url");
+  return Buffer.from(
+    JSON.stringify({ tenant_id: tenantId, incident_id: incidentId, flow }),
+  ).toString("base64url");
 }

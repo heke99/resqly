@@ -2189,6 +2189,7 @@ export type Database = {
           created_at: string;
           id: string;
           idempotency_key: string;
+          request_hash: string | null;
           resource_id: string | null;
           response: Json | null;
           scope: string;
@@ -2198,6 +2199,7 @@ export type Database = {
           created_at?: string;
           id?: string;
           idempotency_key: string;
+          request_hash?: string | null;
           resource_id?: string | null;
           response?: Json | null;
           scope: string;
@@ -2207,6 +2209,7 @@ export type Database = {
           created_at?: string;
           id?: string;
           idempotency_key?: string;
+          request_hash?: string | null;
           resource_id?: string | null;
           response?: Json | null;
           scope?: string;
@@ -6514,6 +6517,19 @@ export type Database = {
           reveal_secret: string;
         }[];
       };
+      create_incident_workflow: {
+        Args: {
+          p_actor_api: string;
+          p_actor_user: string;
+          p_consents?: Json;
+          p_correlation_id: string;
+          p_input: Json;
+          p_key: string;
+          p_locations?: Json;
+          p_tenant: string;
+        };
+        Returns: Json;
+      };
       create_resqly_staging_demo: {
         Args: Record<PropertyKey, never>;
         Returns: {
@@ -6748,6 +6764,29 @@ export type Database = {
       replace_tow_price_list: {
         Args: { p_actor_user: string; p_price: Json; p_tenant: string; p_tow_company: string };
         Returns: string;
+      };
+      request_tow_workflow: {
+        Args: {
+          p_actor_api: string;
+          p_actor_user: string;
+          p_correlation_id: string;
+          p_incident: string;
+          p_input: Json;
+          p_key: string;
+          p_tenant: string;
+        };
+        Returns: Json;
+      };
+      require_incident_workflow_actor: {
+        Args: {
+          p_actor_api: string;
+          p_actor_user: string;
+          p_customer: string;
+          p_permission: string;
+          p_scope: string;
+          p_tenant: string;
+        };
+        Returns: undefined;
       };
       settle_delivery: {
         Args: {

@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./generated-types";
 
 export type { Database, Json } from "./generated-types";
+export * from "./workflows";
 export type AppSupabaseClient = SupabaseClient<Database>;
 
 /**
