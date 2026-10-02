@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "baselineCommit": "25840ee268e1e32e4ad5cf3a560128ac19d01f48",
-  "candidateCommit": null,
+  "candidateCommit": "afbd743136ba79f5c045936e9ab143122c102ace",
   "rules": [
     {
       "id": "R01",
@@ -75,7 +75,10 @@
         "apps/api/src/handlers/incidents.ts",
         "apps/customer-web/app/api/customer/cases/[id]/bankid/_lib.ts"
       ],
-      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-bankid.md"],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ],
       "remainingGaps": [
         "Real provider signature/certificate validation and first identity enrollment policy remain.",
         "Location, destination, evidence and consent amendments are not yet bound into these object versions.",
@@ -93,7 +96,8 @@
       ],
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
       ],
       "remainingGaps": [
         "Real provider signature/certificate validation and first identity enrollment policy remain.",
@@ -113,7 +117,8 @@
       ],
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-core.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
       ],
       "remainingGaps": [
         "Legacy accept disabled for all API roles; actor-bound accept and delivery RPCs service-only. Remaining SECURITY DEFINER inventory open."
@@ -156,7 +161,8 @@
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-workflows.md",
         "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
       ],
       "remainingGaps": [
         "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
@@ -176,7 +182,8 @@
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-workflows.md",
         "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
       ],
       "remainingGaps": [
         "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
@@ -437,7 +444,8 @@
         "docs/masterplan/VERIFICATION-2026-10-02-core.md",
         "docs/masterplan/VERIFICATION-2026-10-02-workflows.md",
         "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
       ],
       "remainingGaps": [
         "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
@@ -630,7 +638,8 @@
       ],
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-core.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
       ],
       "remainingGaps": [
         "Version-scoped PostgreSQL replay/real sessions, API/unit/source checks documented; full release and provider/device evidence still open."
@@ -666,7 +675,8 @@
       "status": "targeted_verified_partial",
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-core.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
       ]
     },
     {
@@ -681,7 +691,10 @@
       "scenario": "BankID-resultat från fel användare/ärende eller gammal version.",
       "expected": "Kan inte verifiera det aktuella objektet.",
       "status": "targeted_verified_partial",
-      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-bankid.md"],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ],
       "remainingGaps": [
         "Real provider signature/certificate validation and first identity enrollment policy remain.",
         "Location, destination, evidence and consent amendments are not yet bound into these object versions.",
@@ -695,7 +708,8 @@
       "status": "targeted_verified_partial",
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
       ],
       "remainingGaps": [
         "Real provider signature/certificate validation and first identity enrollment policy remain.",
@@ -753,7 +767,8 @@
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-core.md",
         "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
       ],
       "remainingGaps": []
     },
@@ -821,7 +836,8 @@
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-core.md",
         "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
       ],
       "remainingGaps": []
     },

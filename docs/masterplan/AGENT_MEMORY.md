@@ -110,3 +110,14 @@ F2–F9 work. Preserve the full masterplan and its separate business decisions.
 Coverage was persisted in GitHub `f924ef93001756b7bfd2eae6ede7cf0a7353fee8`,
 identical tree to local `1a9c56dbca68c9682da8cbdab01a77bfcf54996b`
 (`6ba626eba57ee01eef9941cfaa6849ce1b57cfdc`).
+
+
+## Published verified candidate
+
+GitHub source commit: `afbd743136ba79f5c045936e9ab143122c102ace`.
+Local source commit: `16b8c76743c2579f18a1e005ccae3d3c7375f8f1`.
+Identical source tree: `02998ede75bf71b675421a100731b914bbf72360`.
+Read `CANDIDATE-VERIFICATION-2026-10-02.json` for command results, native
+bundle hashes, all 217 SQL assertions and scoped limits. PR #5 remains draft.
+Main was rechecked and is still the original baseline. Follow-up report commits
+change documentation only; they do not imply a new code candidate or release.

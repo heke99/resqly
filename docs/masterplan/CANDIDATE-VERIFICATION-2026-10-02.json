@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-02",
+  "repository": "heke99/resqly",
+  "draftPullRequest": 5,
+  "baselineMain": "25840ee268e1e32e4ad5cf3a560128ac19d01f48",
+  "candidate": {
+    "localCommit": "16b8c76743c2579f18a1e005ccae3d3c7375f8f1",
+    "githubCommit": "afbd743136ba79f5c045936e9ab143122c102ace",
+    "tree": "02998ede75bf71b675421a100731b914bbf72360"
+  },
+  "checks": {
+    "ci": {
+      "command": "pnpm verify",
+      "passedTasks": 91,
+      "cachedTasks": 58,
+      "vitestTests": 253,
+      "testsPerPackage": {
+        "utils": 28,
+        "types": 6,
+        "insurance": 8,
+        "white-label": 9,
+        "billing": 9,
+        "bankid": 11,
+        "rbac": 7,
+        "tow": 7,
+        "maps": 10,
+        "notifications": 20,
+        "ui": 4,
+        "database": 44,
+        "dispatch": 18,
+        "geodata": 3,
+        "web-kit": 1,
+        "audit": 2,
+        "auth": 4,
+        "workers": 20,
+        "api": 42
+      },
+      "runtime": {
+        "node": "24.19.0",
+        "pnpm": "11.25.0"
+      }
+    },
+    "database": {
+      "command": "bash packages/database/tests/validate-migrations.sh resqly_test_frozen",
+      "runtime": "Direct-local PostgreSQL 16.15/PostGIS/Supabase shims",
+      "migrationCount": 32,
+      "pgTAPAssertions": 217,
+      "assertionsPerSuite": {
+        "actor_accept": 28,
+        "bankid_binding": 47,
+        "coverage_decisions": 47,
+        "delivery_leases": 24,
+        "dispatch_rules": 12,
+        "incident_workflows": 38,
+        "rls_assumptions": 21
+      },
+      "independentSessionResults": [
+        {
+          "sameJobSessions": 100,
+          "sameJobWinners": 1,
+          "atomicSideEffects": {
+            "assignments": 1,
+            "shares": 1,
+            "audit": 1,
+            "events": 1,
+            "webhooks": 1,
+            "email": 1
+          },
+          "sameDriverSessions": 2,
+          "sameVehicleSessions": 2,
+          "winnerRetry": "idempotent",
+          "resourceConflicts": 0
+        },
+        {
+          "workerSessions": 16,
+          "queued": 64,
+          "claimed": 64,
+          "uniqueClaims": 64,
+          "duplicateClaims": 0
+        },
+        {
+          "sameKeySessions": 16,
+          "sameKeyIncidents": 1,
+          "distinctSessions": 100,
+          "uniqueNumbers": 100,
+          "towRequestSessions": 16,
+          "towJobs": 1,
+          "atomicCounts": {
+            "incidents": 101,
+            "numbers": 101,
+            "jobs": 1,
+            "webhooks": 102,
+            "emails": 102
+          }
+        },
+        {
+          "sameKeyDecisionSessions": 16,
+          "sameKeyDecisions": 1,
+          "staleVersionSessions": 16,
+          "versionWinners": 1,
+          "acceptVersusDecision": "serialized",
+          "requestVersusAccept": "no deadlock"
+        },
+        {
+          "completionSessions": 16,
+          "completionWinners": 1,
+          "atomicSideEffects": {
+            "signatures": 1,
+            "audit": 1,
+            "webhooks": 1,
+            "emails": 1,
+            "statusEvents": 1
+          },
+          "latePending": "preserved complete"
+        }
+      ]
+    },
+    "nativeExports": [
+      {
+        "app": "@resqly/driver-mobile",
+        "platform": "ios",
+        "bundleBytes": 2383829,
+        "sha256": "b5aa07dae34e028141a0614b065d379023037cd613d1178333e53578c3992a80",
+        "kind": "Expo Metro Hermes export; no device execution"
+      },
+      {
+        "app": "@resqly/driver-mobile",
+        "platform": "android",
+        "bundleBytes": 2393609,
+        "sha256": "dda3eed28a5bb693c8809fb5dad5a5b1c6ecdcdcda5610233589e2ce50607d21",
+        "kind": "Expo Metro Hermes export; no device execution"
+      },
+      {
+        "app": "@resqly/customer-mobile",
+        "platform": "ios",
+        "bundleBytes": 2282320,
+        "sha256": "45414ac4e5e6811c91d995905169463cb66ce85d74a34e9d3ebd9bf9d72466fa",
+        "kind": "Expo Metro Hermes export; no device execution"
+      },
+      {
+        "app": "@resqly/customer-mobile",
+        "platform": "android",
+        "bundleBytes": 2287571,
+        "sha256": "dc8a30b17d2d9d83e3b358f6bec82469d854ae89fb3227f2408223e3ac3776be",
+        "kind": "Expo Metro Hermes export; no device execution"
+      }
+    ],
+    "generatedTypes": {
+      "path": "packages/database/src/generated-types.ts",
+      "sha256": "65e767d71dcc3bdea2d0b6cccfbf9871fba3d617c8f5cfa1a84e8963f8824386",
+      "source": "Fresh replay schema excluding test-only pgTAP extension"
+    }
+  },
+  "limits": [
+    "Full F0–F9 masterplan remains incomplete; targeted verified statuses retain scope and gaps.",
+    "No live PostgreSQL 17/Auth/Storage/Realtime/browser/native-device/provider end-to-end proof.",
+    "Durable signed callback inbox, push recovery, complete insurer candidate pagination and freshness remain.",
+    "BankID certificate/provider validation, first identity enrollment/mandate policy and location/evidence/consent amendment binding remain.",
+    "Private quote consent, onboarding, reporting/economic review, storage/offboarding/retention and F2–F9 remain.",
+    "Live migration history is empty despite an existing schema: reconcile before deployment.",
+    "No live migrations, approval backfill, production activation or merge performed."
+  ]
+}
