@@ -13,6 +13,8 @@ interface Incident {
   description: string | null;
   requires_bankid: boolean;
   bankid_verified: boolean;
+  insurance_company_id: string | null;
+  coverage_status: string;
 }
 
 interface TimelineEntry {
@@ -52,7 +54,9 @@ const CANCELLABLE = new Set([
 ]);
 
 function timelineLabel(entry: TimelineEntry): string {
-  return entry.kind === "tow" ? towStatusLabel(entry.to_status as TowJobStatus) : incidentStatusLabel(entry.to_status);
+  return entry.kind === "tow"
+    ? towStatusLabel(entry.to_status as TowJobStatus)
+    : incidentStatusLabel(entry.to_status);
 }
 
 function formatTime(iso: string): string {
@@ -84,7 +88,10 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
   const load = useCallback(async () => {
     if (!supabase) return;
     const { data: auth } = await supabase.auth.getUser();
-    if (!auth.user) { setAuthed(false); return; }
+    if (!auth.user) {
+      setAuthed(false);
+      return;
+    }
     setAuthed(true);
     const { data: inc } = await supabase.from("incidents").select("*").eq("id", id).maybeSingle();
     setIncident((inc as Incident | null) ?? null);
@@ -96,7 +103,11 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    const jobRow = job as { id: string; status: TowJobStatus; price_snapshot?: PriceSnapshot | null } | null;
+    const jobRow = job as {
+      id: string;
+      status: TowJobStatus;
+      price_snapshot?: PriceSnapshot | null;
+    } | null;
     if (jobRow) {
       setTowStatus(jobRow.status);
       setPriceSnapshot(jobRow.price_snapshot ?? null);
@@ -119,7 +130,10 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
           headers: { authorization: `Bearer ${token}` },
         });
         if (res.ok) {
-          const json = (await res.json()) as { entries?: TimelineEntry[]; locations?: CaseLocation[] };
+          const json = (await res.json()) as {
+            entries?: TimelineEntry[];
+            locations?: CaseLocation[];
+          };
           setTimeline(json.entries ?? []);
           setLocations(json.locations ?? []);
         }
@@ -181,9 +195,15 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
     if (!token) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/customer/cases/${id}/bankid/sign`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/customer/cases/${id}/bankid/sign`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) { setMessage(json.error ?? "BankID-verifieringen kunde inte startas. Försök igen."); return; }
+      if (!res.ok) {
+        setMessage(json.error ?? "BankID-verifieringen kunde inte startas. Försök igen.");
+        return;
+      }
       if (json.bankid_verified || json.status === "complete") {
         setMessage("BankID verifierad.");
         await load();
@@ -205,9 +225,15 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
     if (!token) return;
     for (let i = 0; i < 45; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
-      const res = await fetch(`/api/customer/bankid/sessions/${sessionId}/poll`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/customer/bankid/sessions/${sessionId}/poll`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) { setMessage(json.error ?? "BankID-verifieringen kunde inte kontrolleras."); return; }
+      if (!res.ok) {
+        setMessage(json.error ?? "BankID-verifieringen kunde inte kontrolleras.");
+        return;
+      }
       if (json.bankid_verified || json.status === "complete") {
         setMessage("BankID verifierad.");
         await load();
@@ -227,10 +253,17 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
     if (!token) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/customer/cases/${id}/request-tow`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify({ priority: "normal" }) });
+      const res = await fetch(`/api/customer/cases/${id}/request-tow`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ priority: "normal" }),
+      });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) setMessage(json.error ?? "Bärgningen kunde inte skickas. Försök igen.");
-      else { setMessage(`Bärgning begärd: ${towStatusLabel(json.status)}`); await load(); }
+      else {
+        setMessage(`Bärgning begärd: ${towStatusLabel(json.status)}`);
+        await load();
+      }
     } catch {
       setMessage("Något gick fel. Kontrollera din uppkoppling och försök igen.");
     } finally {
@@ -240,7 +273,10 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
 
   async function cancelCase() {
     if (busy) return;
-    if (!cancelReason.trim()) { setMessage("Ange varför du vill avbryta ärendet."); return; }
+    if (!cancelReason.trim()) {
+      setMessage("Ange varför du vill avbryta ärendet.");
+      return;
+    }
     const token = await accessToken();
     if (!token) return;
     setBusy(true);
@@ -265,14 +301,21 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
   }
 
   if (!supabase) return <p>Tjänsten är inte tillgänglig just nu. Försök igen om en stund.</p>;
-  if (authed === false) return <p>Du behöver <a href="/login">logga in</a>.</p>;
+  if (authed === false)
+    return (
+      <p>
+        Du behöver <a href="/login">logga in</a>.
+      </p>
+    );
   if (!incident && !loaded) return <p>Laddar ärende…</p>;
   if (!incident) {
     return (
       <div>
         <h1 style={{ fontSize: 24 }}>Ärendet hittades inte</h1>
         <p style={{ opacity: 0.72 }}>Ärendet finns inte eller tillhör ett annat konto.</p>
-        <a className="bigbtn" href="/cases">Till mina ärenden</a>
+        <a className="bigbtn" href="/cases">
+          Till mina ärenden
+        </a>
       </div>
     );
   }
@@ -280,21 +323,49 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
   return (
     <div>
       <h1 style={{ fontSize: 24 }}>{incident.case_number ?? "Ärende"}</h1>
-      <p style={{ opacity: 0.7 }}>{incident.type === "damage_claim" ? "Försäkringsärende" : "Bärgningsärende"} • {incidentStatusLabel(incident.status)}</p>
+      <p style={{ opacity: 0.7 }}>
+        {incident.type === "damage_claim" ? "Försäkringsärende" : "Bärgningsärende"} •{" "}
+        {incidentStatusLabel(incident.status)}
+      </p>
 
       {incident.requires_bankid && !incident.bankid_verified ? (
         <div className="status-card">
           <strong>BankID krävs</strong>
-          <p className="vehicle-meta">Verifiera ärendet innan det skickas vidare till försäkringsbolag/bärgning.</p>
-          <button className="bigbtn" onClick={verifyWithBankid} disabled={busy}>{busy ? "Väntar på BankID…" : "Verifiera med BankID"}</button>
+          <p className="vehicle-meta">
+            Verifiera ärendet innan det skickas vidare till försäkringsbolag/bärgning.
+          </p>
+          <button className="bigbtn" onClick={verifyWithBankid} disabled={busy}>
+            {busy ? "Väntar på BankID…" : "Verifiera med BankID"}
+          </button>
         </div>
       ) : null}
 
-      {incident.bankid_verified && !towStatus && incident.type !== "damage_claim" ? (
+      {incident.insurance_company_id && incident.coverage_status !== "approved" ? (
+        <div className="status-card">
+          <strong>
+            {incident.coverage_status === "denied"
+              ? "Försäkringstäckningen är nekad"
+              : incident.coverage_status === "more_info"
+                ? "Försäkringsbolaget behöver fler uppgifter"
+                : "Försäkringsbedömning pågår"}
+          </strong>
+          <p className="vehicle-meta">
+            Försäkringsbolagets godkännande krävs innan försäkringsbetald bärgning kan begäras. Du
+            kan följa bedömningen i ärendet.
+          </p>
+        </div>
+      ) : null}
+
+      {(!incident.requires_bankid || incident.bankid_verified) &&
+      (!incident.insurance_company_id || incident.coverage_status === "approved") &&
+      !towStatus &&
+      incident.type !== "damage_claim" ? (
         <div className="status-card">
           <strong>Redo för bärgning</strong>
           <p className="vehicle-meta">Vi kan nu begära bärgning för ärendet.</p>
-          <button className="bigbtn" onClick={requestTow} disabled={busy}>{busy ? "Skickar…" : "Begär bärgning"}</button>
+          <button className="bigbtn" onClick={requestTow} disabled={busy}>
+            {busy ? "Skickar…" : "Begär bärgning"}
+          </button>
         </div>
       ) : null}
 
@@ -302,16 +373,27 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
         <div className="status-card" style={{ marginTop: 12 }}>
           <strong>{towStatusLabel(towStatus)}</strong>
           <p style={{ margin: "6px 0 0" }}>{whatHappensNext(towStatus)}</p>
-          {etaSeconds != null ? <p style={{ margin: "6px 0 0" }}>ETA: {formatEta(etaSeconds)}</p> : null}
+          {etaSeconds != null ? (
+            <p style={{ margin: "6px 0 0" }}>ETA: {formatEta(etaSeconds)}</p>
+          ) : null}
           {priceSnapshot?.estimate?.total_minor != null ? (
             <p style={{ margin: "6px 0 0" }}>
-              Överenskommet pris: <strong>{(priceSnapshot.estimate.total_minor / 100).toLocaleString("sv-SE")} {priceSnapshot.estimate.currency ?? "SEK"}</strong>
-              <span style={{ opacity: 0.65, fontSize: 13 }}> (låst när bärgaren accepterade — väntetid och extra arbete kan tillkomma)</span>
+              Överenskommet pris:{" "}
+              <strong>
+                {(priceSnapshot.estimate.total_minor / 100).toLocaleString("sv-SE")}{" "}
+                {priceSnapshot.estimate.currency ?? "SEK"}
+              </strong>
+              <span style={{ opacity: 0.65, fontSize: 13 }}>
+                {" "}
+                (låst när bärgaren accepterade — väntetid och extra arbete kan tillkomma)
+              </span>
             </p>
           ) : null}
         </div>
       ) : incident.type === "damage_claim" ? (
-        <p style={{ opacity: 0.7 }}>Skadeärendet är synligt i försäkringsbolagets portal efter BankID-verifiering.</p>
+        <p style={{ opacity: 0.7 }}>
+          Skadeärendet är synligt i försäkringsbolagets portal efter BankID-verifiering.
+        </p>
       ) : (
         <p style={{ opacity: 0.7 }}>{whatHappensNext("matching")}</p>
       )}
@@ -322,7 +404,10 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
           {locations.map((loc, i) => (
             <p key={i} className="vehicle-meta" style={{ margin: "4px 0 0" }}>
               {loc.kind === "destination" ? "Destination: " : "Upphämtning: "}
-              {loc.address ?? (loc.lat != null && loc.lng != null ? `${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}` : "—")}
+              {loc.address ??
+                (loc.lat != null && loc.lng != null
+                  ? `${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`
+                  : "—")}
             </p>
           ))}
         </div>
@@ -333,10 +418,20 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
           <strong>Händelser</strong>
           <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0" }}>
             {timeline.map((entry, i) => (
-              <li key={i} style={{ padding: "6px 0", borderTop: i > 0 ? "1px solid rgba(0,0,0,0.06)" : "none" }}>
+              <li
+                key={i}
+                style={{
+                  padding: "6px 0",
+                  borderTop: i > 0 ? "1px solid rgba(0,0,0,0.06)" : "none",
+                }}
+              >
                 <span style={{ fontWeight: 600 }}>{timelineLabel(entry)}</span>
-                <span style={{ opacity: 0.6, marginLeft: 8, fontSize: 13 }}>{formatTime(entry.at)}</span>
-                {entry.reason ? <div style={{ opacity: 0.7, fontSize: 13 }}>{entry.reason}</div> : null}
+                <span style={{ opacity: 0.6, marginLeft: 8, fontSize: 13 }}>
+                  {formatTime(entry.at)}
+                </span>
+                {entry.reason ? (
+                  <div style={{ opacity: 0.7, fontSize: 13 }}>{entry.reason}</div>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -344,19 +439,27 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
       ) : (
         <div className="status-card" style={{ marginTop: 12 }}>
           <strong>Vad händer nu?</strong>
-          <p className="vehicle-meta">Statusen på ärendet uppdateras automatiskt på den här sidan.</p>
+          <p className="vehicle-meta">
+            Statusen på ärendet uppdateras automatiskt på den här sidan.
+          </p>
         </div>
       )}
 
       <div className="status-card" style={{ marginTop: 12 }}>
         <strong>Bilder och dokument</strong>
-        <p className="vehicle-meta">Foton på fordonet och skadan hjälper bärgaren och försäkringsbolaget.</p>
+        <p className="vehicle-meta">
+          Foton på fordonet och skadan hjälper bärgaren och försäkringsbolaget.
+        </p>
         {evidence.length > 0 ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
             {evidence.map((e) =>
               e.url && e.content_type.startsWith("image/") ? (
                 <a key={e.id} href={e.url} target="_blank" rel="noreferrer">
-                  <img src={e.url} alt="Uppladdad bild" style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 8 }} />
+                  <img
+                    src={e.url}
+                    alt="Uppladdad bild"
+                    style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 8 }}
+                  />
                 </a>
               ) : e.url ? (
                 <a key={e.id} href={e.url} target="_blank" rel="noreferrer" className="badge">
@@ -367,7 +470,10 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
           </div>
         ) : null}
         {!["closed", "cancelled"].includes(incident.status) ? (
-          <label className="bigbtn" style={{ display: "inline-block", marginTop: 10, cursor: "pointer" }}>
+          <label
+            className="bigbtn"
+            style={{ display: "inline-block", marginTop: 10, cursor: "pointer" }}
+          >
             {uploading ? "Laddar upp…" : "Lägg till bild"}
             <input
               type="file"
@@ -389,7 +495,11 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
           {showCancel ? (
             <div className="status-card">
               <strong>Avbryt ärendet</strong>
-              <label htmlFor="cancel-reason" className="vehicle-meta" style={{ display: "block", marginTop: 6 }}>
+              <label
+                htmlFor="cancel-reason"
+                className="vehicle-meta"
+                style={{ display: "block", marginTop: 6 }}
+              >
                 Varför vill du avbryta?
               </label>
               <input
@@ -402,7 +512,12 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
                 <button className="bigbtn" onClick={cancelCase} disabled={busy}>
                   {busy ? "Avbryter…" : "Bekräfta avbryt"}
                 </button>
-                <button className="bigbtn" style={{ opacity: 0.7 }} onClick={() => setShowCancel(false)} disabled={busy}>
+                <button
+                  className="bigbtn"
+                  style={{ opacity: 0.7 }}
+                  onClick={() => setShowCancel(false)}
+                  disabled={busy}
+                >
                   Ångra
                 </button>
               </div>
@@ -410,7 +525,13 @@ export default function CaseDetail({ params }: { params: Promise<{ id: string }>
           ) : (
             <button
               onClick={() => setShowCancel(true)}
-              style={{ background: "transparent", border: "none", color: "#B00020", cursor: "pointer", padding: 0 }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#B00020",
+                cursor: "pointer",
+                padding: 0,
+              }}
             >
               Behöver du avbryta ärendet?
             </button>

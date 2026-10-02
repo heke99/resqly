@@ -11,5 +11,5 @@ else
 fi
 test -s "$candidate"
 rg -q '^export type Database' "$candidate"
-pnpm exec prettier --parser typescript --write "$candidate" >/dev/null
+pnpm exec prettier --parser typescript --config "$database_dir/../../.prettierrc.json" --write "$candidate" >/dev/null
 mv "$candidate" "$target"

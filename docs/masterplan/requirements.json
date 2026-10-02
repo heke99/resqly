@@ -89,11 +89,17 @@
     {
       "id": "R07",
       "requirement": "Identitet, fordonsrelation och försäkringstäckning har separata tillstånd och källor.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002093718_coverage_decisions.sql",
+        "packages/database/src/workflows.ts",
+        "apps/portal-web/app/cases/[id]/page.tsx"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
+      ],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Immutable BankID provider/session proof and provider-specific insurer coverage adapters remain; coverage decisions have current local database evidence."
       ]
     },
     {
@@ -152,7 +158,8 @@
         "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
       ],
       "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
       ],
       "remainingGaps": [
         "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
@@ -170,7 +177,8 @@
         "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
       ],
       "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
       ],
       "remainingGaps": [
         "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
@@ -481,7 +489,8 @@
       ],
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-core.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
       ],
       "remainingGaps": [
         "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
@@ -769,8 +778,13 @@
       "id": "A07",
       "scenario": "Lyckad BankID men saknat täckningsbeslut.",
       "expected": "Identiteten blir verifierad; täckningen kvarstår som okänd/väntande.",
-      "status": "planned",
-      "evidence": []
+      "status": "targeted_verified_partial",
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
+      ],
+      "remainingGaps": [
+        "Coverage gate uses a verified identity fixture; end-to-end BankID provider completion still needs immutable session binding and validation."
+      ]
     },
     {
       "id": "A08",
@@ -824,8 +838,10 @@
       "expected": "Samma resultat, med leveransbar beständig kommunikation.",
       "status": "targeted_verified_partial",
       "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
-      ]
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
+      ],
+      "remainingGaps": []
     },
     {
       "id": "A15",
@@ -889,8 +905,10 @@
       "expected": "Köpost återhämtas, lease/idempotens håller och fel syns.",
       "status": "targeted_verified_partial",
       "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
-      ]
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
+      ],
+      "remainingGaps": []
     },
     {
       "id": "A24",

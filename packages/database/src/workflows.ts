@@ -99,3 +99,50 @@ export class WorkflowError extends Error {
             : 503;
   }
 }
+
+export type CoverageStatus = "pending" | "approved" | "denied" | "more_info";
+
+export async function decideIncidentCoverage(
+  db: AppSupabaseClient,
+  actor: WorkflowActor,
+  input: {
+    incidentId: string;
+    expectedVersion: number;
+    decision: CoverageStatus;
+    reason: string;
+    reference: string;
+  },
+): Promise<{
+  decision_id: string;
+  coverage_status: CoverageStatus;
+  coverage_version: number;
+  replay: boolean;
+}> {
+  const { data, error } = await db.rpc("decide_incident_coverage", {
+    p_incident: input.incidentId,
+    p_tenant: actor.tenantId,
+    p_actor_user: actor.userId ?? (null as unknown as string),
+    p_actor_api: actor.apiClientId ?? (null as unknown as string),
+    p_expected_version: input.expectedVersion,
+    p_decision: input.decision,
+    p_reason: input.reason,
+    p_reference: input.reference,
+    p_key: actor.key,
+    p_correlation_id: actor.correlationId,
+  });
+  if (error) throw new WorkflowError(error.code, error.message);
+  const result = data as unknown as {
+    decision_id: string;
+    coverage_status: CoverageStatus;
+    coverage_version: number;
+    replay: boolean;
+  };
+  if (
+    !result ||
+    typeof result.decision_id !== "string" ||
+    typeof result.coverage_version !== "number"
+  ) {
+    throw new Error("Invalid coverage decision response");
+  }
+  return result;
+}

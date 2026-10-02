@@ -1001,6 +1001,93 @@ export type Database = {
           },
         ];
       };
+      incident_coverage_decisions: {
+        Row: {
+          actor_api_client_id: string | null;
+          actor_identity: string;
+          actor_user_id: string | null;
+          correlation_id: string;
+          decided_at: string;
+          decision: string;
+          id: string;
+          incident_id: string;
+          reason: string;
+          reference: string;
+          source: string;
+          subject: NonNullable<Json>;
+          tenant_id: string;
+          version: number;
+        };
+        Insert: {
+          actor_api_client_id?: string | null;
+          actor_identity: string;
+          actor_user_id?: string | null;
+          correlation_id: string;
+          decided_at?: string;
+          decision: string;
+          id?: string;
+          incident_id: string;
+          reason: string;
+          reference: string;
+          source: string;
+          subject: NonNullable<Json>;
+          tenant_id: string;
+          version: number;
+        };
+        Update: {
+          actor_api_client_id?: string | null;
+          actor_identity?: string;
+          actor_user_id?: string | null;
+          correlation_id?: string;
+          decided_at?: string;
+          decision?: string;
+          id?: string;
+          incident_id?: string;
+          reason?: string;
+          reference?: string;
+          source?: string;
+          subject?: NonNullable<Json>;
+          tenant_id?: string;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "incident_coverage_decisions_incident_id_fkey";
+            columns: ["incident_id"];
+            isOneToOne: false;
+            referencedRelation: "incidents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "incident_coverage_decisions_incident_id_fkey";
+            columns: ["incident_id"];
+            isOneToOne: false;
+            referencedRelation: "insurance_case_console";
+            referencedColumns: ["incident_id"];
+          },
+          {
+            foreignKeyName: "incident_coverage_decisions_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "insurance_dashboard_stats";
+            referencedColumns: ["tenant_id"];
+          },
+          {
+            foreignKeyName: "incident_coverage_decisions_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "insurer_production_readiness";
+            referencedColumns: ["tenant_id"];
+          },
+          {
+            foreignKeyName: "incident_coverage_decisions_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       incident_evidence: {
         Row: {
           content_type: string;
@@ -1316,6 +1403,9 @@ export type Database = {
         Row: {
           bankid_verified: boolean;
           case_number: string | null;
+          coverage_decision_id: string | null;
+          coverage_status: string;
+          coverage_version: number;
           created_at: string;
           created_by_api_client_id: string | null;
           created_by_user_id: string | null;
@@ -1338,6 +1428,9 @@ export type Database = {
         Insert: {
           bankid_verified?: boolean;
           case_number?: string | null;
+          coverage_decision_id?: string | null;
+          coverage_status?: string;
+          coverage_version?: number;
           created_at?: string;
           created_by_api_client_id?: string | null;
           created_by_user_id?: string | null;
@@ -1360,6 +1453,9 @@ export type Database = {
         Update: {
           bankid_verified?: boolean;
           case_number?: string | null;
+          coverage_decision_id?: string | null;
+          coverage_status?: string;
+          coverage_version?: number;
           created_at?: string;
           created_by_api_client_id?: string | null;
           created_by_user_id?: string | null;
@@ -1380,6 +1476,13 @@ export type Database = {
           vehicle_id?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "fk_incident_coverage_decision";
+            columns: ["coverage_decision_id"];
+            isOneToOne: false;
+            referencedRelation: "incident_coverage_decisions";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "incidents_created_by_api_client_id_fkey";
             columns: ["created_by_api_client_id"];
@@ -6454,6 +6557,10 @@ export type Database = {
         Args: { p_id: string; p_queue: string; p_request: Json; p_token: string };
         Returns: Json;
       };
+      can_read_coverage_decision: {
+        Args: { p_incident: string; p_tenant: string };
+        Returns: boolean;
+      };
       cancel_incident_workflow: {
         Args: {
           p_actor_user: string;
@@ -6551,6 +6658,21 @@ export type Database = {
         }[];
       };
       dearmor: { Args: { "": string }; Returns: string };
+      decide_incident_coverage: {
+        Args: {
+          p_actor_api: string;
+          p_actor_user: string;
+          p_correlation_id: string;
+          p_decision: string;
+          p_expected_version: number;
+          p_incident: string;
+          p_key: string;
+          p_reason: string;
+          p_reference: string;
+          p_tenant: string;
+        };
+        Returns: Json;
+      };
       disablelongtransactions: { Args: Record<PropertyKey, never>; Returns: string };
       dispatch_eligible_candidates: {
         Args: {
@@ -6659,6 +6781,8 @@ export type Database = {
       has_offer_for_job: { Args: { p_job: string }; Returns: boolean };
       has_permission: { Args: { p_permission: string; p_tenant: string }; Returns: boolean };
       has_tenant_access: { Args: { p_tenant: string }; Returns: boolean };
+      incident_coverage_subject: { Args: { p_incident: string }; Returns: Json };
+      incident_has_approved_coverage: { Args: { p_incident: string }; Returns: boolean };
       is_assigned_driver_for_job: { Args: { p_job: string }; Returns: boolean };
       is_driver_user: { Args: { p_driver: string }; Returns: boolean };
       is_platform_admin: { Args: Record<PropertyKey, never>; Returns: boolean };

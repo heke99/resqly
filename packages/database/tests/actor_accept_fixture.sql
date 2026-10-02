@@ -7,6 +7,13 @@ insert into public.insurance_companies(id,tenant_id,name,active)
 insert into public.tow_companies(id,tenant_id,name,active)
   values(md5('f1-tow-company')::uuid,md5('f1-tow-tenant')::uuid,'F1 Test tow',true);
 insert into auth.users(id,email) values(md5('f1-customer')::uuid,'customer@f1-test.invalid');
+insert into auth.users(id,email) values(md5('f1-reviewer')::uuid,'reviewer@f1-test.invalid');
+insert into public.user_profiles(id,full_name) values(md5('f1-reviewer')::uuid,'Fixture insurer reviewer')
+  on conflict(id) do update set full_name=excluded.full_name;
+insert into public.tenant_users(tenant_id,user_id,status)
+  values(md5('f1-insurer')::uuid,md5('f1-reviewer')::uuid,'active');
+insert into public.user_roles(tenant_id,user_id,role_key)
+  values(md5('f1-insurer')::uuid,md5('f1-reviewer')::uuid,'insurance_claims_handler');
 insert into public.user_profiles(id,full_name,phone,email)
   values(md5('f1-customer')::uuid,'Fixture customer','+46700000000','customer@f1-test.invalid')
   on conflict(id) do update set full_name=excluded.full_name,phone=excluded.phone,email=excluded.email;
@@ -37,6 +44,8 @@ do $$ declare n integer; u uuid; d uuid; v uuid; i uuid; j uuid; begin
       values(i,md5('f1-insurer')::uuid,md5('f1-customer')::uuid,md5('f1-customer-vehicle')::uuid,
         md5('f1-insurer-company')::uuid,'towing','submitted',false,false);
     insert into public.incident_locations(incident_id,kind,lat,lng,address) values(i,'pickup',59.33,18.06,'Fixture pickup');
+    perform public.decide_incident_coverage(i,md5('f1-insurer')::uuid,md5('f1-reviewer')::uuid,null,0,
+      'approved','Explicit fixture insurer decision','fixture-reference-'||n,'f1-coverage-'||n,'f1-race-coverage');
     insert into public.tow_jobs(id,tenant_id,incident_id,status,payer_type) values(j,md5('f1-insurer')::uuid,i,'offered','insurance_company');
     insert into public.tow_job_offers(tenant_id,tow_job_id,driver_id,tow_company_id,tow_vehicle_id,status,expires_at)
       select md5('f1-insurer')::uuid,j,md5('f1-driver-'||g)::uuid,md5('f1-tow-company')::uuid,

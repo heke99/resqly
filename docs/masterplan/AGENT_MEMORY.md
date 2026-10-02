@@ -71,3 +71,18 @@ API/database tests pass (41/44), affected API/database/customer-web types and
 lint pass. This is transaction/command evidence, not device/browser evidence.
 Next: immutable BankID binding and a separate versioned insurance coverage
 decision before insurance dispatch. Do not claim coverage from BankID.
+
+## Coverage checkpoint
+
+Separate versioned insurer decisions now gate insurance request, dispatch,
+offer creation and accept. Read `VERIFICATION-2026-10-02-coverage.md` for scope:
+47 pgTAP assertions; 16 same-key and 16 stale-version sessions; accept/decision
+and request/accept races; existing accept and creation regressions. Portal and
+customer types/lint and database 44 Vitest tests pass. Assigned-job decision
+changes require a future explicit operational review, and provider-specific
+coverage adapters/contract conditions remain open. Next is immutable BankID
+session input/binding and durable provider callback handling.
+
+The previous atomic workflow checkpoint is persisted in GitHub commit
+`dae3dcb9ef2300d2a5a01e5e86fe4a5c63483838`, identical tree to local
+`3df3a1140ffb1f7c22bc453e5cbf67fd60bcf84f` (`a04471c84d97a4e86f589277f9eaf0e92ecab47a`).

@@ -52,6 +52,7 @@ def winner_count(results):
 
 def cleanup():
     sql("delete from public.audit_logs where metadata->>'correlation_id' like 'f1-race-%';"
+        "delete from public.request_idempotency_keys where scope='user:'||md5('f1-reviewer')::uuid;"
         f"delete from public.tenants where id='{ident('f1-insurer')}';"
         f"delete from public.tenants where id='{ident('f1-tow-tenant')}';"
         "delete from auth.users where email like '%@f1-test.invalid';")

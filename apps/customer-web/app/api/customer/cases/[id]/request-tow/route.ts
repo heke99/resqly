@@ -140,6 +140,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     created = requested.created;
   } catch (error) {
     const status = error instanceof WorkflowError ? error.status : 503;
+    if (error instanceof WorkflowError && error.message === "insurance_coverage_required") {
+      return jsonError(
+        409,
+        "Försäkringsbolaget behöver godkänna täckningen innan försäkringsbetald bärgning kan begäras.",
+      );
+    }
     return jsonError(
       status,
       status === 409
@@ -168,7 +174,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (locationReadError) return jsonError(503, "Upphämtningsplatsen kunde inte läsas just nu.");
   const location = pickLocation({}, locRow as { lat?: number | null; lng?: number | null } | null);
   if (!location) {
-    const { error } = await db.rpc(
+    const { data, error } = await db.rpc(
       "escalate_tow_job_manual_review" as never,
       {
         p_job: job.id,
@@ -179,7 +185,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         p_assign_to: null,
       } as never,
     );
-    if (error) return jsonError(503, "Ärendet kunde inte skickas till manuell hantering.");
+    if (error || (data as { error?: string } | null)?.error)
+      return jsonError(503, "Ärendet kunde inte skickas till manuell hantering.");
     return NextResponse.json(
       { tow_job_id: job.id, status: "manual_review", offered_drivers: [] },
       { status: created ? 201 : 200 },

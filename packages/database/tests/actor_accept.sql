@@ -23,7 +23,7 @@ select is((select count(*)::integer from public.tow_job_customer_shares),1,'one 
 select is((select count(*)::integer from public.tow_job_status_events),1,'one status event');
 select is((select count(*)::integer from public.audit_logs where action='tow.driver_accepted'),1,'one attributed audit');
 select is((select count(*)::integer from public.webhook_deliveries),1,'one webhook intent');
-select is((select count(*)::integer from public.notification_deliveries),1,'one email intent');
+select is((select count(*)::integer from public.notification_deliveries where tow_job_id is not null),1,'one accept email intent');
 select is((select reason from public.accept_tow_offer_for_actor(md5('f1-job-1')::uuid,md5('f1-driver-1')::uuid,md5('f1-user-1')::uuid,'retry')),'already_accepted_by_driver','retry returns winner');
 select is((select count(*)::integer from public.webhook_deliveries),1,'retry has no duplicated webhook');
 select is((select count(*)::integer from public.tow_job_customer_shares),1,'retry has no duplicated share');
