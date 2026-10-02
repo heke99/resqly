@@ -5,11 +5,12 @@ import {
   createIncidentInputSchema,
   requestTowInputSchema,
 } from "@resqly/types";
-import { AppError, normalizePhoneE164, notFound, sha256Hex } from "@resqly/utils";
+import { AppError, normalizePhoneE164, notFound } from "@resqly/utils";
 import {
   buildSignatureRecord,
   getBankidProvider,
   verifyTicWebhookSignature,
+  redactBankidValue,
   type BankidCollectResult,
   type BankidStartResult,
 } from "@resqly/bankid";
@@ -17,7 +18,7 @@ import type { ApiContext } from "../context";
 import type { RouteResult } from "../http/router";
 import type { BankidSessionRecord, IncidentRecord } from "../repo/types";
 import { runDispatchForJob } from "./dispatch";
-import { enqueueWebhookEvent, escapeHtml, sendEmail } from "../services/notifications";
+import { enqueueWebhookEvent, escapeHtml } from "../services/notifications";
 import { apiActorFields } from "../services/audit";
 
 const bankidStartSchema = z.object({
@@ -95,7 +96,13 @@ export async function startIncidentBankid(
 ): Promise<RouteResult> {
   const input = bankidStartSchema.parse(body ?? {});
   const incident = await ctx.repo.getIncident(ctx.tenantId, id);
-  if (!incident) throw notFound("Incident not found");
+  if (!incident || (ctx.userId && ctx.userId !== incident.customer_user_id))
+    throw notFound("Incident not found");
+  const payload = await ctx.repo.getBankidIncidentPayload(
+    incident.id,
+    incident.customer_user_id,
+    input.purpose,
+  );
   const provider = getBankidProvider(ctx.config.bankid);
   const started = await provider.start({
     purpose: input.purpose,
@@ -106,7 +113,7 @@ export async function startIncidentBankid(
     webhookUrl: ticWebhookUrl(ctx),
     state: bankidState(ctx.tenantId, incident.id, "auth"),
   });
-  await persistBankidSession(ctx, incident, input.purpose, started, "auth");
+  await persistBankidSession(ctx, incident, input.purpose, started, "auth", payload);
   await enqueueWebhookEvent(ctx, "incident.bankid_started", {
     incident_id: incident.id,
     case_number: incident.case_number,
@@ -122,58 +129,15 @@ export async function signIncident(
 ): Promise<RouteResult> {
   const input = bankidSignInputSchema.parse(body);
   const incident = await ctx.repo.getIncident(ctx.tenantId, id);
-  if (!incident) throw notFound("Incident not found");
+  if (!incident || (ctx.userId && ctx.userId !== incident.customer_user_id))
+    throw notFound("Incident not found");
 
   const provider = getBankidProvider(ctx.config.bankid);
-  const signedPayload = signedPayloadForIncident(incident, input.purpose);
-
-  // Preserve existing mock/test behaviour: instant complete for local tests.
-  if (provider.environment !== "production") {
-    const { sessionId, orderRef } = await provider.sign({
-      purpose: input.purpose,
-      personalNumber: input.personal_number,
-      endUserIp: ctx.ip ?? undefined,
-      userVisibleData: userVisibleBankidText(incident, input.purpose),
-      userNonVisibleData: JSON.stringify(signedPayload),
-    });
-    let result = await provider.poll(sessionId);
-    for (let i = 0; i < 5 && result.status !== "complete" && result.status !== "failed"; i++) {
-      result = await provider.poll(sessionId);
-    }
-    if (result.status !== "complete" || !result.completionData) {
-      throw new AppError("dependency_unavailable", "BankID signing did not complete");
-    }
-    const signature = buildSignatureRecord({
-      tenantId: ctx.tenantId,
-      userId: incident.customer_user_id,
-      incidentId: incident.id,
-      orderRef,
-      environment: provider.environment,
-      pepper: ctx.config.encryptionKey,
-      signedPayload,
-      completion: result.completionData,
-      ip: ctx.ip,
-    });
-    const saved = await ctx.repo.recordBankidSignature(signature);
-    await ctx.repo.setIncidentBankidVerified(incident.id);
-    await ctx.repo.recordAudit({
-      tenant_id: ctx.tenantId,
-      ...apiActorFields(ctx),
-      action: "sign",
-      entity_type: "bankid_signature",
-      entity_id: saved.id,
-      fields: ["order_ref", "signed_payload_hash"],
-    });
-    await enqueueWebhookEvent(ctx, "incident.bankid_verified", {
-      incident_id: incident.id,
-      case_number: incident.case_number,
-      order_ref: orderRef,
-    });
-    return {
-      status: 200,
-      body: { status: "complete", order_ref: orderRef, bankid_verified: true },
-    };
-  }
+  const signedPayload = await ctx.repo.getBankidIncidentPayload(
+    incident.id,
+    incident.customer_user_id,
+    input.purpose,
+  );
 
   const started = await provider.sign({
     purpose: input.purpose,
@@ -187,7 +151,30 @@ export async function signIncident(
     userVisibleDataFormat: "simpleMarkdownV1",
     userNonVisibleData: JSON.stringify(signedPayload),
   });
-  await persistBankidSession(ctx, incident, input.purpose, started, "sign", signedPayload);
+  const stored = await persistBankidSession(
+    ctx,
+    incident,
+    input.purpose,
+    started,
+    "sign",
+    signedPayload,
+  );
+  if (provider.environment !== "production") {
+    let result = await provider.poll(started.sessionId);
+    for (
+      let attempt = 0;
+      attempt < 5 && !["complete", "failed"].includes(result.status);
+      attempt++
+    ) {
+      result = await provider.poll(started.sessionId);
+    }
+    if (result.status !== "complete" || !result.completionData)
+      throw new AppError("dependency_unavailable", "BankID signing did not complete");
+    return {
+      status: 200,
+      body: { ...(await handleBankidResult(ctx, stored, result)), order_ref: started.orderRef },
+    };
+  }
   await ctx.repo.recordAudit({
     tenant_id: ctx.tenantId,
     ...apiActorFields(ctx),
@@ -207,7 +194,12 @@ export async function signIncident(
 
 export async function pollBankidSession(ctx: ApiContext, sessionId: string): Promise<RouteResult> {
   const session = await ctx.repo.getBankidSessionById(sessionId);
-  if (!session || session.tenant_id !== ctx.tenantId) throw notFound("BankID session not found");
+  if (
+    !session ||
+    session.tenant_id !== ctx.tenantId ||
+    (ctx.userId && session.user_id !== ctx.userId)
+  )
+    throw notFound("BankID session not found");
   const provider = getBankidProvider(ctx.config.bankid);
   const result = await provider.poll(session.tic_session_id ?? session.order_ref ?? sessionId);
   const handled = await handleBankidResult(ctx, session, result);
@@ -219,7 +211,12 @@ export async function collectBankidSession(
   sessionId: string,
 ): Promise<RouteResult> {
   const session = await ctx.repo.getBankidSessionById(sessionId);
-  if (!session || session.tenant_id !== ctx.tenantId) throw notFound("BankID session not found");
+  if (
+    !session ||
+    session.tenant_id !== ctx.tenantId ||
+    (ctx.userId && session.user_id !== ctx.userId)
+  )
+    throw notFound("BankID session not found");
   const provider = getBankidProvider(ctx.config.bankid);
   const result = await provider.collect(session.tic_session_id ?? session.order_ref ?? sessionId);
   const handled = await handleBankidResult(ctx, session, result);
@@ -231,7 +228,12 @@ export async function cancelBankidSession(
   sessionId: string,
 ): Promise<RouteResult> {
   const session = await ctx.repo.getBankidSessionById(sessionId);
-  if (!session || session.tenant_id !== ctx.tenantId) throw notFound("BankID session not found");
+  if (
+    !session ||
+    session.tenant_id !== ctx.tenantId ||
+    (ctx.userId && session.user_id !== ctx.userId)
+  )
+    throw notFound("BankID session not found");
   const provider = getBankidProvider(ctx.config.bankid);
   await provider.cancel(session.tic_session_id ?? session.order_ref ?? sessionId);
   await ctx.repo.updateBankidSession(session.id, {
@@ -428,7 +430,7 @@ async function persistBankidSession(
   purpose: string,
   started: BankidStartResult,
   flow: "auth" | "sign",
-  signedPayload?: Record<string, unknown>,
+  signedPayload: Record<string, unknown>,
 ): Promise<BankidSessionRecord> {
   return ctx.repo.createBankidSession({
     tenant_id: ctx.tenantId,
@@ -446,7 +448,9 @@ async function persistBankidSession(
     environment: ctx.config.bankid.env,
     purpose,
     callback_state: bankidState(ctx.tenantId, incident.id, flow),
-    raw_status: { started, flow, signedPayload },
+    bound_flow: flow,
+    bound_payload_text: JSON.stringify(signedPayload),
+    raw_status: { started: redactBankidValue(started), flow },
   });
 }
 
@@ -461,14 +465,20 @@ async function handleBankidResult(
       status: result.status,
       hint_code: result.hintCode ?? null,
       webhook_received_at: fromWebhook ? new Date().toISOString() : undefined,
-      raw_status: result.raw ?? result,
+      raw_status: redactBankidValue(result.raw ?? result),
     });
+    const current = await ctx.repo.getBankidSessionById(session.id);
+    const currentIncident =
+      current?.incident_id && current.tenant_id
+        ? await ctx.repo.getIncident(current.tenant_id, current.incident_id)
+        : null;
     return {
       session_id: session.tic_session_id ?? result.sessionId,
-      status: result.status,
-      hint_code: result.hintCode ?? null,
-      message: result.message ?? null,
-      bankid_verified: false,
+      status: current?.status ?? result.status,
+      hint_code: current?.status === "complete" ? null : (result.hintCode ?? null),
+      message: current?.status === "complete" ? null : (result.message ?? null),
+      bankid_verified: current?.status === "complete" && Boolean(currentIncident?.bankid_verified),
+      replay: current?.status === "complete",
     };
   }
 
@@ -479,10 +489,9 @@ async function handleBankidResult(
   const userId = session.user_id ?? incident?.customer_user_id;
   if (!userId) throw new AppError("internal_error", "BankID session is not linked to a user");
 
-  const signedPayload = signedPayloadForIncident(
-    incident ?? ({ id: session.incident_id, case_number: null } as IncidentRecord),
-    session.purpose,
-  );
+  if (!session.bound_payload_text)
+    throw new AppError("conflict", "BankID session must be restarted");
+  const signedPayload = JSON.parse(session.bound_payload_text) as Record<string, unknown>;
   const signature = buildSignatureRecord({
     tenantId: session.tenant_id ?? ctx.tenantId,
     userId,
@@ -490,7 +499,7 @@ async function handleBankidResult(
     orderRef: result.orderRef,
     environment: ctx.config.bankid.env,
     pepper: ctx.config.encryptionKey,
-    signedPayload,
+    signedPayload: session.bound_payload_text,
     completion: result.completionData,
     ip: ctx.ip,
   });
@@ -508,24 +517,12 @@ async function handleBankidResult(
       completedAt: result.completedAt ?? new Date().toISOString(),
       sessionId: result.sessionId,
       orderRef: result.orderRef,
-      raw: result.raw ?? result,
+      raw: redactBankidValue(result.raw ?? result),
     },
     fromWebhook,
   });
 
-  // Side effects are emitted only by the caller that won the database lock.
-  if (completed.newlyProcessed && incident) {
-    // The incident.bankid_verified webhook outbox row is inserted inside the
-    // complete_bankid_session transaction shared by customer web and API.
-    const contact = await ctx.repo.getCustomerContact(incident.id);
-    await sendEmail(ctx, {
-      to: contact?.email,
-      subject: `BankID klart för ärende ${incident.case_number ?? incident.id}`,
-      html: `<p>Din BankID-verifiering är klar.</p><p>Ärende: ${escapeHtml(incident.case_number ?? incident.id)}</p>`,
-      incidentId: incident.id,
-      dedupeKey: `email:bankid_verified:${incident.id}`,
-    });
-  }
+  // Audit and webhook/email intents are committed inside the completion RPC.
 
   return {
     session_id: session.tic_session_id ?? result.sessionId,
@@ -550,20 +547,6 @@ function publicStartBody(started: BankidStartResult): Record<string, unknown> {
   };
 }
 
-function signedPayloadForIncident(
-  incident: Pick<IncidentRecord, "id" | "case_number">,
-  purpose: string,
-): Record<string, unknown> {
-  return {
-    incident_id: incident.id,
-    case_number: incident.case_number,
-    purpose,
-    payload_hash: sha256Hex(
-      JSON.stringify({ incident_id: incident.id, case_number: incident.case_number, purpose }),
-    ),
-  };
-}
-
 function userVisibleBankidText(incident: IncidentRecord, purpose: string): string {
   return [
     `# Resqly bärgningsärende`,
@@ -577,6 +560,7 @@ function userVisibleBankidText(incident: IncidentRecord, purpose: string): strin
 function requiredEndUserIp(ctx: ApiContext): string {
   const forwarded = ctx.headers?.["x-forwarded-for"]?.split(",")[0]?.trim();
   const ip = forwarded || ctx.ip;
+  if (!ip && ctx.config.bankid.env !== "production") return "127.0.0.1";
   if (!ip) throw new AppError("bad_request", "End-user IP is required for BankID");
   return ip;
 }

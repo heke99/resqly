@@ -193,6 +193,11 @@ export type Database = {
       bankid_sessions: {
         Row: {
           auto_start_token: string | null;
+          bound_flow: string | null;
+          bound_object_version: number | null;
+          bound_payload_hash: string | null;
+          bound_payload_text: string | null;
+          bound_policy_id: string | null;
           callback_state: string | null;
           completed_at: string | null;
           completion_processed_at: string | null;
@@ -217,6 +222,11 @@ export type Database = {
         };
         Insert: {
           auto_start_token?: string | null;
+          bound_flow?: string | null;
+          bound_object_version?: number | null;
+          bound_payload_hash?: string | null;
+          bound_payload_text?: string | null;
+          bound_policy_id?: string | null;
           callback_state?: string | null;
           completed_at?: string | null;
           completion_processed_at?: string | null;
@@ -241,6 +251,11 @@ export type Database = {
         };
         Update: {
           auto_start_token?: string | null;
+          bound_flow?: string | null;
+          bound_object_version?: number | null;
+          bound_payload_hash?: string | null;
+          bound_payload_text?: string | null;
+          bound_policy_id?: string | null;
           callback_state?: string | null;
           completed_at?: string | null;
           completion_processed_at?: string | null;
@@ -264,6 +279,13 @@ export type Database = {
           webhook_received_at?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "bankid_sessions_bound_policy_id_fkey";
+            columns: ["bound_policy_id"];
+            isOneToOne: false;
+            referencedRelation: "vehicle_insurance_policies";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "bankid_sessions_tenant_id_fkey";
             columns: ["tenant_id"];
@@ -310,6 +332,7 @@ export type Database = {
       };
       bankid_signatures: {
         Row: {
+          bankid_session_id: string | null;
           bankid_status: Database["public"]["Enums"]["bankid_status"];
           completed_at: string | null;
           created_at: string;
@@ -319,9 +342,11 @@ export type Database = {
           id: string;
           incident_id: string | null;
           ip: string | null;
+          object_version: number | null;
           ocsp_response: string | null;
           order_ref: string;
           personal_number_hash: string;
+          proof_kind: string | null;
           raw_completion: Json | null;
           signature: string;
           signed_payload_hash: string;
@@ -332,6 +357,7 @@ export type Database = {
           user_visible_data_hash: string | null;
         };
         Insert: {
+          bankid_session_id?: string | null;
           bankid_status: Database["public"]["Enums"]["bankid_status"];
           completed_at?: string | null;
           created_at?: string;
@@ -341,9 +367,11 @@ export type Database = {
           id?: string;
           incident_id?: string | null;
           ip?: string | null;
+          object_version?: number | null;
           ocsp_response?: string | null;
           order_ref: string;
           personal_number_hash: string;
+          proof_kind?: string | null;
           raw_completion?: Json | null;
           signature: string;
           signed_payload_hash: string;
@@ -354,6 +382,7 @@ export type Database = {
           user_visible_data_hash?: string | null;
         };
         Update: {
+          bankid_session_id?: string | null;
           bankid_status?: Database["public"]["Enums"]["bankid_status"];
           completed_at?: string | null;
           created_at?: string;
@@ -363,9 +392,11 @@ export type Database = {
           id?: string;
           incident_id?: string | null;
           ip?: string | null;
+          object_version?: number | null;
           ocsp_response?: string | null;
           order_ref?: string;
           personal_number_hash?: string;
+          proof_kind?: string | null;
           raw_completion?: Json | null;
           signature?: string;
           signed_payload_hash?: string;
@@ -376,6 +407,13 @@ export type Database = {
           user_visible_data_hash?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "bankid_signatures_bankid_session_id_fkey";
+            columns: ["bankid_session_id"];
+            isOneToOne: false;
+            referencedRelation: "bankid_sessions";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "bankid_signatures_tenant_id_fkey";
             columns: ["tenant_id"];
@@ -1403,6 +1441,7 @@ export type Database = {
         Row: {
           bankid_verified: boolean;
           case_number: string | null;
+          content_version: number;
           coverage_decision_id: string | null;
           coverage_status: string;
           coverage_version: number;
@@ -1428,6 +1467,7 @@ export type Database = {
         Insert: {
           bankid_verified?: boolean;
           case_number?: string | null;
+          content_version?: number;
           coverage_decision_id?: string | null;
           coverage_status?: string;
           coverage_version?: number;
@@ -1453,6 +1493,7 @@ export type Database = {
         Update: {
           bankid_verified?: boolean;
           case_number?: string | null;
+          content_version?: number;
           coverage_decision_id?: string | null;
           coverage_status?: string;
           coverage_version?: number;
@@ -3068,6 +3109,7 @@ export type Database = {
       tenant_settings: {
         Row: {
           allow_marketplace_fallback: boolean;
+          bankid_environment: Database["public"]["Enums"]["bankid_env"];
           bankid_required_for_claims: boolean;
           bankid_required_for_tow: boolean;
           default_dispatch_strategy: string;
@@ -3084,6 +3126,7 @@ export type Database = {
         };
         Insert: {
           allow_marketplace_fallback?: boolean;
+          bankid_environment?: Database["public"]["Enums"]["bankid_env"];
           bankid_required_for_claims?: boolean;
           bankid_required_for_tow?: boolean;
           default_dispatch_strategy?: string;
@@ -3100,6 +3143,7 @@ export type Database = {
         };
         Update: {
           allow_marketplace_fallback?: boolean;
+          bankid_environment?: Database["public"]["Enums"]["bankid_env"];
           bankid_required_for_claims?: boolean;
           bankid_required_for_tow?: boolean;
           default_dispatch_strategy?: string;
@@ -5552,6 +5596,7 @@ export type Database = {
           id: string;
           insurance_company_id: string;
           is_active: boolean;
+          link_version: number;
           policy_number: string | null;
           status: string;
           tenant_id: string | null;
@@ -5569,6 +5614,7 @@ export type Database = {
           id?: string;
           insurance_company_id: string;
           is_active?: boolean;
+          link_version?: number;
           policy_number?: string | null;
           status?: string;
           tenant_id?: string | null;
@@ -5586,6 +5632,7 @@ export type Database = {
           id?: string;
           insurance_company_id?: string;
           is_active?: boolean;
+          link_version?: number;
           policy_number?: string | null;
           status?: string;
           tenant_id?: string | null;
@@ -6553,6 +6600,8 @@ export type Database = {
             Returns: string;
           };
       allocate_case_number: { Args: { p_scope?: string; p_tenant: string }; Returns: string };
+      bankid_incident_payload: { Args: { p_incident: string; p_purpose: string }; Returns: Json };
+      bankid_policy_payload: { Args: { p_policy: string; p_purpose: string }; Returns: Json };
       bind_delivery_request: {
         Args: { p_id: string; p_queue: string; p_request: Json; p_token: string };
         Returns: Json;
@@ -6783,6 +6832,7 @@ export type Database = {
       has_tenant_access: { Args: { p_tenant: string }; Returns: boolean };
       incident_coverage_subject: { Args: { p_incident: string }; Returns: Json };
       incident_has_approved_coverage: { Args: { p_incident: string }; Returns: boolean };
+      incident_has_current_bankid_proof: { Args: { p_incident: string }; Returns: boolean };
       is_assigned_driver_for_job: { Args: { p_job: string }; Returns: boolean };
       is_driver_user: { Args: { p_driver: string }; Returns: boolean };
       is_platform_admin: { Args: Record<PropertyKey, never>; Returns: boolean };
@@ -6867,6 +6917,10 @@ export type Database = {
       };
       postgis_version: { Args: Record<PropertyKey, never>; Returns: string };
       postgis_wagyu_version: { Args: Record<PropertyKey, never>; Returns: string };
+      prepare_bankid_payload: {
+        Args: { p_incident: string; p_policy: string; p_purpose: string; p_user: string };
+        Returns: Json;
+      };
       provision_tow_driver: {
         Args: {
           p_email: string;

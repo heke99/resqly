@@ -102,6 +102,22 @@ export class WorkflowError extends Error {
 
 export type CoverageStatus = "pending" | "approved" | "denied" | "more_info";
 
+export async function prepareBankidPayload(
+  db: AppSupabaseClient,
+  target: { incidentId?: string; policyId?: string; userId: string; purpose: string },
+): Promise<Record<string, unknown>> {
+  const { data, error } = await db.rpc("prepare_bankid_payload", {
+    p_incident: target.incidentId ?? (null as unknown as string),
+    p_policy: target.policyId ?? (null as unknown as string),
+    p_user: target.userId,
+    p_purpose: target.purpose,
+  });
+  if (error) throw new WorkflowError(error.code, error.message);
+  if (!data || typeof data !== "object" || Array.isArray(data))
+    throw new Error("Invalid BankID payload");
+  return data as Record<string, unknown>;
+}
+
 export async function decideIncidentCoverage(
   db: AppSupabaseClient,
   actor: WorkflowActor,

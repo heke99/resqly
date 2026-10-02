@@ -14,9 +14,7 @@
         "apps/customer-web/app/api/customer/cases/route.ts",
         "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
       ],
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
-      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-workflows.md"],
       "remainingGaps": [
         "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
       ]
@@ -32,9 +30,7 @@
         "apps/customer-web/app/api/customer/cases/route.ts",
         "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
       ],
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
-      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-workflows.md"],
       "remainingGaps": [
         "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
       ]
@@ -45,9 +41,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R04",
@@ -55,9 +49,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R05",
@@ -69,9 +61,7 @@
         "apps/api/src/handlers/tow.ts",
         "apps/workers/src/jobs/delivery-lease-db.ts"
       ],
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
-      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
       "remainingGaps": [
         "Central API driver guard; active DB actor checks. Remaining device/storage/realtime paths still need complete inventory."
       ]
@@ -79,11 +69,17 @@
     {
       "id": "R06",
       "requirement": "BankID-session binds till användare, tenant, objekt, syfte och rätt innehållsversion. Callback från klient räcker inte som slutförandebevis.",
-      "status": "planned",
-      "sourcePaths": [],
-      "evidence": [],
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002100225_immutable_bankid_binding.sql",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/bankid/_lib.ts"
+      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-bankid.md"],
       "remainingGaps": [
-        "Needs current implementation and version-bound validation."
+        "Real provider signature/certificate validation and first identity enrollment policy remain.",
+        "Location, destination, evidence and consent amendments are not yet bound into these object versions.",
+        "Browser/native-device/Auth/Storage/Realtime end-to-end validation remains."
       ]
     },
     {
@@ -96,10 +92,13 @@
         "apps/portal-web/app/cases/[id]/page.tsx"
       ],
       "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
       ],
       "remainingGaps": [
-        "Immutable BankID provider/session proof and provider-specific insurer coverage adapters remain; coverage decisions have current local database evidence."
+        "Real provider signature/certificate validation and first identity enrollment policy remain.",
+        "Location, destination, evidence and consent amendments are not yet bound into these object versions.",
+        "Browser/native-device/Auth/Storage/Realtime end-to-end validation remains."
       ]
     },
     {
@@ -113,7 +112,8 @@
         "apps/workers/src/jobs/delivery-lease-db.ts"
       ],
       "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
       ],
       "remainingGaps": [
         "Legacy accept disabled for all API roles; actor-bound accept and delivery RPCs service-only. Remaining SECURITY DEFINER inventory open."
@@ -129,9 +129,7 @@
         "apps/api/src/handlers/tow.ts",
         "apps/workers/src/jobs/delivery-lease-db.ts"
       ],
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
-      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
       "remainingGaps": [
         "Current driver contact share and stale-offer API reads restricted. Complete column/Storage/Realtime inventory remains."
       ]
@@ -142,9 +140,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R11",
@@ -159,7 +155,8 @@
       ],
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-workflows.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
       ],
       "remainingGaps": [
         "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
@@ -178,7 +175,8 @@
       ],
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-workflows.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
       ],
       "remainingGaps": [
         "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
@@ -190,9 +188,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R14",
@@ -200,9 +196,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R15",
@@ -210,9 +204,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R16",
@@ -220,9 +212,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R17",
@@ -230,9 +220,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R18",
@@ -244,9 +232,7 @@
         "apps/api/src/handlers/tow.ts",
         "apps/workers/src/jobs/delivery-lease-db.ts"
       ],
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
-      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
       "remainingGaps": [
         "Active driver/member/company/tenant, vehicle, capability and approval checked under locks. Coverage/price consent and geographic rules remain."
       ]
@@ -261,9 +247,7 @@
         "apps/api/src/handlers/tow.ts",
         "apps/workers/src/jobs/delivery-lease-db.ts"
       ],
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
-      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
       "remainingGaps": [
         "Unique live-driver and live-vehicle indexes and independent-session resource races verified."
       ]
@@ -278,9 +262,7 @@
         "apps/api/src/handlers/tow.ts",
         "apps/workers/src/jobs/delivery-lease-db.ts"
       ],
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
-      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
       "remainingGaps": [
         "Accept locks job, driver, vehicle, then relationships; unique indexes guard direct writes. Manual reallocation remains."
       ]
@@ -291,9 +273,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R22",
@@ -305,9 +285,7 @@
         "apps/api/src/handlers/tow.ts",
         "apps/workers/src/jobs/delivery-lease-db.ts"
       ],
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
-      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
       "remainingGaps": [
         "Current winning actor retry returns same assignment without duplicate shares/events/audit/outbox."
       ]
@@ -318,9 +296,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R24",
@@ -328,9 +304,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R25",
@@ -338,9 +312,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R26",
@@ -348,9 +320,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R27",
@@ -358,9 +328,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R28",
@@ -368,9 +336,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R29",
@@ -378,9 +344,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R30",
@@ -388,9 +352,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R31",
@@ -398,9 +360,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R32",
@@ -408,9 +368,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R33",
@@ -418,9 +376,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R34",
@@ -428,9 +384,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R35",
@@ -438,9 +392,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R36",
@@ -448,9 +400,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R37",
@@ -458,9 +408,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R38",
@@ -468,9 +416,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R39",
@@ -490,7 +436,8 @@
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-core.md",
         "docs/masterplan/VERIFICATION-2026-10-02-workflows.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
       ],
       "remainingGaps": [
         "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
@@ -506,9 +453,7 @@
         "apps/api/src/handlers/tow.ts",
         "apps/workers/src/jobs/delivery-lease-db.ts"
       ],
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
-      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
       "remainingGaps": [
         "Notification/email/webhook claim, fencing and crash reclaim implemented with attempts/backoff and persisted requests. Push and provider reconciliation remain."
       ]
@@ -519,9 +464,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R42",
@@ -529,9 +472,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R43",
@@ -539,9 +480,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R44",
@@ -549,9 +488,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R45",
@@ -559,9 +496,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R46",
@@ -569,9 +504,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R47",
@@ -579,9 +512,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R48",
@@ -589,9 +520,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R49",
@@ -599,9 +528,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R50",
@@ -614,9 +541,7 @@
         "apps/customer-web/app/api/customer/cases/route.ts",
         "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
       ],
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
-      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-workflows.md"],
       "remainingGaps": [
         "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
       ]
@@ -627,9 +552,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R52",
@@ -637,9 +560,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R53",
@@ -647,9 +568,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R54",
@@ -657,9 +576,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R55",
@@ -667,9 +584,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R56",
@@ -677,9 +592,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R57",
@@ -687,9 +600,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R58",
@@ -697,9 +608,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R59",
@@ -707,9 +616,7 @@
       "status": "planned",
       "sourcePaths": [],
       "evidence": [],
-      "remainingGaps": [
-        "Needs current implementation and version-bound validation."
-      ]
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
     },
     {
       "id": "R60",
@@ -722,7 +629,8 @@
         "apps/workers/src/jobs/delivery-lease-db.ts"
       ],
       "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
       ],
       "remainingGaps": [
         "Version-scoped PostgreSQL replay/real sessions, API/unit/source checks documented; full release and provider/device evidence still open."
@@ -757,7 +665,8 @@
       "expected": "Nekas och inga affärsrader ändras.",
       "status": "targeted_verified_partial",
       "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
       ]
     },
     {
@@ -771,8 +680,13 @@
       "id": "A06",
       "scenario": "BankID-resultat från fel användare/ärende eller gammal version.",
       "expected": "Kan inte verifiera det aktuella objektet.",
-      "status": "planned",
-      "evidence": []
+      "status": "targeted_verified_partial",
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-bankid.md"],
+      "remainingGaps": [
+        "Real provider signature/certificate validation and first identity enrollment policy remain.",
+        "Location, destination, evidence and consent amendments are not yet bound into these object versions.",
+        "Browser/native-device/Auth/Storage/Realtime end-to-end validation remains."
+      ]
     },
     {
       "id": "A07",
@@ -780,10 +694,13 @@
       "expected": "Identiteten blir verifierad; täckningen kvarstår som okänd/väntande.",
       "status": "targeted_verified_partial",
       "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
       ],
       "remainingGaps": [
-        "Coverage gate uses a verified identity fixture; end-to-end BankID provider completion still needs immutable session binding and validation."
+        "Real provider signature/certificate validation and first identity enrollment policy remain.",
+        "Location, destination, evidence and consent amendments are not yet bound into these object versions.",
+        "Browser/native-device/Auth/Storage/Realtime end-to-end validation remains."
       ]
     },
     {
@@ -819,18 +736,14 @@
       "scenario": "Två verkliga DB-sessioner, sedan stresstest med 100 samtidiga accepter på samma jobb.",
       "expected": "Exakt en tilldelning, rätt vinnare, inga dubbla shares/events/outbox-events.",
       "status": "targeted_verified_partial",
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
-      ]
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"]
     },
     {
       "id": "A13",
       "scenario": "Två samtidiga jobb försöker boka samma förare respektive samma bärgningsbil.",
       "expected": "Högst ett reserverar respektive resurs.",
       "status": "targeted_verified_partial",
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-core.md"
-      ]
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"]
     },
     {
       "id": "A14",
@@ -839,7 +752,8 @@
       "status": "targeted_verified_partial",
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-core.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
       ],
       "remainingGaps": []
     },
@@ -906,7 +820,8 @@
       "status": "targeted_verified_partial",
       "evidence": [
         "docs/masterplan/VERIFICATION-2026-10-02-core.md",
-        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md"
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md"
       ],
       "remainingGaps": []
     },
@@ -950,9 +865,7 @@
       "scenario": "Prefixbyte och samtidiga ärendeskapanden för white-label.",
       "expected": "Unika stabila nummer, historik oförändrad, rätt branding utan behörighetsläcka.",
       "status": "targeted_verified_partial",
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
-      ]
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-workflows.md"]
     },
     {
       "id": "A30",
@@ -1015,9 +928,7 @@
       "scenario": "Samma försäkringsscenario via webb, mobil, portal och partner-API.",
       "expected": "Samma domänregler, behörigheter och affärsresultat.",
       "status": "targeted_verified_partial",
-      "evidence": [
-        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md"
-      ]
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-workflows.md"]
     },
     {
       "id": "A39",

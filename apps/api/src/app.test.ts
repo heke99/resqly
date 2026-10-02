@@ -202,6 +202,39 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     expect(body.status).toBe("awaiting_bankid");
   });
 
+  it("persists the exact BankID start payload and replays provider completion once", async () => {
+    const { incident_id: id } = (await createIncident()).body as { incident_id: string };
+    const signed = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/incidents/${id}/bankid/sign`,
+      headers: auth(),
+      body: { purpose: "Sign towing case", personal_number: "199001011234" },
+    });
+    expect(signed.status).toBe(200);
+    const session = [...env.repo.bankidSessions.values()].find((row) => row.incident_id === id)!;
+    expect(JSON.parse(session.bound_payload_text!)).toMatchObject({
+      incident_id: id,
+      customer_user_id: CUSTOMER_USER_ID,
+      object_version: 1,
+      purpose: "Sign towing case",
+    });
+    expect(env.repo.bankidSignatures[0]?.signed_payload_hash).toBe(
+      sha256Hex(session.bound_payload_text!),
+    );
+    expect(JSON.stringify(env.repo.bankidSignatures)).not.toContain("199001011234");
+    const replay = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/bankid/sessions/${session.id}/poll`,
+      headers: auth(),
+    });
+    expect(replay.status).toBe(200);
+    expect((replay.body as { replay: boolean }).replay).toBe(true);
+    expect(env.repo.bankidSignatures).toHaveLength(1);
+    expect(env.repo.auditLogs.filter((row) => row.entity_type === "bankid_signature")).toHaveLength(
+      1,
+    );
+  });
+
   it("blocks request-tow until BankID is verified, then succeeds and dispatches", async () => {
     const created = (await createIncident()).body as { incident_id: string };
     const id = created.incident_id;

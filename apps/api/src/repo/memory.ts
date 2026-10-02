@@ -485,8 +485,34 @@ export class MemoryRepo implements ApiRepo {
   async updateBankidSession(sessionId: string, patch: Record<string, unknown>) {
     const rec = this.bankidSessions.get(sessionId);
     if (!rec) return;
-    Object.assign(rec, patch);
+    if (
+      !this.completedBankidSessions.has(rec.id) &&
+      !["failed", "cancelled", "expired"].includes(rec.status)
+    )
+      Object.assign(rec, patch);
     if (rec.tic_session_id) this.bankidSessions.set(rec.tic_session_id, rec);
+  }
+  async getBankidIncidentPayload(incidentId: string, userId: string, purpose: string) {
+    const incident = this.incidents.get(incidentId);
+    if (!incident || incident.customer_user_id !== userId)
+      throw new Error("bankid_target_forbidden");
+    return {
+      incident_id: incident.id,
+      tenant_id: incident.tenant_id,
+      customer_user_id: incident.customer_user_id,
+      vehicle_id: incident.vehicle_id,
+      insurance_company_id: incident.insurance_company_id,
+      case_number: incident.case_number,
+      type: incident.type,
+      problem_type: incident.problem_type,
+      damage_type: incident.damage_type,
+      description: incident.description,
+      is_drivable: incident.is_drivable ?? null,
+      needs_tow: incident.needs_tow ?? null,
+      occurred_at: incident.occurred_at ?? null,
+      object_version: incident.content_version ?? 1,
+      purpose,
+    };
   }
   async getBankidSessionByTicSessionId(sessionId: string): Promise<BankidSessionRecord | null> {
     const rec = this.bankidSessions.get(sessionId);
@@ -523,6 +549,13 @@ export class MemoryRepo implements ApiRepo {
       this.completedBankidSessions.add(session.id);
       session.status = "complete";
       if (session.incident_id) await this.setIncidentBankidVerified(session.incident_id);
+      this.auditLogs.push({
+        tenant_id: session.tenant_id,
+        actor_user_id: session.user_id,
+        action: "sign",
+        entity_type: "bankid_signature",
+        entity_id: saved.id,
+      });
     }
     return {
       newlyProcessed: !already,

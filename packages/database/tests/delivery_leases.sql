@@ -1,6 +1,8 @@
 begin;
 select plan(24);
 \ir actor_accept_fixture.sql
+-- Coverage setup also enqueues fixture emails. Isolate this queue test.
+update public.notification_deliveries set status='sent' where tenant_id=md5('f1-insurer')::uuid;
 
 select ok(not has_function_privilege('anon','public.claim_delivery_batch(text,text,integer,integer,text[])','execute'),'anonymous cannot claim');
 select ok(not has_function_privilege('authenticated','public.claim_delivery_batch(text,text,integer,integer,text[])','execute'),'client cannot claim');

@@ -86,3 +86,27 @@ session input/binding and durable provider callback handling.
 The previous atomic workflow checkpoint is persisted in GitHub commit
 `dae3dcb9ef2300d2a5a01e5e86fe4a5c63483838`, identical tree to local
 `3df3a1140ffb1f7c22bc453e5cbf67fd60bcf84f` (`a04471c84d97a4e86f589277f9eaf0e92ecab47a`).
+
+
+## BankID and frozen-core checkpoint
+
+Immutable session input and object versions now gate completion and current
+identity proof. Read `VERIFICATION-2026-10-02-bankid.md`: 47 pgTAP assertions,
+16 simultaneous completion sessions and exact one-set side effects. Coverage
+stays separate. Real provider/certificate/first-enrollment policy, durable
+callback inbox and location/evidence/consent amendments remain open.
+
+Full candidate checks on 2026-10-02 pass: 91 CI tasks, 253 Vitest tests in
+19 packages, 32-migration fresh local replay, 217 pgTAP assertions, all five
+independent-session scripts, and four Expo/Hermes exports (both apps on iOS
+and Android). This is build/command evidence, not native-device or live-provider
+validation. No live migrations, activation or merge was performed.
+
+Next independent work: durable signed callback inbox; complete insurer
+candidate pagination and location/ETA freshness; push intents/recovery;
+then resumable onboarding, explicit private quote consent and the remaining
+F2–F9 work. Preserve the full masterplan and its separate business decisions.
+
+Coverage was persisted in GitHub `f924ef93001756b7bfd2eae6ede7cf0a7353fee8`,
+identical tree to local `1a9c56dbca68c9682da8cbdab01a77bfcf54996b`
+(`6ba626eba57ee01eef9941cfaa6849ce1b57cfdc`).

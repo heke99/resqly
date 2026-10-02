@@ -64,6 +64,10 @@ export interface IncidentRecord {
   problem_type: string | null;
   damage_type: string | null;
   description: string | null;
+  content_version?: number;
+  is_drivable?: boolean | null;
+  needs_tow?: boolean | null;
+  occurred_at?: string | null;
 }
 
 export interface TowJobRecord {
@@ -193,6 +197,9 @@ export interface BankidSessionRecord {
   environment: string;
   purpose: string;
   raw_status?: unknown;
+  bound_payload_text?: string | null;
+  bound_flow?: "auth" | "sign" | null;
+  bound_object_version?: number | null;
 }
 
 export interface TenantWebhookTarget {
@@ -277,6 +284,11 @@ export interface ApiRepo {
   setIncidentBankidVerified(id: string): Promise<void>;
   addEvidence(row: Record<string, unknown>): Promise<{ id: string }>;
   createBankidSession(row: Record<string, unknown>): Promise<BankidSessionRecord>;
+  getBankidIncidentPayload(
+    incidentId: string,
+    userId: string,
+    purpose: string,
+  ): Promise<Record<string, unknown>>;
   updateBankidSession(sessionId: string, patch: Record<string, unknown>): Promise<void>;
   getBankidSessionByTicSessionId(sessionId: string): Promise<BankidSessionRecord | null>;
   getBankidSessionById(sessionId: string): Promise<BankidSessionRecord | null>;

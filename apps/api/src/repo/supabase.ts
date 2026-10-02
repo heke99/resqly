@@ -2,6 +2,7 @@ import {
   allocateCaseNumber,
   createIncidentWorkflow,
   requestTowWorkflow,
+  WorkflowError,
   type WorkflowActor,
   type AppSupabaseClient,
 } from "@resqly/database";
@@ -277,8 +278,18 @@ export class SupabaseRepo implements ApiRepo {
       .insert(row as never)
       .select("*")
       .single();
-    if (error) throw new Error(error.message);
+    if (error) throw new WorkflowError(error.code, error.message);
     return data as BankidSessionRecord;
+  }
+  async getBankidIncidentPayload(incidentId: string, userId: string, purpose: string) {
+    const { data, error } = await this.db.rpc("prepare_bankid_payload", {
+      p_incident: incidentId,
+      p_policy: null as unknown as string,
+      p_user: userId,
+      p_purpose: purpose,
+    });
+    if (error) throw new WorkflowError(error.code, error.message);
+    return data as Record<string, unknown>;
   }
   async updateBankidSession(sessionId: string, patch: Record<string, unknown>): Promise<void> {
     const { error } = await this.table("bankid_sessions")
@@ -328,7 +339,7 @@ export class SupabaseRepo implements ApiRepo {
         p_from_webhook: input.fromWebhook,
       } as never,
     );
-    if (error) throw new Error(error.message);
+    if (error) throw new WorkflowError(error.code, error.message);
     const row = (Array.isArray(data) ? data[0] : data) as {
       newly_processed?: boolean;
       signature_id?: string | null;

@@ -37,10 +37,11 @@ create temporary table decision as select pg_temp.decide(md5('coverage-case')::u
 select is((select coverage_status from public.incidents where id=md5('coverage-case')::uuid),'approved','authorized manual approval');
 select is((select coverage_version::integer from public.incidents where id=md5('coverage-case')::uuid),1,'version advances once');
 select ok(public.incident_has_approved_coverage(md5('coverage-case')::uuid),'approval has matching proof');
+savepoint coverage_subject_amendment;
 update public.incidents set description='Changed assessment facts' where id=md5('coverage-case')::uuid;
 select ok(not public.incident_has_approved_coverage(md5('coverage-case')::uuid),'changed assessment facts invalidate the old approval');
-update public.incidents set description=null where id=md5('coverage-case')::uuid;
-select ok(public.incident_has_approved_coverage(md5('coverage-case')::uuid),'matching immutable assessment facts are approved');
+rollback to coverage_subject_amendment;
+select ok(public.incident_has_approved_coverage(md5('coverage-case')::uuid),'rollback restores the unchanged approved subject');
 select is(pg_temp.decide(md5('coverage-case')::uuid,0,'approved','coverage-one')->>'decision_id',
   (select result->>'decision_id' from decision),'same key returns same immutable decision');
 select is((select count(*)::integer from public.incident_coverage_decisions where incident_id=md5('coverage-case')::uuid),1,'retry adds no history');
@@ -52,6 +53,8 @@ select throws_ok($$select pg_temp.decide(md5('coverage-case')::uuid,0,'denied','
   '23505','coverage_version_conflict','stale reviewer cannot overwrite newer decision');
 select throws_ok($$update public.incident_coverage_decisions set reason='Changed' where incident_id=md5('coverage-case')::uuid$$,
   '23514','coverage_history_immutable','even an owner update cannot rewrite history');
+-- This suite isolates coverage. Current BankID proof is tested separately.
+update public.incidents set requires_bankid=false where id=md5('coverage-case')::uuid;
 select lives_ok($$select public.request_tow_workflow(md5('coverage-case')::uuid,md5('f1-insurer')::uuid,
   md5('f1-customer')::uuid,null,'{"pickup":{"lat":59.3,"lng":18.1}}','approved-request','test')$$,'approved coverage allows request');
 select is((select count(*)::integer from public.tow_jobs where incident_id=md5('coverage-case')::uuid),1,'one approved job');
