@@ -14,11 +14,41 @@ function setup() {
   repo.seedTenant({ id: "t-if", slug: "if", name: "If", case_number_prefix: "IF" });
   repo.seedApiClient("t-if", sha256Hex(API_KEY));
   repo.candidates = [
-    { driverId: "drv1", towCompanyId: "tc1", towVehicleId: "truck1", dutyStatus: "on_duty", distanceMeters: 1000, etaSeconds: 300, insuranceAgreementId: "agr-if-tc1", inPreferredNetwork: true },
-    { driverId: "drv2", towCompanyId: "tc1", towVehicleId: "truck2", dutyStatus: "on_duty", distanceMeters: 4000, etaSeconds: 700, insuranceAgreementId: "agr-if-tc1", inPreferredNetwork: true },
+    {
+      driverId: "drv1",
+      towCompanyId: "tc1",
+      towVehicleId: "truck1",
+      dutyStatus: "on_duty",
+      distanceMeters: 1000,
+      etaSeconds: 300,
+      insuranceAgreementId: "agr-if-tc1",
+      inPreferredNetwork: true,
+    },
+    {
+      driverId: "drv2",
+      towCompanyId: "tc1",
+      towVehicleId: "truck2",
+      dutyStatus: "on_duty",
+      distanceMeters: 4000,
+      etaSeconds: 700,
+      insuranceAgreementId: "agr-if-tc1",
+      inPreferredNetwork: true,
+    },
   ];
   repo.driverUsers.set("user-drv1", "drv1");
   repo.driverUsers.set("user-drv2", "drv2");
+  repo.seedDriverProfile({
+    id: "drv1",
+    user_id: "user-drv1",
+    is_online: true,
+    duty_status: "on_duty",
+  });
+  repo.seedDriverProfile({
+    id: "drv2",
+    user_id: "user-drv2",
+    is_online: true,
+    duty_status: "on_duty",
+  });
   const app = new App({
     repo,
     maps: { routesEnabled: false },
@@ -44,6 +74,23 @@ const driverAuth = () => ({ "x-driver-authorization": `Bearer ${DRIVER_TOKEN}` }
 const driver2Auth = () => ({ "x-driver-authorization": `Bearer ${DRIVER2_TOKEN}` });
 
 describe("API auth", () => {
+  it.each([
+    ["GET", "/api/v1/drivers/me/offers"],
+    ["GET", "/api/v1/drivers/me/jobs"],
+    ["POST", "/api/v1/drivers/me/device"],
+    ["POST", "/api/v1/drivers/me/online"],
+    ["POST", "/api/v1/drivers/me/location"],
+    ["GET", "/api/v1/tow/jobs/old-job"],
+    ["POST", "/api/v1/tow/jobs/old-job/status"],
+  ])("blocks suspended driver session at %s %s", async (method, path) => {
+    const { app, repo } = setup();
+    repo.seedDriverProfile({ id: "drv1", user_id: "user-drv1", status: "inactive" });
+    const response = await app.handle({ method, path, headers: driverAuth(), body: {} });
+    expect(response.status).toBe(403);
+    expect(repo.devices).toHaveLength(0);
+    expect(repo.auditLogs).toHaveLength(0);
+  });
+
   it("rejects requests without an API key", async () => {
     const { app } = setup();
     const res = await app.handle({ method: "GET", path: "/api/v1/tenant/settings", headers: {} });
@@ -71,8 +118,16 @@ describe("API auth", () => {
       encryptionKey: "p",
       rateLimiter: new RateLimiter(1, 60_000),
     });
-    const first = await app.handle({ method: "GET", path: "/api/v1/tenant/settings", headers: auth() });
-    const second = await app.handle({ method: "GET", path: "/api/v1/tenant/settings", headers: auth() });
+    const first = await app.handle({
+      method: "GET",
+      path: "/api/v1/tenant/settings",
+      headers: auth(),
+    });
+    const second = await app.handle({
+      method: "GET",
+      path: "/api/v1/tenant/settings",
+      headers: auth(),
+    });
     expect(first.status).toBe(200);
     expect(second.status).toBe(429);
   });
@@ -88,7 +143,11 @@ describe("API auth", () => {
       encryptionKey: "p",
     });
 
-    const read = await app.handle({ method: "GET", path: "/api/v1/tenant/settings", headers: auth() });
+    const read = await app.handle({
+      method: "GET",
+      path: "/api/v1/tenant/settings",
+      headers: auth(),
+    });
     const write = await app.handle({
       method: "PATCH",
       path: "/api/v1/tenant/settings",
@@ -98,7 +157,9 @@ describe("API auth", () => {
 
     expect(read.status).toBe(200);
     expect(write.status).toBe(403);
-    expect((write.body as { error: { user_message?: string } }).error.user_message).toContain("tenant:write");
+    expect((write.body as { error: { user_message?: string } }).error.user_message).toContain(
+      "tenant:write",
+    );
   });
 
   it("never lets an API key call user-session-only driver routes", async () => {
@@ -141,6 +202,39 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     expect(body.status).toBe("awaiting_bankid");
   });
 
+  it("persists the exact BankID start payload and replays provider completion once", async () => {
+    const { incident_id: id } = (await createIncident()).body as { incident_id: string };
+    const signed = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/incidents/${id}/bankid/sign`,
+      headers: auth(),
+      body: { purpose: "Sign towing case", personal_number: "199001011234" },
+    });
+    expect(signed.status).toBe(200);
+    const session = [...env.repo.bankidSessions.values()].find((row) => row.incident_id === id)!;
+    expect(JSON.parse(session.bound_payload_text!)).toMatchObject({
+      incident_id: id,
+      customer_user_id: CUSTOMER_USER_ID,
+      object_version: 1,
+      purpose: "Sign towing case",
+    });
+    expect(env.repo.bankidSignatures[0]?.signed_payload_hash).toBe(
+      sha256Hex(session.bound_payload_text!),
+    );
+    expect(JSON.stringify(env.repo.bankidSignatures)).not.toContain("199001011234");
+    const replay = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/bankid/sessions/${session.id}/poll`,
+      headers: auth(),
+    });
+    expect(replay.status).toBe(200);
+    expect((replay.body as { replay: boolean }).replay).toBe(true);
+    expect(env.repo.bankidSignatures).toHaveLength(1);
+    expect(env.repo.auditLogs.filter((row) => row.entity_type === "bankid_signature")).toHaveLength(
+      1,
+    );
+  });
+
   it("blocks request-tow until BankID is verified, then succeeds and dispatches", async () => {
     const created = (await createIncident()).body as { incident_id: string };
     const id = created.incident_id;
@@ -149,7 +243,11 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
       method: "POST",
       path: `/api/v1/incidents/${id}/request-tow`,
       headers: auth(),
-      body: { pickup: { lat: 59.33, lng: 18.06 }, payer_type: "insurance_company", priority: "normal" },
+      body: {
+        pickup: { lat: 59.33, lng: 18.06 },
+        payer_type: "insurance_company",
+        priority: "normal",
+      },
     });
     expect(blocked.status).toBe(409);
 
@@ -181,7 +279,11 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
       method: "POST",
       path: `/api/v1/incidents/${id}/request-tow`,
       headers: auth(),
-      body: { pickup: { lat: 59.33, lng: 18.06 }, payer_type: "insurance_company", priority: "normal" },
+      body: {
+        pickup: { lat: 59.33, lng: 18.06 },
+        payer_type: "insurance_company",
+        priority: "normal",
+      },
     });
     expect(tow.status).toBe(201);
     const towBody = tow.body as { tow_job_id: string; status: string; offered_drivers: string[] };
@@ -215,13 +317,17 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     expect(share.customer_phone).toBe("+46700000000");
     expect(Object.keys(share)).not.toContain("personal_number");
     expect(Object.keys(share)).not.toContain("bankid_status");
-    // a data_share audit was written
-    expect(env.repo.auditLogs.some((a) => a.action === "data_share")).toBe(true);
+    expect(env.repo.auditLogs.some((a) => a.action === "tow.driver_accepted")).toBe(true);
   });
 
   it("isolates tenants: another tenant cannot read this incident", async () => {
     const created = (await createIncident()).body as { incident_id: string };
-    env.repo.seedTenant({ id: "t-folk", slug: "folk", name: "Folksam", case_number_prefix: "FOLK" });
+    env.repo.seedTenant({
+      id: "t-folk",
+      slug: "folk",
+      name: "Folksam",
+      case_number_prefix: "FOLK",
+    });
     const otherKey = "rk_other";
     env.repo.seedApiClient("t-folk", sha256Hex(otherKey));
 
@@ -284,12 +390,33 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
       priority: "normal",
     });
     await repo.createOffers([
-      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv1", tow_company_id: "tc1", rank: 0, expires_at: new Date(Date.now() + 60000).toISOString() },
-      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv2", tow_company_id: "tc1", rank: 1, expires_at: new Date(Date.now() + 60000).toISOString() },
+      {
+        tenant_id: "t-if",
+        tow_job_id: job.id,
+        driver_id: "drv1",
+        tow_company_id: "tc1",
+        rank: 0,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      },
+      {
+        tenant_id: "t-if",
+        tow_job_id: job.id,
+        driver_id: "drv2",
+        tow_company_id: "tc1",
+        rank: 1,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      },
     ]);
     repo.seedContact("inc-1", {
-      name: "Anna Andersson", phone: "+46700000000", email: null, registration_number: "X1", problem_summary: "x",
-      pickup: { lat: 59, lng: 18 }, pickup_address: null, destination_address: null, customer_notes: null,
+      name: "Anna Andersson",
+      phone: "+46700000000",
+      email: null,
+      registration_number: "X1",
+      problem_summary: "x",
+      pickup: { lat: 59, lng: 18 },
+      pickup_address: null,
+      destination_address: null,
+      customer_notes: null,
     });
 
     const first = await env.app.handle({
@@ -303,7 +430,9 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     // The job is now locked to drv1 and drv2's competing offer is cancelled.
     const stored = await repo.getTowJob("t-if", job.id);
     expect(stored?.driver_id).toBe("drv1");
-    expect(repo.offers.find((o) => o.tow_job_id === job.id && o.driver_id === "drv2")?.status).toBe("cancelled");
+    expect(repo.offers.find((o) => o.tow_job_id === job.id && o.driver_id === "drv2")?.status).toBe(
+      "cancelled",
+    );
     const sharesAfterFirst = repo.customerShares.length;
 
     // The losing driver gets a conflict with a friendly Swedish message.
@@ -339,7 +468,14 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
       priority: "normal",
     });
     await repo.createOffers([
-      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv1", tow_company_id: "tc1", rank: 0, expires_at: new Date(Date.now() - 1000).toISOString() },
+      {
+        tenant_id: "t-if",
+        tow_job_id: job.id,
+        driver_id: "drv1",
+        tow_company_id: "tc1",
+        rank: 0,
+        expires_at: new Date(Date.now() - 1000).toISOString(),
+      },
     ]);
     repo.seedContact("inc-exp", {
       name: "Anna Andersson",
@@ -403,12 +539,27 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
   it("lists driver offers without customer PII (pre-accept minimization)", async () => {
     const repo = env.repo;
     const job = await repo.createTowJob({
-      tenant_id: "t-if", incident_id: "inc-2", status: "offered", payer_type: "insurance_company", priority: "high",
+      tenant_id: "t-if",
+      incident_id: "inc-2",
+      status: "offered",
+      payer_type: "insurance_company",
+      priority: "high",
     });
     await repo.createOffers([
-      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv1", tow_company_id: "tc1", rank: 0, expires_at: new Date(Date.now() + 60000).toISOString() },
+      {
+        tenant_id: "t-if",
+        tow_job_id: job.id,
+        driver_id: "drv1",
+        tow_company_id: "tc1",
+        rank: 0,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      },
     ]);
-    const res = await env.app.handle({ method: "GET", path: "/api/v1/drivers/me/offers", headers: driverAuth() });
+    const res = await env.app.handle({
+      method: "GET",
+      path: "/api/v1/drivers/me/offers",
+      headers: driverAuth(),
+    });
     expect(res.status).toBe(200);
     const body = res.body as { offers: Array<Record<string, unknown>> };
     expect(body.offers.length).toBeGreaterThan(0);
@@ -421,10 +572,21 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
   it("rejecting an offer marks it rejected", async () => {
     const repo = env.repo;
     const job = await repo.createTowJob({
-      tenant_id: "t-if", incident_id: "inc-3", status: "offered", payer_type: "insurance_company", priority: "normal",
+      tenant_id: "t-if",
+      incident_id: "inc-3",
+      status: "offered",
+      payer_type: "insurance_company",
+      priority: "normal",
     });
     await repo.createOffers([
-      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv1", tow_company_id: "tc1", rank: 0, expires_at: new Date(Date.now() + 60000).toISOString() },
+      {
+        tenant_id: "t-if",
+        tow_job_id: job.id,
+        driver_id: "drv1",
+        tow_company_id: "tc1",
+        rank: 0,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      },
     ]);
     const offer = repo.offers.find((o) => o.tow_job_id === job.id && o.driver_id === "drv1")!;
     const res = await env.app.handle({
@@ -473,14 +635,22 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
       },
     ]);
 
-    const refreshed = repo.offers.find((offer) => offer.tow_job_id === job.id && offer.driver_id === "drv1");
+    const refreshed = repo.offers.find(
+      (offer) => offer.tow_job_id === job.id && offer.driver_id === "drv1",
+    );
     expect(refreshed?.status).toBe("pending");
     expect(refreshed?.expires_at).toBe(secondExpiry);
-    expect(repo.offers.filter((offer) => offer.tow_job_id === job.id && offer.driver_id === "drv1")).toHaveLength(1);
+    expect(
+      repo.offers.filter((offer) => offer.tow_job_id === job.id && offer.driver_id === "drv1"),
+    ).toHaveLength(1);
   });
 
   it("requires an authenticated user for role-context", async () => {
-    const noUser = await env.app.handle({ method: "GET", path: "/api/v1/me/role-context", headers: auth() });
+    const noUser = await env.app.handle({
+      method: "GET",
+      path: "/api/v1/me/role-context",
+      headers: auth(),
+    });
     expect(noUser.status).toBe(403);
 
     env.repo.seedRoleContext({
@@ -491,9 +661,20 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
       is_customer: false,
       driver: { driver_id: "drv1", tow_company_id: "tc1", is_online: false, status: "active" },
       tenants: [],
-      capabilities: { customer: false, driver: true, insurance_admin: false, tow_admin: false, tenant_user: false, superadmin: false },
+      capabilities: {
+        customer: false,
+        driver: true,
+        insurance_admin: false,
+        tow_admin: false,
+        tenant_user: false,
+        superadmin: false,
+      },
     });
-    const res = await env.app.handle({ method: "GET", path: "/api/v1/me/role-context", headers: driverAuth() });
+    const res = await env.app.handle({
+      method: "GET",
+      path: "/api/v1/me/role-context",
+      headers: driverAuth(),
+    });
     expect(res.status).toBe(200);
     expect((res.body as { capabilities: { driver: boolean } }).capabilities.driver).toBe(true);
   });
@@ -524,7 +705,9 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     });
     expect(res.status).toBe(201);
     const incidentId = (res.body as { incident_id: string }).incident_id;
-    const loc = env.repo.incidentLocations.find((l) => l.incident_id === incidentId && l.kind === "pickup");
+    const loc = env.repo.incidentLocations.find(
+      (l) => l.incident_id === incidentId && l.kind === "pickup",
+    );
     expect(loc).toBeDefined();
     expect(loc!.lat).toBe(59.33);
     expect(loc!.address).toBe("Drottninggatan 1");
@@ -532,9 +715,23 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
 
   it("replays idempotent incident creation instead of creating duplicates", async () => {
     const headers = { ...auth(), "idempotency-key": "case-key-1" };
-    const body = { type: "towing", customer_user_id: CUSTOMER_USER_ID, problem_type: "dead_battery" };
-    const first = await env.app.handle({ method: "POST", path: "/api/v1/incidents", headers, body });
-    const second = await env.app.handle({ method: "POST", path: "/api/v1/incidents", headers, body });
+    const body = {
+      type: "towing",
+      customer_user_id: CUSTOMER_USER_ID,
+      problem_type: "dead_battery",
+    };
+    const first = await env.app.handle({
+      method: "POST",
+      path: "/api/v1/incidents",
+      headers,
+      body,
+    });
+    const second = await env.app.handle({
+      method: "POST",
+      path: "/api/v1/incidents",
+      headers,
+      body,
+    });
     expect(first.status).toBe(201);
     expect(second.status).toBe(200);
     expect(second.headers?.["x-idempotent-replay"]).toBe("true");
@@ -542,6 +739,33 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
       (first.body as { incident_id: string }).incident_id,
     );
     expect(env.repo.incidents.size).toBe(1);
+  });
+
+  it("rejects changed incident payload with the same idempotency key", async () => {
+    const headers = { ...auth(), "idempotency-key": "changed-input" };
+    const body = {
+      type: "towing",
+      customer_user_id: CUSTOMER_USER_ID,
+      problem_type: "dead_battery",
+    };
+    const first = await env.app.handle({
+      method: "POST",
+      path: "/api/v1/incidents",
+      headers,
+      body,
+    });
+    const changed = await env.app.handle({
+      method: "POST",
+      path: "/api/v1/incidents",
+      headers,
+      body: { ...body, description: "different incident" },
+    });
+    expect(first.status).toBe(201);
+    expect(changed.status).toBe(409);
+    expect(env.repo.incidents.size).toBe(1);
+    expect(env.repo.webhookDeliveries.filter((x) => x.event === "incident.created")).toHaveLength(
+      1,
+    );
   });
 
   it("replays idempotent request-tow so double clicks never create two jobs", async () => {
@@ -554,13 +778,34 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
       body: { purpose: "Sign", personal_number: "199001011234" },
     });
     env.repo.seedContact(id, {
-      name: "Anna Andersson", phone: "+46700000000", email: null, registration_number: "X1", problem_summary: "x",
-      pickup: { lat: 59, lng: 18 }, pickup_address: null, destination_address: null, customer_notes: null,
+      name: "Anna Andersson",
+      phone: "+46700000000",
+      email: null,
+      registration_number: "X1",
+      problem_summary: "x",
+      pickup: { lat: 59, lng: 18 },
+      pickup_address: null,
+      destination_address: null,
+      customer_notes: null,
     });
     const headers = { ...auth(), "idempotency-key": "tow-key-1" };
-    const body = { pickup: { lat: 59, lng: 18 }, payer_type: "insurance_company", priority: "normal" };
-    const first = await env.app.handle({ method: "POST", path: `/api/v1/incidents/${id}/request-tow`, headers, body });
-    const second = await env.app.handle({ method: "POST", path: `/api/v1/incidents/${id}/request-tow`, headers, body });
+    const body = {
+      pickup: { lat: 59, lng: 18 },
+      payer_type: "insurance_company",
+      priority: "normal",
+    };
+    const first = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/incidents/${id}/request-tow`,
+      headers,
+      body,
+    });
+    const second = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/incidents/${id}/request-tow`,
+      headers,
+      body,
+    });
     expect(first.status).toBe(201);
     expect(second.status).toBe(200);
     expect((second.body as { tow_job_id: string }).tow_job_id).toBe(
@@ -579,38 +824,83 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
       body: { purpose: "Sign", personal_number: "199001011234" },
     });
     env.repo.seedContact(id, {
-      name: "Anna Andersson", phone: "+46700000000", email: null, registration_number: "X1", problem_summary: "x",
-      pickup: { lat: 59, lng: 18 }, pickup_address: null, destination_address: null, customer_notes: null,
+      name: "Anna Andersson",
+      phone: "+46700000000",
+      email: null,
+      registration_number: "X1",
+      problem_summary: "x",
+      pickup: { lat: 59, lng: 18 },
+      pickup_address: null,
+      destination_address: null,
+      customer_notes: null,
     });
     const job = await env.repo.createTowJob({
-      tenant_id: "t-if", incident_id: id, status: "created", payer_type: "insurance_company", priority: "normal",
+      tenant_id: "t-if",
+      incident_id: id,
+      status: "created",
+      payer_type: "insurance_company",
+      priority: "normal",
     });
     expect((await env.repo.claimTowDispatch(job.id)).claimed).toBe(true);
 
     const headers = { ...auth(), "idempotency-key": "tow-transient-key" };
-    const body = { pickup: { lat: 59, lng: 18 }, payer_type: "insurance_company", priority: "normal" };
-    const first = await env.app.handle({ method: "POST", path: `/api/v1/incidents/${id}/request-tow`, headers, body });
+    const body = {
+      pickup: { lat: 59, lng: 18 },
+      payer_type: "insurance_company",
+      priority: "normal",
+    };
+    const first = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/incidents/${id}/request-tow`,
+      headers,
+      body,
+    });
     expect(first.status).toBe(202);
     expect((first.body as { dispatch_in_progress?: boolean }).dispatch_in_progress).toBe(true);
 
     await env.repo.recordDispatchAttempt(job.id, null);
-    const second = await env.app.handle({ method: "POST", path: `/api/v1/incidents/${id}/request-tow`, headers, body });
+    const second = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/incidents/${id}/request-tow`,
+      headers,
+      body,
+    });
     expect(second.status).toBe(200);
     expect(second.headers?.["x-idempotent-replay"]).toBeUndefined();
-    expect((second.body as { offered_drivers: unknown[] }).offered_drivers.length).toBeGreaterThan(0);
+    expect((second.body as { offered_drivers: unknown[] }).offered_drivers.length).toBeGreaterThan(
+      0,
+    );
   });
 
   it("lets an assigned driver update job status with only the driver session token", async () => {
     const repo = env.repo;
     const job = await repo.createTowJob({
-      tenant_id: "t-if", incident_id: "inc-drv", status: "offered", payer_type: "insurance_company", priority: "normal",
+      tenant_id: "t-if",
+      incident_id: "inc-drv",
+      status: "offered",
+      payer_type: "insurance_company",
+      priority: "normal",
     });
     await repo.createOffers([
-      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv1", tow_company_id: "tc1", rank: 0, expires_at: new Date(Date.now() + 60000).toISOString() },
+      {
+        tenant_id: "t-if",
+        tow_job_id: job.id,
+        driver_id: "drv1",
+        tow_company_id: "tc1",
+        rank: 0,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      },
     ]);
     repo.seedContact("inc-drv", {
-      name: "Anna Andersson", phone: "+46700000000", email: null, registration_number: "X1", problem_summary: "x",
-      pickup: { lat: 59, lng: 18 }, pickup_address: null, destination_address: null, customer_notes: null,
+      name: "Anna Andersson",
+      phone: "+46700000000",
+      email: null,
+      registration_number: "X1",
+      problem_summary: "x",
+      pickup: { lat: 59, lng: 18 },
+      pickup_address: null,
+      destination_address: null,
+      customer_notes: null,
     });
 
     // The driver mobile app never ships a tenant API key: only the Supabase
@@ -647,14 +937,32 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
   it("blocks every job mutation until the offered driver has accepted", async () => {
     const repo = env.repo;
     const job = await repo.createTowJob({
-      tenant_id: "t-if", incident_id: "inc-pending", status: "offered", payer_type: "insurance_company", priority: "normal",
+      tenant_id: "t-if",
+      incident_id: "inc-pending",
+      status: "offered",
+      payer_type: "insurance_company",
+      priority: "normal",
     });
     await repo.createOffers([
-      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv1", tow_company_id: "tc1", rank: 0, expires_at: new Date(Date.now() + 60000).toISOString() },
+      {
+        tenant_id: "t-if",
+        tow_job_id: job.id,
+        driver_id: "drv1",
+        tow_company_id: "tc1",
+        rank: 0,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      },
     ]);
     repo.seedContact("inc-pending", {
-      name: "Anna Andersson", phone: "+46700000000", email: null, registration_number: "X1", problem_summary: "x",
-      pickup: { lat: 59, lng: 18 }, pickup_address: null, destination_address: null, customer_notes: null,
+      name: "Anna Andersson",
+      phone: "+46700000000",
+      email: null,
+      registration_number: "X1",
+      problem_summary: "x",
+      pickup: { lat: 59, lng: 18 },
+      pickup_address: null,
+      destination_address: null,
+      customer_notes: null,
     });
 
     const headers = { authorization: `Bearer ${DRIVER_TOKEN}` };
@@ -686,17 +994,40 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
   it("uploads tow evidence directly to private storage and registers it idempotently", async () => {
     const repo = env.repo;
     const job = await repo.createTowJob({
-      tenant_id: "t-if", incident_id: "inc-photo", status: "offered", payer_type: "insurance_company", priority: "normal",
+      tenant_id: "t-if",
+      incident_id: "inc-photo",
+      status: "offered",
+      payer_type: "insurance_company",
+      priority: "normal",
     });
     await repo.createOffers([
-      { tenant_id: "t-if", tow_job_id: job.id, driver_id: "drv1", tow_company_id: "tc1", rank: 0, expires_at: new Date(Date.now() + 60000).toISOString() },
+      {
+        tenant_id: "t-if",
+        tow_job_id: job.id,
+        driver_id: "drv1",
+        tow_company_id: "tc1",
+        rank: 0,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      },
     ]);
     repo.seedContact("inc-photo", {
-      name: "Anna", phone: "+46700000000", email: null, registration_number: "ABC123", problem_summary: "x",
-      pickup: { lat: 59, lng: 18 }, pickup_address: null, destination_address: null, customer_notes: null,
+      name: "Anna",
+      phone: "+46700000000",
+      email: null,
+      registration_number: "ABC123",
+      problem_summary: "x",
+      pickup: { lat: 59, lng: 18 },
+      pickup_address: null,
+      destination_address: null,
+      customer_notes: null,
     });
     const headers = { authorization: `Bearer ${DRIVER_TOKEN}` };
-    const accepted = await env.app.handle({ method: "POST", path: `/api/v1/tow/jobs/${job.id}/accept`, headers, body: {} });
+    const accepted = await env.app.handle({
+      method: "POST",
+      path: `/api/v1/tow/jobs/${job.id}/accept`,
+      headers,
+      body: {},
+    });
     expect(accepted.status).toBe(200);
 
     const upload = await env.app.handle({
@@ -710,7 +1041,11 @@ describe("incident + tow lifecycle (acceptance criteria)", () => {
     expect(uploadBody.storage_path).toContain(`${job.id}/drv1/`);
     expect(uploadBody.upload_token).toBeTruthy();
 
-    repo.towEvidenceObjects.push({ path: uploadBody.storage_path, contentType: "image/jpeg", size: 2048 });
+    repo.towEvidenceObjects.push({
+      path: uploadBody.storage_path,
+      contentType: "image/jpeg",
+      size: 2048,
+    });
     const completeBody = {
       storage_path: uploadBody.storage_path,
       content_type: "image/jpeg",
@@ -784,7 +1119,11 @@ describe("production safety", () => {
 
   it("serves a friendly Swedish BankID browser callback page", async () => {
     const { app } = setup();
-    const res = await app.handle({ method: "GET", path: "/api/v1/bankid/callback?sessionId=missing", headers: {} });
+    const res = await app.handle({
+      method: "GET",
+      path: "/api/v1/bankid/callback?sessionId=missing",
+      headers: {},
+    });
     expect(res.status).toBe(200);
     expect(res.rawBody).toContain('lang="sv"');
     expect(res.rawBody).toContain("tillbaka till appen");

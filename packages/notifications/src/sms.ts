@@ -68,10 +68,12 @@ export class HttpSmsAdapter implements ChannelAdapter {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: body.toString(),
+        signal: AbortSignal.timeout(10_000),
       });
       const text = await res.text().catch(() => "");
       if (!res.ok) {
-        return { channel: "sms", delivered: false, error: `SMS ${res.status}${text ? ` ${text.slice(0, 300)}` : ""}` };
+        return { channel: "sms", delivered: false, retryable: res.status === 429,
+          uncertain: res.status >= 500, error: `SMS ${res.status}${text ? ` ${text.slice(0, 300)}` : ""}` };
       }
       let providerMessageId: string | undefined;
       try {
@@ -81,7 +83,7 @@ export class HttpSmsAdapter implements ChannelAdapter {
       }
       return { channel: "sms", delivered: true, providerMessageId };
     } catch (e) {
-      return { channel: "sms", delivered: false, error: e instanceof Error ? e.message : String(e) };
+      return { channel: "sms", delivered: false, uncertain: true, error: e instanceof Error ? e.message : String(e) };
     }
   }
 }

@@ -1,6 +1,7 @@
 import type { BankidEnv, BankidStatus } from "@resqly/types";
 import { hashPersonalNumber, signedPayloadHash } from "@resqly/utils";
 import type { BankidCompletionData } from "./provider";
+import { redactBankidValue } from "./redaction";
 
 export interface BuildSignatureInput {
   tenantId: string;
@@ -48,7 +49,7 @@ export function buildSignatureRecord(input: BuildSignatureInput): {
     signed_payload_hash: signedPayloadHash(input.signedPayload),
     signature: input.completion.signature,
     ocsp_response: input.completion.ocspResponse ?? null,
-    raw_completion: input.completion.raw ?? null,
+    raw_completion: redactBankidValue(input.completion.raw ?? null),
     environment: input.environment,
     ip: input.ip ?? null,
     device: input.device ?? null,

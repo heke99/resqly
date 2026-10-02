@@ -1,0 +1,978 @@
+{
+  "schemaVersion": 2,
+  "baselineCommit": "25840ee268e1e32e4ad5cf3a560128ac19d01f48",
+  "candidateCommit": "afbd743136ba79f5c045936e9ab143122c102ace",
+  "rules": [
+    {
+      "id": "R01",
+      "requirement": "Servern härleder ägande tenant från verifierad fordons-/försäkringsrelation eller explicit privatoperatör. Klientens tenant-ID är aldrig ensamt auktoritativt.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002090954_atomic_incident_workflows.sql",
+        "packages/database/src/workflows.ts",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/route.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
+      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-workflows.md"],
+      "remainingGaps": [
+        "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
+      ]
+    },
+    {
+      "id": "R02",
+      "requirement": "Ärende, kund, kundfordon, försäkringsbolag och skapande aktör måste bilda en giltig kedja.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002090954_atomic_incident_workflows.sql",
+        "packages/database/src/workflows.ts",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/route.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
+      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-workflows.md"],
+      "remainingGaps": [
+        "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
+      ]
+    },
+    {
+      "id": "R03",
+      "requirement": "Utförande företag, förare och exakt bärgningsfordon måste bilda en giltig separat resurskedja.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R04",
+      "requirement": "Aktiv tenant och aktivt medlemskap krävs där organisationsåtkomst ges.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R05",
+      "requirement": "Aktiv förare krävs för erbjudande-, jobb-, position-, accept-, status- och enhetsoperationer.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
+      "remainingGaps": [
+        "Central API driver guard; active DB actor checks. Remaining device/storage/realtime paths still need complete inventory."
+      ]
+    },
+    {
+      "id": "R06",
+      "requirement": "BankID-session binds till användare, tenant, objekt, syfte och rätt innehållsversion. Callback från klient räcker inte som slutförandebevis.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002100225_immutable_bankid_binding.sql",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/bankid/_lib.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ],
+      "remainingGaps": [
+        "Real provider signature/certificate validation and first identity enrollment policy remain.",
+        "Location, destination, evidence and consent amendments are not yet bound into these object versions.",
+        "Browser/native-device/Auth/Storage/Realtime end-to-end validation remains."
+      ]
+    },
+    {
+      "id": "R07",
+      "requirement": "Identitet, fordonsrelation och försäkringstäckning har separata tillstånd och källor.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002093718_coverage_decisions.sql",
+        "packages/database/src/workflows.ts",
+        "apps/portal-web/app/cases/[id]/page.tsx"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ],
+      "remainingGaps": [
+        "Real provider signature/certificate validation and first identity enrollment policy remain.",
+        "Location, destination, evidence and consent amendments are not yet bound into these object versions.",
+        "Browser/native-device/Auth/Storage/Realtime end-to-end validation remains."
+      ]
+    },
+    {
+      "id": "R08",
+      "requirement": "Känsliga interna RPC:er har minsta möjliga EXECUTE-grants och uttrycklig anrops-/aktörskontroll. Anonym identitet får inte tolkas som betrodd worker.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ],
+      "remainingGaps": [
+        "Legacy accept disabled for all API roles; actor-bound accept and delivery RPCs service-only. Remaining SECURITY DEFINER inventory open."
+      ]
+    },
+    {
+      "id": "R09",
+      "requirement": "Förare får kundkontakt först efter aktuell giltig tilldelning. Personnummer/BankID-bevis delas aldrig med förare.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
+      "remainingGaps": [
+        "Current driver contact share and stale-offer API reads restricted. Complete column/Storage/Realtime inventory remains."
+      ]
+    },
+    {
+      "id": "R10",
+      "requirement": "Omfördelning, avstängning och avslutad åtkomst återkallar share-, fil-, realtime- och API-åtkomst. Redan utfärdade signerade URL:er har kort TTL eller hanteras via återkontrollerande proxy där omedelbar återkallelse behövs.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R11",
+      "requirement": "Varje viktig skrivning har exakt en skapande/ändrande aktör; attribution bevaras även när ett konto avaktiveras.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002090954_atomic_incident_workflows.sql",
+        "packages/database/src/workflows.ts",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/route.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ],
+      "remainingGaps": [
+        "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
+      ]
+    },
+    {
+      "id": "R12",
+      "requirement": "Domänrelationer skyddas med FK/constraints/transactions även när serverns service-role kringgår RLS.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002090954_atomic_incident_workflows.sql",
+        "packages/database/src/workflows.ts",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/route.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ],
+      "remainingGaps": [
+        "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
+      ]
+    },
+    {
+      "id": "R13",
+      "requirement": "Försäkringsdispatch kräver giltigt aktivt avtal, rätt område/tjänst och explicit godkännande av faktiskt bärgningsfordons-ID. Batchgodkännande lagrar varje fordons-ID och omfattar inte framtida fordon automatiskt.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R14",
+      "requirement": "Försäkringsutskick omfattar alla behöriga resurser i den aktiva utskicksomgången; paginering/kapacitetsgräns får inte bli en tyst avtalsregel.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R15",
+      "requirement": "Saknade resurser/svar ger manuell hjälp eller nästa godkända omgång. Ingen automatisk övergång till privatmarknad.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R16",
+      "requirement": "Privatdispatch kräver aktivt marknadsplatsdeltagande och direktorderstillstånd, med närmast-först och konfigurerad expansion.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R17",
+      "requirement": "Jourläge, kapabilitet, aktuell bärgningsbil, geografisk täckning och färsk tillgänglighet kontrolleras före utskick.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R18",
+      "requirement": "Behörighet och resurstillgänglighet kontrolleras igen atomiskt vid accept. Ett gammalt erbjudande är inte fortsatt behörighet.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
+      "remainingGaps": [
+        "Active driver/member/company/tenant, vehicle, capability and approval checked under locks. Coverage/price consent and geographic rules remain."
+      ]
+    },
+    {
+      "id": "R19",
+      "requirement": "Exakt en aktiv tilldelning per jobb; en förare och en bärgningsbil får inte dubbelbokas över två samtidiga jobb.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
+      "remainingGaps": [
+        "Unique live-driver and live-vehicle indexes and independent-session resource races verified."
+      ]
+    },
+    {
+      "id": "R20",
+      "requirement": "Resurslås tas i konsekvent ordning och kräver databasconstraint/låsning över resurs, inte bara över jobb.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
+      "remainingGaps": [
+        "Accept locks job, driver, vehicle, then relationships; unique indexes guard direct writes. Manual reallocation remains."
+      ]
+    },
+    {
+      "id": "R21",
+      "requirement": "Accepterat, avvisat, avbrutet och utgånget erbjudande kan inte skrivas över av ett sent konkurrerande anrop.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R22",
+      "requirement": "Retry av samma giltiga accept ger samma resultat utan dubbla events, kunddelningar eller externa meddelandeavsikter.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
+      "remainingGaps": [
+        "Current winning actor retry returns same assignment without duplicate shares/events/audit/outbox."
+      ]
+    },
+    {
+      "id": "R23",
+      "requirement": "Ny dispatchomgång återställer/kopplar erbjudandet till ny cykel korrekt och bevarar historik. Förare ska ha ett faktiskt pending offer när jobbet visar erbjudet.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R24",
+      "requirement": "Manuellt resursbyte genomgår samma avtals-/kapabilitetskontroller och återkallar gamla tilldelningens åtkomst.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R25",
+      "requirement": "Ett återkallat avtal stoppar nya accepter. Redan pågående jobb går till uttrycklig operativ bedömning; de avslutas inte tyst.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R26",
+      "requirement": "Kundkontakt måste finnas före bindande tilldelning enligt det ordinarie kundflödet; eventuellt handläggarbeställt undantag måste ha godkänd alternativ kontakt.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R27",
+      "requirement": "Statusändring använder kanonisk övergångsgraf, förväntad version/status och identifierad aktör.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R28",
+      "requirement": "Levererat, slutrapporterat, godkänt underlag, fakturerat och betalt är separata tillstånd.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R29",
+      "requirement": "Hjälp på plats kan slutföras utan transport-/lastningssteg när tjänsten tillåter det.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R30",
+      "requirement": "Administrativ knapp får inte simulera förarrapport eller verkligt utförande. Avvikande avslut behöver dokumenterat beslut.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R31",
+      "requirement": "Slutrapport kräver tjänstespecifika fält och versionsstyrda beviskrav.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R32",
+      "requirement": "Byte av destination, extra arbete, väntetid, förvaring och avbokningsavgift följer avtals-/prisregler och erforderligt godkännande.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R33",
+      "requirement": "Prislistor versioneras; redan godkänd prisgrund ändras inte när en ny prislista aktiveras.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R34",
+      "requirement": "Fakturaunderlag kan granskas/avvisas/korrigeras utan att utförandehistoriken skrivs om.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R35",
+      "requirement": "Extern fakturareferens lagras med provider/bolag. Dokumenterat fakturaunderlag är inte juridisk faktura eller bevisad betalning. Fördelning mellan flera betalare versionslagras och ska summera till godkänt totalbelopp utan överlappande debitering.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R36",
+      "requirement": "Externa betalningar i första versionen har källa, rapportör, tid och referens; inget automatiskt betalt från avslutat jobb.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R37",
+      "requirement": "Filer är privata med objektkoppling, filstorleks-/typkontroll, säker uppladdning, åtkomstkontroll och skadlig-filinnehållshantering.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R38",
+      "requirement": "Kund-, bärgar-, försäkrings- och verkstadsdokument delas per ändamål; hela skadeakten följer inte automatiskt med bärgningsuppdraget.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R39",
+      "requirement": "Affärstransaktion och beständig outbox skrivs i samma commit. Fel vid outbox-/audit-skrivning gör inte ett lyckat affärsbesked.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts",
+        "packages/database/supabase/migrations/20261002090954_atomic_incident_workflows.sql",
+        "packages/database/src/workflows.ts",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/route.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-workflows.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ],
+      "remainingGaps": [
+        "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
+      ]
+    },
+    {
+      "id": "R40",
+      "requirement": "Workers använder lease, begränsade försök, backoff och idempotens. Krasch efter extern sändning ger kontrollerad deduplicering/avstämning.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"],
+      "remainingGaps": [
+        "Notification/email/webhook claim, fencing and crash reclaim implemented with attempts/backoff and persisted requests. Push and provider reconciliation remain."
+      ]
+    },
+    {
+      "id": "R41",
+      "requirement": "Inkommande signerade webhooks sparas i beständig inbox innan behandling; samma event behandlas inte dubbelt.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R42",
+      "requirement": "Leverantörers event kan vara sena eller komma i annan ordning; gamla event får inte rulla tillbaka aktuellt domäntillstånd.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R43",
+      "requirement": "Push är signal om ett serverlagrat erbjudande. Acceptförfall och escalation styrs av servertid, inte telefonens timer.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R44",
+      "requirement": "Push-ticket, receipt, appens mottagningskvittens och förarens accept är olika bevisnivåer.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R45",
+      "requirement": "Positionsdata lagrar observationstid, mottagningstid, noggrannhet och källa. Inaktuell position visas som inaktuell.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R46",
+      "requirement": "Kartfel/okänd restid får inte visas som tillförlitlig live-ETA. Manuell uppskattning märks med källa.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R47",
+      "requirement": "En offline-accept läggs inte som lokalt lyckad tilldelning. Appen behöver aktuellt serverbesked.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R48",
+      "requirement": "Offline rapport/status synkas med händelse-ID, version och konfliktkontroll; bilder har separat återupptagbar kö.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R49",
+      "requirement": "White-label-branding är separat från dataauktorisering. Domän och deep link måste vara verifierad routinginformation.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R50",
+      "requirement": "Ärendenummer genereras atomiskt med unikhet per avsedd nummerdomän; prefixbyte ändrar inte historiska nummer.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002090954_atomic_incident_workflows.sql",
+        "packages/database/src/workflows.ts",
+        "apps/api/src/handlers/incidents.ts",
+        "apps/customer-web/app/api/customer/cases/route.ts",
+        "apps/customer-web/app/api/customer/cases/[id]/request-tow/route.ts"
+      ],
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-workflows.md"],
+      "remainingGaps": [
+        "Incident/tow creation commands and concurrent numbering verified locally. Remaining mutation, provider and full-client scope is open."
+      ]
+    },
+    {
+      "id": "R51",
+      "requirement": "Alla kritiska anrop/events har correlation-ID och tenant-/objektkoppling; loggar innehåller inte onödig PII.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R52",
+      "requirement": "Föråldrade, fastnade, uttömda och manuella köposter syns med ansvarig och nästa åtgärd.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R53",
+      "requirement": "Ingen mock-/testidentitet, testintegration eller demodata får behandlas som verklig i produktion.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R54",
+      "requirement": "Migrationer preflightar konflikter och kräver avstämning/karantän framför tyst dataradering eller automatiskt affärsgodkännande.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R55",
+      "requirement": "Retention är exekverad och testad, med separat policy för position, ärende, bevis, audit och ekonomidata.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R56",
+      "requirement": "API-scope, rate limits, nyckelrotation och webb-/appsessioner är centrala kontroller, inte enbart UI-regler.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R57",
+      "requirement": "Företagsprovisionering har ett återupptagbart och idempotent flöde. Delvis skapad organisation markeras ofärdig och är inte dispatchklar.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R58",
+      "requirement": "Produktionsdrift kräver återställningsprov, larm, runbooks och ansvarig operatör, inte endast en grön health-route.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R59",
+      "requirement": "Nya features är tenant-/miljöstyrda och har dokumenterat tillstånd; pilot, kodklart och produktionsaktiverat får inte blandas ihop.",
+      "status": "planned",
+      "sourcePaths": [],
+      "evidence": [],
+      "remainingGaps": ["Needs current implementation and version-bound validation."]
+    },
+    {
+      "id": "R60",
+      "requirement": "Varje krav har verklig anropsväg och versionsbundet testbevis. En knapp, stub, mock eller statisk SQL-kontroll är inte full verifiering.",
+      "status": "targeted_verified_partial",
+      "sourcePaths": [
+        "packages/database/supabase/migrations/20261002074000_atomic_actor_accept.sql",
+        "packages/database/supabase/migrations/20261002083237_delivery_leases.sql",
+        "apps/api/src/handlers/tow.ts",
+        "apps/workers/src/jobs/delivery-lease-db.ts"
+      ],
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ],
+      "remainingGaps": [
+        "Version-scoped PostgreSQL replay/real sessions, API/unit/source checks documented; full release and provider/device evidence still open."
+      ]
+    }
+  ],
+  "acceptanceContracts": [
+    {
+      "id": "A01",
+      "scenario": "Kund A öppnar kund B:s ärende, fil, export och statusfeed.",
+      "expected": "Ingen data eller förändring; kontrollerad klientrespons.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A02",
+      "scenario": "Försäkringsbolag A försöker läsa bolag B eller privatoperatören.",
+      "expected": "Nekas över API, SQL-klientväg, UI, storage och realtime.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A03",
+      "scenario": "Bärgarbolag läser orelaterade jobb eller full kundprofil.",
+      "expected": "Endast aktuell tillåten arbetsdata delas.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A04",
+      "scenario": "Anonym och vanlig klientroll anropar intern accept-/status-RPC.",
+      "expected": "Nekas och inga affärsrader ändras.",
+      "status": "targeted_verified_partial",
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ]
+    },
+    {
+      "id": "A05",
+      "scenario": "Medlem/förare/bolag avstängs medan tidigare session är aktiv.",
+      "expected": "Alla känsliga läs-/skrivvägar stoppas omedelbart enligt sessionspolicy.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A06",
+      "scenario": "BankID-resultat från fel användare/ärende eller gammal version.",
+      "expected": "Kan inte verifiera det aktuella objektet.",
+      "status": "targeted_verified_partial",
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ],
+      "remainingGaps": [
+        "Real provider signature/certificate validation and first identity enrollment policy remain.",
+        "Location, destination, evidence and consent amendments are not yet bound into these object versions.",
+        "Browser/native-device/Auth/Storage/Realtime end-to-end validation remains."
+      ]
+    },
+    {
+      "id": "A07",
+      "scenario": "Lyckad BankID men saknat täckningsbeslut.",
+      "expected": "Identiteten blir verifierad; täckningen kvarstår som okänd/väntande.",
+      "status": "targeted_verified_partial",
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ],
+      "remainingGaps": [
+        "Real provider signature/certificate validation and first identity enrollment policy remain.",
+        "Location, destination, evidence and consent amendments are not yet bound into these object versions.",
+        "Browser/native-device/Auth/Storage/Realtime end-to-end validation remains."
+      ]
+    },
+    {
+      "id": "A08",
+      "scenario": "Avtal pausat/utgånget eller bärgningsbil inte godkänd.",
+      "expected": "Resursen får inte erbjudande och kan inte acceptera gammalt offer.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A09",
+      "scenario": "Behöriga avtalsbilar överstiger en intern kandidat-/ETA-batch.",
+      "expected": "Alla behöriga i utskicksområdet omfattas; ingen tyst truncering.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A10",
+      "scenario": "Ingen behörig avtalsresurs eller ingen svarar.",
+      "expected": "Ett hanterbart review/eskaleringsärende, ingen privatdispatch.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A11",
+      "scenario": "Privatjobb med flera resurser/avstånd.",
+      "expected": "Rätt närmast-först-ordning och kontrollerad expansion.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A12",
+      "scenario": "Två verkliga DB-sessioner, sedan stresstest med 100 samtidiga accepter på samma jobb.",
+      "expected": "Exakt en tilldelning, rätt vinnare, inga dubbla shares/events/outbox-events.",
+      "status": "targeted_verified_partial",
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"]
+    },
+    {
+      "id": "A13",
+      "scenario": "Två samtidiga jobb försöker boka samma förare respektive samma bärgningsbil.",
+      "expected": "Högst ett reserverar respektive resurs.",
+      "status": "targeted_verified_partial",
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-core.md"]
+    },
+    {
+      "id": "A14",
+      "scenario": "Timeout efter commit och upprepad accept.",
+      "expected": "Samma resultat, med leveransbar beständig kommunikation.",
+      "status": "targeted_verified_partial",
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ],
+      "remainingGaps": []
+    },
+    {
+      "id": "A15",
+      "scenario": "Accept/avslag/expiry/eskalering sker samtidigt.",
+      "expected": "Tillåten slutstatus och inga överlappande motsägande beslut.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A16",
+      "scenario": "Återdispatch efter avslag/expiry.",
+      "expected": "Aktuellt pending offer i ny cykel och bevarad historik.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A17",
+      "scenario": "Manuell omfördelning till otillåten bil/förare.",
+      "expected": "Nekas. Giltigt byte återkallar tidigare resursens åtkomst.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A18",
+      "scenario": "Transport jämfört med starthjälp på plats.",
+      "expected": "Båda kan slutrapporteras utan felaktiga obligatoriska steg.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A19",
+      "scenario": "Admin försöker markera färdigt utan giltig rapport.",
+      "expected": "Vanligt slutförande nekas; avvikelse kräver separat beslut.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A20",
+      "scenario": "Ny prislista aktiveras under pågående jobb.",
+      "expected": "Jobbets avtalade snapshot består; tillägg får eget godkännande.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A21",
+      "scenario": "Privatpris ändras efter att kund godkänt prisgrund.",
+      "expected": "Nytt godkännande innan bindande ändring.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A22",
+      "scenario": "Dubbel slutrapport/export och korrigering.",
+      "expected": "Inga dubbla ekonomirader/fakturor; korrigering är spårbar.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A23",
+      "scenario": "Worker kraschar före/efter extern sändning, eller två workers kör.",
+      "expected": "Köpost återhämtas, lease/idempotens håller och fel syns.",
+      "status": "targeted_verified_partial",
+      "evidence": [
+        "docs/masterplan/VERIFICATION-2026-10-02-core.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-coverage.md",
+        "docs/masterplan/VERIFICATION-2026-10-02-bankid.md",
+        "docs/masterplan/CANDIDATE-VERIFICATION-2026-10-02.json"
+      ],
+      "remainingGaps": []
+    },
+    {
+      "id": "A24",
+      "scenario": "Dubbla/felordnade webhooks, fel signatur, gammalt replay.",
+      "expected": "Validering/deduplicering håller och aktuell status skyddas.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A25",
+      "scenario": "Push uteblir/dubbleras eller token blir ogiltig.",
+      "expected": "Servererbjudandet finns kvar korrekt, appen hämtar aktuellt läge, reservväg aktiveras.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A26",
+      "scenario": "Telefon stängs, GPS nekas, batterisparläge eller nät bryts.",
+      "expected": "Ingen falsk färsk position/ETA; föraren kan återansluta säkert.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A27",
+      "scenario": "Offline rapport/status med gammal serverversion.",
+      "expected": "Konflikt hanteras; ingen tyst historikomskrivning/dublett.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A28",
+      "scenario": "Upload av fel objekts fil, fel typ/storlek och återkallad filåtkomst.",
+      "expected": "Nekas eller hamnar i kontrollerad karantän; rätt objekt visas.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A29",
+      "scenario": "Prefixbyte och samtidiga ärendeskapanden för white-label.",
+      "expected": "Unika stabila nummer, historik oförändrad, rätt branding utan behörighetsläcka.",
+      "status": "targeted_verified_partial",
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-workflows.md"]
+    },
+    {
+      "id": "A30",
+      "scenario": "Avbruten organisation-/inbjudningsprovisionering.",
+      "expected": "Idempotent återupptagning, ingen falskt driftklar organisation.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A31",
+      "scenario": "Migrationsreplay på tom DB och produktionslik konfliktdata.",
+      "expected": "Reproducerbart schema utan tyst databortfall/automatiskt avtalsgodkännande.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A32",
+      "scenario": "Gallring, offboarding och historisk attribution.",
+      "expected": "Rätt data gallras, nödvändig historik/ekonomi skyddas, aktör kvarstår spårbar.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A33",
+      "scenario": "Verkstad stängd eller fel destination/extra arbete.",
+      "expected": "Alternativ/godkännande och prispåverkan dokumenteras.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A34",
+      "scenario": "Skadeärende länkas till assistans.",
+      "expected": "Sambandet visas, men bärgaren får inte hela skadeakten.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A35",
+      "scenario": "Företagsbeställare utan giltigt mandat/kostnadsställe.",
+      "expected": "Saknad behörighet stoppas; godkänt uppdrag har rätt ansvar och rapportering.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A36",
+      "scenario": "Framtida betalwebhook/återbetalning/avstämning.",
+      "expected": "Signerat resultat, separata finanstillstånd och inga dubbla belopp.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A37",
+      "scenario": "Fryst release återställs eller worker stoppas/återstartas.",
+      "expected": "Dokumenterat återställningsprov utan dubbla affärshändelser/sändningar.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A38",
+      "scenario": "Samma försäkringsscenario via webb, mobil, portal och partner-API.",
+      "expected": "Samma domänregler, behörigheter och affärsresultat.",
+      "status": "targeted_verified_partial",
+      "evidence": ["docs/masterplan/VERIFICATION-2026-10-02-workflows.md"]
+    },
+    {
+      "id": "A39",
+      "scenario": "Kostnaden delas mellan försäkringsbolag, kund och annan betalare, inklusive korrigering/exportretry.",
+      "expected": "Andelarna summerar till totalen med rätt valuta/avrundning; ingen överlappande dubbeldebitering.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A40",
+      "scenario": "Skadeanmälan → komplettering → handläggarbeslut → avslut, med assistanslänk.",
+      "expected": "Fullt flöde, rätt beslutsaktör, separata statusar och nekad obehörig åtkomst i kund-/försäkrings-/bärgaryta.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A41",
+      "scenario": "Verkstad tilldelas → accepterar mottagning → tar emot fordon → kvitterar överlämning.",
+      "expected": "End-to-end-kvittens och avvikelsehantering, rätt dokumentdelning och nekad annan verkstads åtkomst.",
+      "status": "planned",
+      "evidence": []
+    },
+    {
+      "id": "A42",
+      "scenario": "Handläggare beställer åt kund utan eget konto; privatoperatör hanterar sitt eget ärende.",
+      "expected": "Beställande aktör och verifierad kund hålls isär; erforderlig BankID kringgås inte. Operatören klarar egen arbetskö utan plattformens breda adminrättigheter.",
+      "status": "planned",
+      "evidence": []
+    }
+  ]
+}

@@ -1,18 +1,20 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { request as httpsRequest } from "node:https";
-import { buildWebhookEnvelope, signWebhook } from "@resqly/notifications";
-import type { WebhookEvent } from "@resqly/types";
+import { signWebhook } from "@resqly/notifications";
+import type { WebhookEnvelope } from "@resqly/types";
 import type { AppSupabaseClient } from "@resqly/database";
 import { validatePublicHttpsUrl } from "@resqly/utils";
 import { processDelivery } from "./webhook-delivery";
+import { claimDeliveries, settleDelivery, type DeliveryLease } from "./delivery-lease-db";
 
-export interface WebhookDeliveryRow {
+export interface WebhookDeliveryRow extends DeliveryLease {
   id: string;
   tenant_id: string;
   webhook_id: string;
   event: string;
   payload: Record<string, unknown>;
+  envelope: WebhookEnvelope;
   status: "pending" | "delivering" | "failed" | "succeeded" | "exhausted";
   attempts: number;
 }
@@ -38,27 +40,8 @@ export async function pollWebhookDeliveries(
   opts: { fetchImpl?: FetchLike; resolveHost?: ResolveHost; now?: Date; limit?: number } = {},
 ): Promise<void> {
   const now = opts.now ?? new Date();
-  const { data, error: loadError } = await db
-    .from("webhook_deliveries" as never)
-    .select("id, tenant_id, webhook_id, event, payload, status, attempts")
-    .in("status", ["pending", "failed"])
-    .or(`next_attempt_at.is.null,next_attempt_at.lte.${now.toISOString()}`)
-    .order("created_at", { ascending: true })
-    .limit(opts.limit ?? 50);
-  if (loadError) throw new Error(`webhook delivery load failed: ${loadError.message}`);
-
-  const deliveries = ((data as WebhookDeliveryRow[] | null) ?? []) as WebhookDeliveryRow[];
+  const deliveries = await claimDeliveries<WebhookDeliveryRow>(db, "webhook_deliveries", { limit: opts.limit ?? 25 });
   for (const delivery of deliveries) {
-    const { data: claimed, error: claimError } = await db
-      .from("webhook_deliveries" as never)
-      .update({ status: "delivering", updated_at: new Date().toISOString() } as never)
-      .eq("id", delivery.id)
-      .in("status", ["pending", "failed"])
-      .select("id")
-      .maybeSingle();
-    if (claimError) throw new Error(`webhook delivery claim failed: ${claimError.message}`);
-    if (!claimed) continue;
-
     const { data: webhook, error: webhookError } = await db
       .from("tenant_webhooks" as never)
       .select("id, url, secret, active, events")
@@ -67,7 +50,7 @@ export async function pollWebhookDeliveries(
     if (webhookError) throw new Error(`webhook target load failed: ${webhookError.message}`);
     const target = webhook as TenantWebhookRow | null;
     const outcome = await processDelivery(
-      delivery,
+      { ...delivery, attempts: delivery.attempts - 1 },
       () => deliverOnce(
         delivery,
         target,
@@ -77,20 +60,7 @@ export async function pollWebhookDeliveries(
       { now: now.getTime() },
     );
 
-    const { error: updateError } = await db
-      .from("webhook_deliveries" as never)
-      .update({
-        status: outcome.status,
-        attempts: outcome.attempts,
-        next_attempt_at: outcome.nextAttemptAt,
-        last_error: outcome.error ?? null,
-        response_status: outcome.responseStatus ?? null,
-        response_body: outcome.responseBody ?? null,
-        updated_at: new Date().toISOString(),
-        delivered_at: outcome.status === "succeeded" ? new Date().toISOString() : null,
-      } as never)
-      .eq("id", delivery.id);
-    if (updateError) throw new Error(`webhook delivery update failed: ${updateError.message}`);
+    await settleDelivery(db, "webhook_deliveries", delivery, outcome);
   }
 }
 
@@ -111,18 +81,14 @@ async function deliverOnce(
   // already-saved hostname from later resolving to localhost/cloud metadata.
   const safeTarget = await resolvePublicWebhookTarget(target.url, resolveHost);
   const safeUrl = safeTarget.url;
-  const envelope = buildWebhookEnvelope(
-    delivery.event as WebhookEvent,
-    delivery.tenant_id,
-    delivery.payload,
-  );
-  const signed = signWebhook(target.secret, envelope);
+  const signed = signWebhook(target.secret, delivery.envelope);
   const res = fetchImpl
     ? await fetchImpl(safeUrl.toString(), {
         method: "POST",
         headers: signed.headers,
         body: signed.body,
         redirect: "manual",
+        signal: AbortSignal.timeout(10_000),
       })
     : await postPinnedHttps(safeTarget, signed.headers, signed.body);
   const responseBody = await res.text().catch(() => "");

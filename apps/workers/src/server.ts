@@ -13,6 +13,7 @@ import { evaluateOfferExpiry, type OfferRow } from "./jobs/offer-expiry";
 import { selectOfferPushRetries, type OfferPushRow } from "./jobs/offer-push";
 import { pollWebhookDeliveries } from "./jobs/webhook-db-delivery";
 import { pollOperationalNotificationQueue } from "./jobs/notification-queue-db";
+import { pollCustomerEmails } from "./jobs/customer-email-db";
 import { pollOfferFallbacks } from "./jobs/offer-fallback-db";
 import { pollEtaRefresh } from "./jobs/eta-refresh-db";
 import { pollDispatchRecovery } from "./jobs/dispatch-recovery-db";
@@ -228,6 +229,7 @@ async function tick(db: AppSupabaseClient, deps: TickDeps): Promise<void> {
     ["offer-push-retry", () => pollOfferPushRetries(db)],
     ["offer-fallback", () => pollOfferFallbacks(db)],
     ["notification-queue", () => pollOperationalNotificationQueue(db, deps.adapters)],
+    ["customer-email", () => pollCustomerEmails(db, deps.adapters.email, { workerId: workerInstanceId })],
     ["eta-refresh", () => pollEtaRefresh(db, deps.maps)],
     ["webhook-delivery", () => pollWebhookDeliveries(db)],
   ];

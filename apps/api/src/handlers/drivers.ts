@@ -50,13 +50,13 @@ export async function registerDevice(ctx: ApiContext, body: unknown): Promise<Ro
   const driverId = requireDriver(ctx);
   const userId = ctx.userId;
   if (!userId) throw forbidden("An authenticated user access token is required");
+  const profile = await requireActiveDriverProfile(ctx, driverId);
   const input = driverDeviceInputSchema.parse(body);
   await ctx.repo.upsertDriverDevice(driverId, userId, {
     expo_push_token: input.expo_push_token,
     platform: input.platform,
     device_name: input.device_name ?? null,
   });
-  const profile = await requireActiveDriverProfile(ctx, driverId);
   await ctx.repo.recordAudit({
     tenant_id: profile.tenant_id,
     ...apiActorFields(ctx),

@@ -1,10 +1,6 @@
-import type {
-  Coordinate,
-  IncidentStatus,
-  IncidentType,
-  TowJobStatus,
-} from "@resqly/types";
+import type { Coordinate, IncidentStatus, IncidentType, TowJobStatus } from "@resqly/types";
 import type { DispatchCandidate } from "@resqly/dispatch";
+import type { WorkflowActor, IncidentWorkflowResult, TowWorkflowResult } from "@resqly/database";
 
 export type ApiScope =
   | "incidents:read"
@@ -68,6 +64,10 @@ export interface IncidentRecord {
   problem_type: string | null;
   damage_type: string | null;
   description: string | null;
+  content_version?: number;
+  is_drivable?: boolean | null;
+  needs_tow?: boolean | null;
+  occurred_at?: string | null;
 }
 
 export interface TowJobRecord {
@@ -197,6 +197,9 @@ export interface BankidSessionRecord {
   environment: string;
   purpose: string;
   raw_status?: unknown;
+  bound_payload_text?: string | null;
+  bound_flow?: "auth" | "sign" | null;
+  bound_object_version?: number | null;
 }
 
 export interface TenantWebhookTarget {
@@ -213,6 +216,7 @@ export interface TenantWebhookTarget {
  * interface makes the request pipeline fully unit-testable without a database.
  */
 export interface ApiRepo {
+  isDriverActorActive(driverId: string, userId: string): Promise<boolean>;
   findApiClientByKeyHash(hash: string): Promise<ApiClientRecord | null>;
   logApiRequest(row: {
     tenant_id: string | null;
@@ -257,6 +261,16 @@ export interface ApiRepo {
     insuranceCompanyId: string | null;
   }): Promise<void>;
   createIncident(row: Record<string, unknown>): Promise<IncidentRecord>;
+  createIncidentWorkflow(
+    actor: WorkflowActor,
+    input: Record<string, unknown>,
+    locations: Array<Record<string, unknown>>,
+  ): Promise<IncidentWorkflowResult>;
+  requestTowWorkflow(
+    actor: WorkflowActor,
+    incidentId: string,
+    input: Record<string, unknown>,
+  ): Promise<TowWorkflowResult<TowJobRecord>>;
   /** Insert or replace an incident location (kind = pickup/destination). */
   upsertIncidentLocation(row: {
     incident_id: string;
@@ -270,6 +284,11 @@ export interface ApiRepo {
   setIncidentBankidVerified(id: string): Promise<void>;
   addEvidence(row: Record<string, unknown>): Promise<{ id: string }>;
   createBankidSession(row: Record<string, unknown>): Promise<BankidSessionRecord>;
+  getBankidIncidentPayload(
+    incidentId: string,
+    userId: string,
+    purpose: string,
+  ): Promise<Record<string, unknown>>;
   updateBankidSession(sessionId: string, patch: Record<string, unknown>): Promise<void>;
   getBankidSessionByTicSessionId(sessionId: string): Promise<BankidSessionRecord | null>;
   getBankidSessionById(sessionId: string): Promise<BankidSessionRecord | null>;
@@ -302,12 +321,17 @@ export interface ApiRepo {
   /** Create a one-time direct-to-Storage upload token for the driver app. */
   createTowEvidenceUpload(path: string): Promise<{ path: string; token: string }>;
   /** Verify that the uploaded object exists before registering evidence. */
-  getTowEvidenceObject(path: string): Promise<{ size: number | null; contentType: string | null } | null>;
+  getTowEvidenceObject(
+    path: string,
+  ): Promise<{ size: number | null; contentType: string | null } | null>;
   createTowJobEvidence(row: Record<string, unknown>): Promise<{ id: string }>;
   getTowJob(tenantId: string, id: string): Promise<TowJobRecord | null>;
   getActiveTowJobForIncident(tenantId: string, incidentId: string): Promise<TowJobRecord | null>;
   claimTowDispatch(jobId: string): Promise<{ claimed: boolean; status: string }>;
-  recordDispatchAttempt(jobId: string, error: string | null): Promise<{ attempts: number; status: string }>;
+  recordDispatchAttempt(
+    jobId: string,
+    error: string | null,
+  ): Promise<{ attempts: number; status: string }>;
 
   /** Lookup by id only — callers MUST verify driver/tenant authorization. */
   getTowJobById(id: string): Promise<TowJobRecord | null>;
@@ -321,15 +345,29 @@ export interface ApiRepo {
     actor_worker?: string | null;
     reason?: string | null;
   }): Promise<void>;
-  assignTowJob(tenantId: string, id: string, driverId: string, towCompanyId: string, towVehicleId: string): Promise<void>;
+  assignTowJob(
+    tenantId: string,
+    id: string,
+    driverId: string,
+    towCompanyId: string,
+    towVehicleId: string,
+  ): Promise<void>;
   createOffers(rows: Array<Record<string, unknown>>): Promise<void>;
-  getOfferForDriver(jobId: string, driverId: string): Promise<{ status: string } | null>;
+  getOfferForDriver(
+    jobId: string,
+    driverId: string,
+  ): Promise<{ status: string; expires_at: string } | null>;
 
   /**
    * Race-safe offer acceptance. Locks the job, accepts the driver's pending
    * offer, cancels the rest, and assigns the job atomically.
    */
-  acceptOffer(jobId: string, driverId: string): Promise<AcceptOfferResult>;
+  acceptOffer(
+    jobId: string,
+    driverId: string,
+    actorUserId: string,
+    correlationId: string,
+  ): Promise<AcceptOfferResult>;
   getOfferById(id: string): Promise<OfferRecord | null>;
   rejectOffer(jobId: string, driverId: string, reason: string | null): Promise<boolean>;
 
@@ -359,12 +397,21 @@ export interface ApiRepo {
   /** Jobs currently assigned to the driver (accepted through transporting). */
   listDriverJobs(driverId: string, opts?: { history?: boolean }): Promise<TowJobRecord[]>;
   listDriverDevices(driverId: string): Promise<DriverDeviceRecord[]>;
-  markOfferPush(jobId: string, driverId: string, status: string, error?: string | null): Promise<void>;
+  markOfferPush(
+    jobId: string,
+    driverId: string,
+    status: string,
+    error?: string | null,
+  ): Promise<void>;
 
   recordNotificationDelivery(row: Record<string, unknown>): Promise<void>;
   /** True when a notification with this dedupe key was already recorded. */
   hasNotificationDelivery(dedupeKey: string): Promise<boolean>;
-  enqueueWebhookEvent(tenantId: string, event: string, payload: Record<string, unknown>): Promise<void>;
+  enqueueWebhookEvent(
+    tenantId: string,
+    event: string,
+    payload: Record<string, unknown>,
+  ): Promise<void>;
   recordUsageEvent(tenantId: string, kind: string, quantity?: number): Promise<void>;
 
   /** Aggregate role/capability context for a user across all apps. */

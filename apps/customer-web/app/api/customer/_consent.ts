@@ -2,10 +2,7 @@ import { createHash } from "node:crypto";
 import type { AppSupabaseClient } from "@resqly/database";
 
 export type ConsentKind =
-  | "vehicle_insurance_link"
-  | "claim_submission"
-  | "share_with_insurer"
-  | "share_with_tow_partner";
+  "vehicle_insurance_link" | "claim_submission" | "share_with_insurer" | "share_with_tow_partner";
 
 /**
  * Plain-language fallback texts used when a tenant has not published its own
@@ -34,12 +31,42 @@ export interface RecordConsentInput {
   metadata?: Record<string, unknown>;
 }
 
+/** Resolve the exact text version before an atomic business command. */
+export async function prepareConsent(
+  db: AppSupabaseClient,
+  tenantId: string,
+  kind: ConsentKind,
+  metadata: Record<string, unknown>,
+) {
+  const { data, error } = await db
+    .from("tenant_legal_text_versions" as never)
+    .select("id,body,version")
+    .eq("tenant_id", tenantId)
+    .eq("kind", kind)
+    .eq("locale", "sv")
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) throw new Error("Samtyckestexten kunde inte läsas");
+  const version = data as { id: string; body: string; version: number } | null;
+  return {
+    legal_version_id: version?.id ?? null,
+    consent_kind: kind,
+    accepted_text_hash: createHash("sha256")
+      .update(version?.body ?? DEFAULT_CONSENT_TEXTS[kind])
+      .digest("hex"),
+    metadata: { ...metadata, text_version: version?.version ?? 0, used_default_text: !version },
+  };
+}
+
 /**
  * Store a versioned consent acceptance. Uses the tenant's active legal text
  * when one exists; otherwise the platform default text. Every acceptance is
  * audit-logged with the text hash and version.
  */
-export async function recordConsent(db: AppSupabaseClient, input: RecordConsentInput): Promise<void> {
+export async function recordConsent(
+  db: AppSupabaseClient,
+  input: RecordConsentInput,
+): Promise<void> {
   const { data: version, error: versionError } = await db
     .from("tenant_legal_text_versions" as never)
     .select("id, body, version")
@@ -55,23 +82,27 @@ export async function recordConsent(db: AppSupabaseClient, input: RecordConsentI
   const ip = input.request?.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
   const userAgent = input.request?.headers.get("user-agent")?.slice(0, 300) ?? null;
 
-  const { data: consent, error: consentError } = await db.from("customer_consent_acceptances" as never).insert({
-    tenant_id: input.tenantId,
-    user_id: input.userId,
-    legal_version_id: versionRow?.id ?? null,
-    consent_kind: input.kind,
-    accepted_text_hash: textHash,
-    incident_id: input.incidentId ?? null,
-    vehicle_id: input.vehicleId ?? null,
-    vehicle_policy_id: input.vehiclePolicyId ?? null,
-    ip,
-    user_agent: userAgent,
-    metadata: {
-      ...(input.metadata ?? {}),
-      text_version: versionRow?.version ?? 0,
-      used_default_text: !versionRow,
-    },
-  } as never).select("id").single();
+  const { data: consent, error: consentError } = await db
+    .from("customer_consent_acceptances" as never)
+    .insert({
+      tenant_id: input.tenantId,
+      user_id: input.userId,
+      legal_version_id: versionRow?.id ?? null,
+      consent_kind: input.kind,
+      accepted_text_hash: textHash,
+      incident_id: input.incidentId ?? null,
+      vehicle_id: input.vehicleId ?? null,
+      vehicle_policy_id: input.vehiclePolicyId ?? null,
+      ip,
+      user_agent: userAgent,
+      metadata: {
+        ...(input.metadata ?? {}),
+        text_version: versionRow?.version ?? 0,
+        used_default_text: !versionRow,
+      },
+    } as never)
+    .select("id")
+    .single();
   if (consentError || !consent) {
     throw new Error(`Samtycket kunde inte sparas: ${consentError?.message ?? "okänt fel"}`);
   }
@@ -88,7 +119,12 @@ export async function recordConsent(db: AppSupabaseClient, input: RecordConsentI
     metadata: { consent_kind: input.kind, text_version: versionRow?.version ?? 0 },
   } as never);
   if (auditError) {
-    await db.from("customer_consent_acceptances" as never).delete().eq("id", consentId);
-    throw new Error(`Samtycket sparades men revisionsloggen kunde inte skrivas: ${auditError.message}`);
+    await db
+      .from("customer_consent_acceptances" as never)
+      .delete()
+      .eq("id", consentId);
+    throw new Error(
+      `Samtycket sparades men revisionsloggen kunde inte skrivas: ${auditError.message}`,
+    );
   }
 }

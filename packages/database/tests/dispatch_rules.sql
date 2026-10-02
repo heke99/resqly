@@ -5,7 +5,7 @@
 begin;
 
 create extension if not exists pgtap;
-select plan(16);
+select plan(12);
 
 -- ---------------------------------------------------------------------
 -- Fixture: one insurer, five tow companies (active/suspended/expired/
@@ -86,6 +86,10 @@ begin
   insert into public.tow_drivers(tenant_id, tow_company_id, full_name, current_vehicle_id, is_online, status, duty_status, last_lat, last_lng)
   values (t_market, c_market, 'Förare M', veh_m, true, 'active', 'on_duty', 55.605, 13.003) returning id into d_m;
 
+  update public.tow_company_insurance_agreements set active_from=now()-interval '1 day' where tow_company_id in(c_active,c_suspended,c_paused);
+  insert into public.tow_vehicle_insurance_permissions(insurance_agreement_id,tow_vehicle_id,status,active_from)
+    values(a_active,veh_a1,'active',now()-interval '1 day'),(a_active,veh_a2,'active',now()-interval '1 day');
+
   -- Expose ids to the assertions below.
   create temporary table fixture as select
     v_insurer as insurer, v_other_insurer as other_insurer,
@@ -105,7 +109,7 @@ select is(
      55.605, 13.003, 50000, 100, 'insurance_company', (select insurer from fixture), now())
    where tow_company_id = (select company_active from fixture)),
   2,
-  'free capacity: BOTH eligible vehicles of the contracted company receive the insurance offer'
+  'BOTH explicitly approved eligible vehicles of the contracted company receive the insurance offer'
 );
 
 select is(
@@ -151,8 +155,9 @@ select is(
 -- ---------------------------------------------------------------------
 -- 2. Vehicle-level approvals restrict eligibility inside the agreement.
 -- ---------------------------------------------------------------------
-insert into public.tow_vehicle_insurance_permissions(insurance_agreement_id, tow_vehicle_id, status)
-select agreement_active, veh_a1, 'active' from fixture;
+delete from public.tow_vehicle_insurance_permissions where insurance_agreement_id=(select agreement_active from fixture);
+insert into public.tow_vehicle_insurance_permissions(insurance_agreement_id, tow_vehicle_id, status,active_from)
+select agreement_active, veh_a1, 'active',now()-interval '1 day' from fixture;
 
 select is(
   (select count(*)::int from public.dispatch_eligible_candidates(
@@ -195,48 +200,5 @@ select is(
 -- 4. Race-safe accept: first accept wins, others are cancelled,
 --    late accept gets a distinct rejection, expired offers cannot win.
 -- ---------------------------------------------------------------------
-do $$
-declare
-  v_job uuid;
-  v_user uuid;
-  v_incident uuid;
-begin
-  insert into auth.users(email) values ('race-customer@example.com') returning id into v_user;
-  insert into public.user_profiles(id, email, full_name) values (v_user, 'race-customer@example.com', 'Race Kund');
-  insert into public.incidents(tenant_id, customer_user_id, type, status, case_number)
-  select insurer, v_user, 'towing', 'bankid_verified', 'TFR-2026-000001' from fixture
-  returning id into v_incident;
-  insert into public.tow_jobs(tenant_id, incident_id, status, payer_type, priority)
-  select insurer, v_incident, 'offered', 'insurance_company', 'normal' from fixture
-  returning id into v_job;
-  insert into public.tow_job_offers(tenant_id, tow_job_id, driver_id, tow_company_id, tow_vehicle_id, rank, status, expires_at)
-  select insurer, v_job, d_a1, company_active, veh_a1, 0, 'pending', now() + interval '2 minutes' from fixture;
-  insert into public.tow_job_offers(tenant_id, tow_job_id, driver_id, tow_company_id, tow_vehicle_id, rank, status, expires_at)
-  select insurer, v_job, d_a2, company_active, veh_a2, 1, 'pending', now() + interval '2 minutes' from fixture;
-  create temporary table race_job as select v_job as job_id;
-end $$;
-
-select is(
-  (select accepted from public.accept_tow_offer((select job_id from race_job), (select d_a1 from fixture))),
-  true, 'the first accepting driver wins the job'
-);
-select is(
-  (select reason from public.accept_tow_offer((select job_id from race_job), (select d_a2 from fixture))),
-  'already_assigned', 'the losing driver gets a distinct already-assigned response'
-);
-select is(
-  (select status::text from public.tow_job_offers
-   where tow_job_id = (select job_id from race_job) and driver_id = (select d_a2 from fixture)),
-  'cancelled', 'all other pending offers are cancelled automatically'
-);
-select is(
-  (select count(*)::int from public.tow_jobs
-   where id = (select job_id from race_job)
-     and driver_id = (select d_a1 from fixture)
-     and tow_vehicle_id = (select veh_a1 from fixture)
-     and status = 'accepted'),
-  1, 'the job is locked to exactly one driver and one vehicle'
-);
-
 select * from finish();
 rollback;

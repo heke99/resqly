@@ -6,6 +6,9 @@ export interface OutboundNotification {
   subject?: string | null;
   body: string;
   tenantId?: string;
+  idempotencyKey?: string;
+  /** Persisted provider request, bound before the first network attempt. */
+  preparedRequest?: Record<string, unknown>;
 }
 
 export interface NotificationResult {
@@ -13,10 +16,13 @@ export interface NotificationResult {
   delivered: boolean;
   providerMessageId?: string;
   error?: string;
+  retryable?: boolean;
+  uncertain?: boolean;
 }
 
 export interface ChannelAdapter {
   readonly channel: NotificationChannel;
+  prepare?(message: OutboundNotification): Record<string, unknown>;
   send(message: OutboundNotification): Promise<NotificationResult>;
 }
 
